@@ -1,0 +1,14 @@
+# Build artifacts
+/target/
+
+# No-git-era manual snapshots (superseded by git history; kept on disk only)
+/snapshots/
+
+# Local runtime state
+*.log
+
+# Editor/OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store

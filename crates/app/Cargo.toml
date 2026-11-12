@@ -1,0 +1,22 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# The crate also had a temporary `render` acceptance bin until post-v1
+# loop 2; with it gone, plain `cargo run -p app` targets the TUI binary.
+default-run = "frond"
+
+[[bin]]
+name = "frond"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+engine = { path = "../engine" }
+vault = { path = "../vault" }
+ratatui.workspace = true
+crossterm.workspace = true
+unicode-width = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
