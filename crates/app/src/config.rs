@@ -1,0 +1,330 @@
+//! `~/.config/frond/config.toml`: persistent settings read at startup.
+//!
+//! Keys: `theme` (string), `vault` (path), `watch` (bool). Missing file =
+//! defaults; malformed file = warning + defaults (never a crash). Unknown
+//! keys are ignored but reported (never silently). The `FROND_CONFIG` env
+//! var overrides the path (tests and smokes only — they must never write
+//! to the real `~/.config`).
+//!
+//! Precedence with the CLI: `--vault`/`--theme`/`--watch` flags override
+//! the config values (see `main.rs`).
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+
+use crate::viewer::FileStamp;
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Config {
+    pub theme: Option<String>,
+    pub vault: Option<PathBuf>,
+    pub watch: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ConfigRaw {
+    theme: Option<String>,
+    vault: Option<PathBuf>,
+    watch: Option<bool>,
+    /// Keys outside our vocabulary — captured so they can be reported.
+    #[serde(flatten)]
+    unknown: BTreeMap<String, toml::Value>,
+}
+
+/// The config file path: `FROND_CONFIG` when set, else `~/.config/frond/config.toml`.
+pub fn config_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("FROND_CONFIG") {
+        return Some(PathBuf::from(path));
+    }
+    std::env::var("HOME")
+        .ok()
+        .filter(|home| !home.is_empty())
+        .map(|home| {
+            PathBuf::from(home)
+                .join(".config")
+                .join("frond")
+                .join("config.toml")
+        })
+}
+
+/// Loads the config from `path`. Returns the config plus warnings:
+/// a missing file is silently default (that is the normal first-run
+/// state), a malformed file or unknown keys produce warnings but never
+/// an error.
+pub fn load(path: &Path) -> (Config, Vec<String>) {
+    let (config, warnings, _) = load_status(path);
+    (config, warnings)
+}
+
+/// `load` plus a parse-success flag: `malformed` is true only when the
+/// file existed but could not be parsed (a valid parse with an absent
+/// theme key is NOT malformed — hot-reload must treat the two
+/// differently: malformed keeps the current theme, a valid theme-less
+/// config reverts to the default).
+fn load_status(path: &Path) -> (Config, Vec<String>, bool) {
+    let Ok(text) = fs::read_to_string(path) else {
+        // Missing (or unreadable) file: defaults, no warning.
+        return (Config::default(), Vec::new(), false);
+    };
+    match toml::from_str::<ConfigRaw>(&text) {
+        Ok(raw) => {
+            let mut warnings = Vec::new();
+            let unknown: Vec<String> = raw.unknown.keys().cloned().collect();
+            if !unknown.is_empty() {
+                warnings.push(format!(
+                    "config: unknown keys ignored: {}",
+                    unknown.join(", ")
+                ));
+            }
+            (
+                Config {
+                    theme: raw.theme,
+                    vault: raw.vault,
+                    watch: raw.watch,
+                },
+                warnings,
+                false,
+            )
+        }
+        Err(err) => (
+            Config::default(),
+            vec![format!(
+                "could not parse config \"{}\": {err}",
+                path.display()
+            )],
+            true,
+        ),
+    }
+}
+
+impl Config {
+    /// True unless the config (or a flag) explicitly disabled watch mode.
+    pub fn watch_default(&self) -> bool {
+        self.watch.unwrap_or(true)
+    }
+}
+
+/// Hot-reload state for the config file: its mtime stamp plus the theme
+/// key we last saw. Polled on the app's 1 s watcher tick.
+pub struct ConfigWatch {
+    pub path: PathBuf,
+    stamp: Option<FileStamp>,
+    /// The raw `theme` key of the last successfully parsed config
+    /// (`None` = absent/malformed — the effective name is then the default).
+    theme_key: Option<String>,
+}
+
+/// Outcome of one config poll.
+pub struct ConfigPoll {
+    /// The file's stamp changed since the last poll.
+    pub changed: bool,
+    /// New theme name to live-apply (`None` = nothing to apply: unchanged
+    /// key, or the file is malformed — keep the current theme).
+    pub theme: Option<String>,
+    /// Warnings to surface (malformed file, unknown keys).
+    pub warnings: Vec<String>,
+    /// The raw `theme` key as of this poll (`None` when malformed or
+    /// absent). Lets the caller track a config that names a theme the
+    /// app cannot resolve *yet* (a custom file that may appear later).
+    pub theme_named: Option<String>,
+}
+
+impl ConfigWatch {
+    pub fn new(path: PathBuf) -> Self {
+        let (config, _, _) = load_status(&path);
+        Self {
+            theme_key: config.theme,
+            stamp: FileStamp::of(&path).ok(),
+            path,
+        }
+    }
+
+    /// Polls the config file's stamp; on a change re-reads it. Only the
+    /// `theme` key is live-applied — the `vault` path applies on the next
+    /// launch (rebooting the index/watcher mid-session is not safe) and
+    /// `watch` toggling is left to the `w` key. A **malformed** re-read
+    /// keeps the current theme and only warns (the key is not updated, so
+    /// fixing the file re-triggers an apply); a **valid** re-read applies
+    /// the resolution chain's result — an absent `theme` key means the
+    /// default theme, even when unknown keys are still present.
+    pub fn poll(&mut self) -> ConfigPoll {
+        let stamp = FileStamp::of(&self.path).ok();
+        if stamp == self.stamp {
+            return ConfigPoll {
+                changed: false,
+                theme: None,
+                warnings: Vec::new(),
+                theme_named: None,
+            };
+        }
+        self.stamp = stamp;
+        let (config, warnings, malformed) = load_status(&self.path);
+        if malformed {
+            // Malformed file: keep the current theme, just warn.
+            return ConfigPoll {
+                changed: true,
+                theme: None,
+                warnings,
+                theme_named: None,
+            };
+        }
+        if config.theme == self.theme_key {
+            // Theme key unchanged (e.g. only vault/watch edited): nothing
+            // to live-apply.
+            return ConfigPoll {
+                changed: true,
+                theme: None,
+                warnings,
+                theme_named: self.theme_key.clone(),
+            };
+        }
+        let theme = Some(
+            config
+                .theme
+                .clone()
+                .unwrap_or_else(|| crate::theme::DEFAULT_THEME.to_string()),
+        );
+        self.theme_key = config.theme.clone();
+        // Unknown-key warnings surface on the apply path too (the caller
+        // shows them unless the theme apply had its own message) — the
+        // unchanged-theme-key path and this path stay symmetric.
+        ConfigPoll {
+            changed: true,
+            theme,
+            warnings,
+            theme_named: config.theme,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::TempDir;
+
+    fn load_at(dir: &TempDir, name: &str) -> (Config, Vec<String>) {
+        load(&dir.path().join(name))
+    }
+
+    #[test]
+    fn missing_file_is_silently_default() {
+        let dir = TempDir::new("cfg-missing");
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert_eq!(config, Config::default());
+        assert!(warnings.is_empty(), "a missing file is the normal state");
+        assert!(config.watch_default(), "watch defaults to on");
+    }
+
+    #[test]
+    fn values_are_parsed() {
+        let dir = TempDir::new("cfg-values");
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "theme = \"dracula\"\nvault = \"/tmp/vault\"\nwatch = false\n",
+        )
+        .unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert_eq!(config.theme.as_deref(), Some("dracula"));
+        assert_eq!(config.vault.as_deref(), Some(Path::new("/tmp/vault")));
+        assert_eq!(config.watch, Some(false));
+        assert!(!config.watch_default());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn malformed_file_warns_and_defaults() {
+        let dir = TempDir::new("cfg-malformed");
+        std::fs::write(dir.path().join("config.toml"), "!!! not toml !!!\n").unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert_eq!(
+            config,
+            Config::default(),
+            "malformed: defaults, never a crash"
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("could not parse config"),
+            "{}",
+            warnings[0]
+        );
+
+        // Wrong value types are malformed too.
+        std::fs::write(dir.path().join("config.toml"), "watch = \"yes\"\n").unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert_eq!(config, Config::default());
+        assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn unknown_keys_are_ignored_but_warned() {
+        let dir = TempDir::new("cfg-unknown");
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "theme = \"ocean\"\nfutures_scale = 0.5\n",
+        )
+        .unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert_eq!(
+            config.theme.as_deref(),
+            Some("ocean"),
+            "known keys still load"
+        );
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].contains("unknown keys ignored: futures_scale"),
+            "{}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn path_override_points_somewhere_else() {
+        // `FROND_CONFIG` redirects the lookup (smoke/tests only); the real
+        // `~/.config` is never touched by tests.
+        let dir = TempDir::new("cfg-override");
+        std::fs::write(dir.path().join("mine.toml"), "theme = \"nord\"\n").unwrap();
+        // SAFETY of the env dance: single-threaded unit test process.
+        std::env::set_var("FROND_CONFIG", dir.path().join("mine.toml"));
+        let path = config_path();
+        std::env::remove_var("FROND_CONFIG");
+        assert_eq!(path, Some(dir.path().join("mine.toml")));
+        let (config, _) = load(&path.unwrap());
+        assert_eq!(config.theme.as_deref(), Some("nord"));
+    }
+
+    #[test]
+    fn valid_themeless_config_with_unknown_keys_applies_the_default() {
+        // A valid parse whose `theme` key was removed must live-apply the
+        // default — unlike a malformed file, which keeps the current theme.
+        let dir = TempDir::new("cfg-themeless");
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "theme = \"dracula\"\n").unwrap();
+        let mut watch = ConfigWatch::new(path.clone());
+        assert_eq!(
+            watch.poll().theme,
+            None,
+            "initial state: the file is unchanged, nothing to apply"
+        );
+
+        // Rewrite: theme key removed, unknown key still present — a valid
+        // parse, not a malformed one (different length → different stamp).
+        std::fs::write(&path, "futures_scale = 0.5\n").unwrap();
+        let poll = watch.poll();
+        assert_eq!(
+            poll.theme.as_deref(),
+            Some(crate::theme::DEFAULT_THEME),
+            "valid theme-less config applies the resolution chain's default"
+        );
+        assert!(
+            !poll.warnings.is_empty(),
+            "unknown keys surface on the apply path too"
+        );
+
+        // The next poll is quiet (the key is now tracked as absent).
+        assert_eq!(watch.poll().theme, None);
+    }
+}

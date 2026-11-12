@@ -1,0 +1,10 @@
+filters:
+  and:
+    - 'type == "note"'
+views:
+  - type: table
+    name: Notes
+    order:
+      - file.name
+      - status
+      - tags

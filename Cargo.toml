@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/engine",
+    "crates/vault",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+ratatui = "0.30"
+crossterm = "0.29"
