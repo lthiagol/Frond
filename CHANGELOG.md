@@ -36,6 +36,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   row in the backlinks panel selects it and opens the note (focus moves
   to the content pane, like every other open path); clicking the panel's
   border rows or empty space keeps the previous focus-only behavior.
+- **Opened notes reveal in the sidebar**: following a wikilink, opening a
+  search hit or backlink, or restoring the session expands the note's
+  ancestor folders and selects its row in the tree (no focus change; the
+  sidebar staying hidden is fine — the state is ready for the next `Tab`).
+  A `.base` table expands its parent folder only (no tree row). The
+  revealed expansion persists in the session file like any other.
 - **`f` toggles the metadata block**: the note's frontmatter, which
   renders as a key/value table at the top, can be hidden to read the
   note itself (`f`, session toggle; the config `metadata` key sets the

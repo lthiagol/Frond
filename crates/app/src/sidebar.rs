@@ -158,6 +158,35 @@ impl Sidebar {
         }
     }
 
+    /// Reveal `path` in the tree: expand every ancestor folder and select
+    /// the note, scrolled into view. Called when a note is opened from
+    /// anywhere but the tree itself (link follow, search hit, backlink,
+    /// session restore), so the sidebar shows where the reader landed.
+    /// Paths that are not tree nodes (a `.base` table, a non-`.md` file,
+    /// or something outside the vault) still expand their ancestors below
+    /// the root, but the selection stays put — there is no row for them.
+    /// No focus change; the reader stays on the content pane.
+    pub fn reveal(&mut self, path: &Path) {
+        // Non-normalized paths (`..` components) are lexically inside the
+        // root but semantically outside: no reveal at all.
+        if path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            return;
+        }
+        for ancestor in path.ancestors().skip(1) {
+            if ancestor == self.root || !ancestor.starts_with(&self.root) {
+                break;
+            }
+            self.expanded.insert(ancestor.to_path_buf());
+        }
+        if self.find(path).is_some() {
+            self.selected = Some(path.to_path_buf());
+            self.scroll_selection_into_view();
+        }
+    }
+
     /// `l`/Right on a folder: expand it. (Only called for directories; on
     /// a note the app moves focus to the content pane instead.)
     pub fn expand_or_activate(&mut self) -> Option<PathBuf> {
@@ -527,6 +556,43 @@ mod tests {
         sb.move_down(1); // must not panic
         sb.move_up(1);
         sb.rescan(); // must not panic
+    }
+
+    #[test]
+    fn reveal_expands_ancestors_and_selects_the_note() {
+        let vault = fixture();
+        let mut sb = Sidebar::new(vault.path()).unwrap();
+        sb.viewport = 1;
+
+        // Deep note under a collapsed folder: ancestors expand, the note
+        // is selected and scrolled into view.
+        sb.reveal(&vault.path().join("Archive").join("old.md"));
+        assert!(sb.expanded.contains(&vault.path().join("Archive")));
+        assert_eq!(sb.selected, Some(vault.path().join("Archive/old.md")));
+        // Rows: [Archive, old.md, alpha.md, beta.md]; viewport 1 → the
+        // selection (index 1) must be the visible row.
+        assert_eq!(sb.scroll, 1);
+        // The root itself is never expanded or selected.
+        assert!(!sb.expanded.contains(vault.path()));
+    }
+
+    #[test]
+    fn reveal_non_note_and_outside_paths_expand_only() {
+        let vault = fixture();
+        let mut sb = Sidebar::new(vault.path()).unwrap();
+        sb.selected = Some(vault.path().join("alpha.md"));
+
+        // A non-`.md` path (e.g. a `.base` table): ancestors expand, the
+        // selection stays put (no tree row for it).
+        sb.reveal(&vault.path().join("Archive").join("notes.base"));
+        assert!(sb.expanded.contains(&vault.path().join("Archive")));
+        assert_eq!(sb.selected, Some(vault.path().join("alpha.md")));
+
+        // Something outside the vault (a `..` escape) touches nothing.
+        let outside = vault.path().join("..").join("elsewhere.md");
+        sb.reveal(&outside);
+        assert_eq!(sb.selected, Some(vault.path().join("alpha.md")));
+        assert_eq!(sb.expanded.len(), 1, "no stray expansion (Archive only)");
     }
 
     #[test]

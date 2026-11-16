@@ -1115,7 +1115,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
         &[
             ("u", "refresh git status (watch events too)"),
             ("Shift+T", "cycle theme (session only)"),
-            ("m", "toggle mouse capture / native select"),
+            ("m", "toggle mouse capture; off: wheel = arrows"),
             ("", "? help · q / Ctrl+C quit"),
         ],
     ),
