@@ -1114,8 +1114,9 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
 
 /// Footer hint inside the help popup (fixed at the bottom), in herdr's
 /// hint style: `key action` pairs separated by ` · `. The scroll part is
-/// shown only while the body actually overflows.
-const HELP_FOOTER_SCROLL: &str = " scroll j/k/↑↓/pgup/pgdn · g/G top/bottom · close esc/any key";
+/// shown only while the body actually overflows, and both variants fit
+/// the popup's 59-cell inner width (the Paragraph would clip a longer one).
+const HELP_FOOTER_SCROLL: &str = " scroll j/k · g/G ends · close esc/any key";
 const HELP_FOOTER_CLOSE: &str = " close esc/any key";
 /// Popup title (bold, left) and close chip (right), both fixed at the top.
 const HELP_TITLE: &str = "keybinds";
@@ -1244,7 +1245,17 @@ fn help_grid(area_height: u16) -> HelpGrid {
             };
         }
     }
-    unreachable!("the compact layout is always accepted")
+    // The compact layout is always accepted above; this is belt-and-braces
+    // for the "never crash" convention (and keeps the compiler happy about
+    // the match being exhaustive without a panic path).
+    let packed = help_pack(HELP_SECTIONS, 1, false);
+    HelpGrid {
+        label_widths: vec![help_label_width(&all)],
+        rows: packed.iter().map(|c| c.rows).max().unwrap_or(0),
+        columns: packed,
+        width: HELP_WIDTH,
+        spaced: false,
+    }
 }
 
 /// Body rows of one column's cells: header and entries, keys padded to the

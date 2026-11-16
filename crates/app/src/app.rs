@@ -1581,7 +1581,7 @@ impl App {
     /// resizes; `None` restores the proportional default. Content re-parses
     /// automatically because the layout feeds the width back every frame.
     pub fn narrow_sidebar(&mut self) {
-        self.set_sidebar_width(self.current_sidebar_width() - 2);
+        self.set_sidebar_width(self.current_sidebar_width().saturating_sub(2));
     }
 
     pub fn widen_sidebar(&mut self) {
@@ -1614,8 +1614,8 @@ impl App {
             )
         }
         crate::session::SessionState {
-            note: rel(root, Some(self.viewer.path.as_path())),
-            scroll: self.viewer.scroll,
+            note: rel(root, Some(self.current_path().as_path())),
+            scroll: self.current_scroll() as u32,
             mode: Some(
                 match self.sidebar_mode {
                     SidebarMode::Tree => "tree",
@@ -1643,26 +1643,38 @@ impl App {
         }
     }
 
-    /// Apply a session snapshot, best-effort: missing files, entries
-    /// outside the tree, and open failures are skipped silently — the
+    /// Apply a session snapshot, best-effort: vanished files, entries the
+    /// tree no longer has, and open failures are skipped silently — the
     /// fallback is the normal startup state (vault index at the top, the
-    /// first sidebar row selected). The restored scroll is clamped by the
-    /// next render (`run_app`'s initial `on_resize`).
+    /// first sidebar row selected). Only *vault-relative* entries are
+    /// honored: the session file lives outside the vault, so it must not
+    /// smuggle opens — absolute paths and `..` escapes in the file are
+    /// skipped (the snapshot's own `session_state` never writes them, but
+    /// the file is user-editable). The restored scroll is clamped by the
+    /// next render (`run_app`'s initial `on_resize`); a `.base` note
+    /// reopens with the table's row offset.
     pub fn restore_session(&mut self, state: &crate::session::SessionState, root: &Path) {
-        let abs = |rel: &str| {
+        use std::path::Component;
+        let within = |rel: &str| -> Option<PathBuf> {
             let path = Path::new(rel);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                root.join(path)
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+                || rel.is_empty()
+            {
+                return None;
             }
+            Some(root.join(path))
         };
         if let Some(sidebar) = &mut self.sidebar {
             for dir in &state.expanded {
-                sidebar.expanded.insert(abs(dir));
+                if let Some(path) = within(dir) {
+                    sidebar.expanded.insert(path);
+                }
             }
-            if let Some(selected) = &state.selected {
-                sidebar.selected = Some(abs(selected));
+            if let Some(selected) = state.selected.as_deref().and_then(within) {
+                sidebar.selected = Some(selected);
                 sidebar.scroll_selection_into_view();
             }
         }
@@ -1673,9 +1685,14 @@ impl App {
             }
             _ => {}
         }
-        if let Some(note) = &state.note {
-            if self.open_note(&abs(note)).is_ok() {
-                self.viewer.scroll = state.scroll;
+        if let Some(note) = state.note.as_deref().and_then(within) {
+            let scroll = state.scroll;
+            if crate::baseview::is_base_file(&note) {
+                // A `.base` table: the scroll is the table's row offset
+                // (clamped by the next render, like every base open).
+                let _ = self.open_base_at(&note, scroll as usize);
+            } else if self.open_note(&note).is_ok() {
+                self.viewer.scroll = scroll;
             }
         }
     }
@@ -1848,12 +1865,21 @@ mod tests {
         app.handle_key(key(KeyCode::Char('<')));
         assert_eq!(app.sidebar_width, Some(28));
 
-        // Clamped at both ends.
-        for _ in 0..50 {
-            app.handle_key(key(KeyCode::Char('<')));
-        }
+        // A config-provided width steps the same way.
+        app.sidebar_width = Some(40);
+        app.handle_key(key(KeyCode::Char('>')));
+        assert_eq!(app.sidebar_width, Some(42), "steps from the config value");
+
+        // Clamped at both ends (and no u16 underflow from a degenerate
+        // drawn width).
+        app.sidebar_area = Some(Rect::new(0, 0, 1, 20));
+        app.sidebar_width = None;
+        app.handle_key(key(KeyCode::Char('<')));
+        assert_eq!(app.sidebar_width, Some(SIDEBAR_MIN_WIDTH), "no underflow");
+        app.sidebar_width = Some(SIDEBAR_MIN_WIDTH);
+        app.handle_key(key(KeyCode::Char('<')));
         assert_eq!(app.sidebar_width, Some(SIDEBAR_MIN_WIDTH));
-        for _ in 0..100 {
+        for _ in 0..50 {
             app.handle_key(key(KeyCode::Char('>')));
         }
         assert_eq!(app.sidebar_width, Some(SIDEBAR_MAX_WIDTH));
@@ -1867,7 +1893,7 @@ mod tests {
     #[test]
     fn session_snapshot_and_restore_roundtrip() {
         let vault_dir = vault();
-        let (file, mut shaped) = app(&vault_dir);
+        let (_file, mut shaped) = app(&vault_dir);
 
         // Shape a session: open a nested note, scroll it, expand the tree,
         // select its row.
@@ -1927,6 +1953,66 @@ mod tests {
         assert_eq!(app.viewer.path, _file.path());
         assert_eq!(app.viewer.scroll, 0);
         assert!(app.viewer.last_error.is_none(), "no startup noise");
+    }
+
+    /// The session file lives outside the vault and is user-editable, so
+    /// restore must not honor absolute paths or `..` escapes; a `.base`
+    /// note reopens as the table with its row offset.
+    #[test]
+    fn session_restore_rejects_escapes_and_restores_base_tables() {
+        let vault_dir = vault();
+        let (_file, mut base_app) = app(&vault_dir);
+        std::fs::write(
+            vault_dir.path().join("tbl.base"),
+            "views:\n  - type: table\n    name: Solo\n    order:\n      - file.name\n",
+        )
+        .unwrap();
+        base_app
+            .open_note(&vault_dir.path().join("tbl.base"))
+            .unwrap();
+        base_app.base.as_mut().unwrap().scroll = 2;
+
+        // Snapshot while the base is open: the base file (not the previous
+        // note) and its row offset are what gets remembered.
+        let state = base_app.session_state(vault_dir.path());
+        assert_eq!(
+            state.note.as_deref(),
+            Some("tbl.base"),
+            "an open base table is the remembered note"
+        );
+        assert_eq!(state.scroll, 2);
+
+        // Escape attempts are skipped, not opened.
+        let hostile = crate::session::SessionState {
+            note: Some("../../etc/passwd".to_string()),
+            scroll: 0,
+            expanded: vec!["../..".to_string()],
+            selected: Some("/etc".to_string()),
+            mode: Some("tree".to_string()),
+        };
+        base_app.restore_session(&hostile, vault_dir.path());
+        assert!(
+            base_app.current_path().ends_with("tbl.base"),
+            "hostile note skipped: the base table stayed open"
+        );
+        assert!(
+            !base_app
+                .sidebar
+                .as_ref()
+                .unwrap()
+                .expanded
+                .iter()
+                .any(|p| !p.starts_with(vault_dir.path())),
+            "no expansion entry escapes the vault"
+        );
+
+        // The base snapshot restores: table open again, row offset back.
+        let (_f2, mut fresh) = app(&vault_dir);
+        fresh.restore_session(&state, vault_dir.path());
+        let base = fresh.base.as_ref().expect("base table reopened");
+        assert_eq!(base.path, vault_dir.path().join("tbl.base"));
+        assert_eq!(base.scroll, 2, "row offset restored");
+        assert_eq!(fresh.current_path(), vault_dir.path().join("tbl.base"));
     }
 
     #[test]

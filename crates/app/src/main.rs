@@ -114,7 +114,11 @@ fn parse_args() -> Result<Args, String> {
 }
 
 /// Arg parsing over an explicit iterator (unit-testable; `parse_args`
-/// feeds it the real argv).
+/// feeds it the real argv). Collected into a slice for the lookahead the
+/// boolean flags need: a bare `--watch`/`--mouse` followed by something
+/// that parses as a bool is almost always the space-form mistake
+/// (`--mouse false`), so it errors with the `=`-form hint instead of
+/// letting `false` silently become the file argument.
 fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut vault: Option<PathBuf> = None;
     let mut theme: Option<String> = None;
@@ -122,30 +126,36 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut mouse: Option<bool> = None;
     let mut info: Option<Info> = None;
     let mut file: Option<PathBuf> = None;
-    let mut args = args;
-    while let Some(arg) = args.next() {
+    let args: Vec<String> = args.collect();
+    let mut index = 0;
+    while let Some(arg) = args.get(index) {
         match arg.as_str() {
             "--vault" => {
-                vault = Some(
-                    args.next()
-                        .ok_or("--vault requires a directory argument")?
-                        .into(),
-                )
+                let value = args
+                    .get(index + 1)
+                    .ok_or("--vault requires a directory argument")?;
+                index += 1;
+                vault = Some(value.into());
             }
             _ if arg.starts_with("--vault=") => {
                 vault = Some(arg["--vault=".len()..].to_string().into());
             }
             "--theme" => {
-                theme = Some(
-                    args.next()
-                        .ok_or("--theme requires a name argument")?
-                        .to_string(),
-                )
+                let value = args
+                    .get(index + 1)
+                    .ok_or("--theme requires a name argument")?;
+                index += 1;
+                theme = Some(value.to_string());
             }
             _ if arg.starts_with("--theme=") => {
                 theme = Some(arg["--theme=".len()..].to_string());
             }
-            "--watch" => watch = Some(true),
+            "--watch" => {
+                if bool_lookahead(args.get(index + 1)) {
+                    return Err("--watch takes no value; use --watch=<true|false>".to_string());
+                }
+                watch = Some(true);
+            }
             _ if arg.starts_with("--watch=") => {
                 let value = arg["--watch=".len()..].to_string();
                 watch = Some(
@@ -154,7 +164,12 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                         .map_err(|_| format!("--watch expects true or false, got \"{value}\""))?,
                 );
             }
-            "--mouse" => mouse = Some(true),
+            "--mouse" => {
+                if bool_lookahead(args.get(index + 1)) {
+                    return Err("--mouse takes no value; use --mouse=<true|false>".to_string());
+                }
+                mouse = Some(true);
+            }
             _ if arg.starts_with("--mouse=") => {
                 let value = arg["--mouse=".len()..].to_string();
                 mouse = Some(
@@ -174,6 +189,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                 file = Some(arg.into());
             }
         }
+        index += 1;
     }
     Ok(Args {
         file,
@@ -183,6 +199,18 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         mouse,
         info,
     })
+}
+
+/// True when `next` (the token after a bare boolean flag) parses as a
+/// bool — the space-form mistake the `=`-only flag vocabulary rejects.
+fn bool_lookahead(next: Option<&String>) -> bool {
+    next.is_some_and(|value| value.parse::<bool>().is_ok())
+}
+
+/// Mouse capture startup state: `--mouse` flag > config `mouse` key >
+/// on (the historical default).
+fn effective_mouse(flag: Option<bool>, config: Option<bool>) -> bool {
+    flag.or(config).unwrap_or(true)
 }
 
 /// Checks that `input` names an existing directory and returns its absolute
@@ -223,7 +251,10 @@ fn prompt_vault_path() -> Result<PathBuf, String> {
 /// Canonicalizes `path` so path comparisons become identity comparisons.
 /// Falls back to a lexical absolutization (cwd-joined) when canonicalize
 /// fails, so a not-yet-existing file keeps its usual open-error path.
+/// A leading `~` expands to $HOME first (`~/notes`, or `~` alone);
+/// `~user` is left literal (no passwd lookup).
 fn absolutize(path: &Path) -> PathBuf {
+    let path = &expand_tilde(path);
     if let Ok(canon) = path.canonicalize() {
         return canon;
     }
@@ -233,6 +264,23 @@ fn absolutize(path: &Path) -> PathBuf {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(path)
+    }
+}
+
+/// Expands a leading `~` to $HOME (`~/notes` → `$HOME/notes`, `~` →
+/// `$HOME`), so `~` in the config `vault` key or on the CLI works like in
+/// a shell. Without a resolvable $HOME the path is returned unchanged.
+fn expand_tilde(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if text.as_bytes().first() != Some(&b'~') {
+        return path.to_path_buf();
+    }
+    if text.len() > 1 && text.as_bytes()[1] != b'/' {
+        return path.to_path_buf(); // `~user`: left literal
+    }
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() => PathBuf::from(home).join(text[1..].trim_start_matches('/')),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -292,7 +340,7 @@ fn main() {
     // Mouse capture: CLI flag > config `mouse` key > on (the historical
     // default). Off = the terminal keeps the mouse for native text
     // selection; `m` toggles at runtime either way.
-    let mouse = args.mouse.or(config.mouse).unwrap_or(true);
+    let mouse = effective_mouse(args.mouse, config.mouse);
     let theme_name = theme::effective_theme_name(
         args.theme.as_deref(),
         std::env::var("FROND_THEME").ok().as_deref(),
@@ -505,17 +553,27 @@ fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::
                         break;
                     }
                 }
-                Event::Mouse(mouse) => match mouse.kind {
-                    MouseEventKind::ScrollDown => {
-                        app.handle_wheel_at(mouse.column, mouse.row, true)
+                Event::Mouse(mouse) => {
+                    // Capture off: the status bar promises the app ignores
+                    // the mouse, so gate here too — it must not depend on
+                    // the terminal actually withholding events.
+                    if !app.mouse_capture {
+                        continue;
                     }
-                    MouseEventKind::ScrollUp => app.handle_wheel_at(mouse.column, mouse.row, false),
-                    MouseEventKind::Up(MouseButton::Left) => {
-                        app.handle_click(mouse.column, mouse.row);
-                        app.flush_clipboard(&mut io::stdout());
+                    match mouse.kind {
+                        MouseEventKind::ScrollDown => {
+                            app.handle_wheel_at(mouse.column, mouse.row, true)
+                        }
+                        MouseEventKind::ScrollUp => {
+                            app.handle_wheel_at(mouse.column, mouse.row, false)
+                        }
+                        MouseEventKind::Up(MouseButton::Left) => {
+                            app.handle_click(mouse.column, mouse.row);
+                            app.flush_clipboard(&mut io::stdout());
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 Event::Resize(cols, rows) => app.viewer.on_resize(cols, rows),
                 _ => {}
             }
@@ -569,6 +627,27 @@ mod tests {
         let args = parse(&["--config-show", "x.md"]).unwrap();
         assert_eq!(args.info, Some(Info::ConfigShow));
         assert_eq!(args.file.as_deref(), Some(Path::new("x.md")));
+    }
+
+    /// The space-form mistake (`--mouse false`) must error with the
+    /// `=`-form hint instead of `false` becoming the file argument — and
+    /// `frond --mouse note.md` (next token not a bool) keeps working.
+    #[test]
+    fn boolean_flags_reject_the_space_form() {
+        assert!(parse(&["--mouse", "false"]).is_err());
+        assert!(parse(&["--watch", "false"]).is_err());
+        // A non-bool next token is NOT consumed: bare flag + positional.
+        let args = parse(&["--mouse", "x.md"]).unwrap();
+        assert_eq!(args.mouse, Some(true));
+        assert_eq!(args.file.as_deref(), Some(Path::new("x.md")));
+    }
+
+    #[test]
+    fn mouse_precedence_is_flag_over_config_over_on() {
+        assert!(!effective_mouse(Some(false), Some(true)), "flag wins");
+        assert!(effective_mouse(Some(true), Some(false)), "flag wins");
+        assert!(!effective_mouse(None, Some(false)), "config next");
+        assert!(effective_mouse(None, None), "default on");
     }
 
     #[test]
@@ -625,5 +704,29 @@ mod tests {
             absolutize(&dotted),
             std::env::current_dir().unwrap().join(&dotted)
         );
+    }
+
+    #[test]
+    fn tilde_expands_to_home() {
+        // SAFETY of the env dance: single-threaded unit test process; the
+        // original HOME is restored so other tests see the real value.
+        let home = TempDir::new("tilde-home");
+        let saved = std::env::var("HOME").ok();
+        std::env::set_var("HOME", home.path());
+        assert_eq!(
+            expand_tilde(Path::new("~/notes")),
+            home.path().join("notes")
+        );
+        assert_eq!(expand_tilde(Path::new("~")), home.path());
+        // `~user` and plain paths stay literal.
+        assert_eq!(expand_tilde(Path::new("~other/x")), Path::new("~other/x"));
+        assert_eq!(expand_tilde(Path::new("rel/x")), Path::new("rel/x"));
+        // No usable $HOME: unchanged.
+        std::env::remove_var("HOME");
+        assert_eq!(expand_tilde(Path::new("~/notes")), Path::new("~/notes"));
+        match saved {
+            Some(h) => std::env::set_var("HOME", h),
+            None => std::env::remove_var("HOME"),
+        }
     }
 }
