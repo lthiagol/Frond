@@ -19,8 +19,14 @@ use crate::search::{SearchMode, SearchState};
 use crate::sidebar::{NodeKind, Sidebar};
 use crate::tags::TagList;
 use crate::theme::{Theme, ThemeChoices};
+use crate::ui;
 use crate::viewer::{Focusable, SharedIndex, Viewer};
 use crate::watch::VaultWatcher;
+
+/// Sidebar width bounds for the `<`/`>` override (columns). The floor
+/// matches the proportional default's clamp in `ui::sidebar_width`.
+pub const SIDEBAR_MIN_WIDTH: u16 = 24;
+pub const SIDEBAR_MAX_WIDTH: u16 = 120;
 
 pub use crate::baseview::BaseState;
 
@@ -128,6 +134,15 @@ pub struct App {
     /// Active theme (chrome + markdown palette). Cycled with `Shift+T`,
     /// replaced by config hot-reloads; session-only, never persisted.
     pub theme_ui: crate::theme::UiTheme,
+    /// Whether the app currently wants mouse capture on (`m` toggles, the
+    /// config `mouse` key sets the startup default; main.rs executes the
+    /// actual capture switch when this diverges from the live state). Off
+    /// = the terminal handles the mouse natively (text selection/copy).
+    pub mouse_capture: bool,
+    /// Sidebar width override in terminal columns (`None` = the default
+    /// 30% of the terminal, clamped 24–60; see `ui::sidebar_width`). Set
+    /// by `<`/`>` and the config `sidebar_width` key, clamped 24–120.
+    pub sidebar_width: Option<u16>,
     theme_choices: ThemeChoices,
     /// Discovered custom theme files (name → path), reused by config
     /// hot-reloads without re-walking the theme dirs.
@@ -195,6 +210,8 @@ impl App {
             search: SearchState::default(),
             git: None,
             watcher,
+            mouse_capture: true,
+            sidebar_width: None,
             note_viewport: Rect::default(),
             sidebar_area: None,
             backlinks_area: None,
@@ -718,9 +735,12 @@ impl App {
     /// keyboard focus (`Focus`) to that pane — sidebar → `Sidebar`, the
     /// note or base-table content → `Content`, the backlinks panel →
     /// `Backlinks`. The pane focus is assigned **after** the click's
-    /// action runs, so side effects (opening a note, toggling a folder or
-    /// checkbox) cannot leave a different pane focused; the clicked pane
-    /// always wins. Item-level focus (the focused link/checkbox used by
+    /// action runs, with one exception: a click that *opens a note or
+    /// base table from the sidebar* hands focus to `Content` (the reader
+    /// context moves with the open; folder toggles keep `Sidebar`). The
+    /// clicked-pane-wins rule otherwise holds: an action that does not
+    /// open anything (folder toggle, checkbox) cannot leave a different
+    /// pane focused. Item-level focus (the focused link/checkbox used by
     /// `x`/`X` + Enter) is still set by link/checkbox clicks exactly like
     /// [`Self::activate_focused_link`]. Wheel events are position-routed
     /// instead ([`Self::handle_wheel_at`]) and do not move pane focus.
@@ -750,8 +770,13 @@ impl App {
         if self.sidebar_visible {
             if let Some(area) = self.sidebar_area {
                 if point_in_rect(col, row, area) {
-                    self.sidebar_click(row, area);
-                    self.focus = Focus::Sidebar;
+                    let opened = self.sidebar_click(row, area);
+                    // Clicked-pane-wins, except that an open moves the
+                    // reader's context to the content pane (matching
+                    // Enter); a folder toggle or no-op keeps `Sidebar`.
+                    if !opened {
+                        self.focus = Focus::Sidebar;
+                    }
                     return;
                 }
             }
@@ -863,15 +888,16 @@ impl App {
     /// A click inside the sidebar widget: maps the screen row to a list
     /// row (border rows and past-the-end clicks are no-ops), selects it,
     /// toggles folders/tags, and opens notes via the normal `open_note`
-    /// path (nav push, scroll reset, error surfacing).
-    fn sidebar_click(&mut self, row: u16, area: Rect) {
+    /// path (nav push, scroll reset, error surfacing). Returns whether a
+    /// note/base table was opened (and focus moved to `Content`).
+    fn sidebar_click(&mut self, row: u16, area: Rect) -> bool {
         match self.sidebar_mode {
             SidebarMode::Tree => {
                 let clicked = self.sidebar.as_mut().and_then(|sidebar| {
                     let index = sidebar.row_index_at_screen_row(area, row)?;
                     sidebar.click(index)
                 });
-                self.open_sidebar_path(clicked);
+                self.open_sidebar_path(clicked)
             }
             SidebarMode::Tags => {
                 let clicked = {
@@ -880,20 +906,24 @@ impl App {
                     crate::sidebar::list_row_at(row, area, scroll, len)
                         .and_then(|index| self.tags.click(index))
                 };
-                self.open_sidebar_path(clicked);
+                self.open_sidebar_path(clicked)
             }
         }
     }
 
     /// Opens a sidebar-reported note path, surfacing failures like the
     /// Enter path does; `None` (folder toggle, border click) is a no-op.
-    fn open_sidebar_path(&mut self, path: Option<PathBuf>) {
+    /// On success the focus moves to the content pane, matching Enter.
+    fn open_sidebar_path(&mut self, path: Option<PathBuf>) -> bool {
         let Some(path) = path else {
-            return;
+            return false;
         };
         if let Err(err) = self.open_note(&path) {
             self.viewer.last_error = Some(format!("open failed: {err}"));
+            return false;
         }
+        self.focus = Focus::Content;
+        true
     }
 
     /// `Backspace`: restore the previous note (or `.base` table) with its
@@ -1053,7 +1083,8 @@ impl App {
 
     /// Opens a note selected in the sidebar (tree or tag mode); on read
     /// failure the error is surfaced in the status bar and the current
-    /// note stays put.
+    /// note stays put (with the sidebar still focused). On success the
+    /// focus moves to the content pane.
     fn open_from_sidebar(&mut self) {
         let path = match self.sidebar_mode {
             SidebarMode::Tree => self.sidebar.as_mut().and_then(|sb| sb.activate()),
@@ -1064,17 +1095,27 @@ impl App {
         };
         if let Err(err) = self.open_note(&path) {
             self.viewer.last_error = Some(format!("open failed: {err}"));
+            return;
         }
+        // A note was opened: the reader's context moves to the content
+        // pane, so the next j/k/PgDn/wheel scrolls the note, not the
+        // sidebar the selection came from. Failed opens keep the sidebar
+        // focused (the selection is still the object of attention).
+        self.focus = Focus::Content;
     }
 
-    /// Enter on the backlinks panel: open the selected backlink.
+    /// Enter on the backlinks panel: open the selected backlink. On
+    /// success the focus moves to the content pane, matching the sidebar
+    /// open paths; a failed open keeps the panel focused.
     fn open_from_backlinks(&mut self) {
         let Some(path) = self.backlinks.get(self.backlink_sel).cloned() else {
             return;
         };
         if let Err(err) = self.open_note(&path) {
             self.viewer.last_error = Some(format!("open failed: {err}"));
+            return;
         }
+        self.focus = Focus::Content;
     }
 
     /// Config hot-reload tick: on an mtime change re-read the config and
@@ -1245,6 +1286,9 @@ impl App {
             }
             KeyCode::Tab if plain => self.toggle_sidebar(),
             KeyCode::Char('t') if plain && self.sidebar.is_some() => self.toggle_sidebar_mode(),
+            KeyCode::Char('m') if plain => self.toggle_mouse_capture(),
+            KeyCode::Char('>') if plain => self.widen_sidebar(),
+            KeyCode::Char('<') if plain => self.narrow_sidebar(),
             KeyCode::Char('b') if plain => self.toggle_backlinks(),
             KeyCode::Char('s') if plain && self.index.is_some() => self.search.open_input(),
             KeyCode::Char('u') if plain => self.refresh_git(true),
@@ -1450,8 +1494,9 @@ impl App {
     /// Enter on a search hit: opens the note through the normal
     /// navigation stack (so Backspace returns to the previous note with
     /// its scroll) and scrolls the matched raw line into view. The popup
-    /// closes after a successful open; a failed open surfaces the error
-    /// and keeps the popup.
+    /// closes after a successful open (with the focus moving to the
+    /// content pane, like every other open path); a failed open surfaces
+    /// the error and keeps the popup.
     fn open_search_hit(&mut self) {
         let Some(hit) = self.search.selected_hit().cloned() else {
             return;
@@ -1462,6 +1507,9 @@ impl App {
         }
         self.viewer.scroll_to_source_line(hit.line);
         self.search.close();
+        // Consistent with the sidebar/backlinks open paths: the reader's
+        // context moves to the opened note.
+        self.focus = Focus::Content;
     }
 
     fn backlink_move(&mut self, delta: isize) {
@@ -1516,6 +1564,119 @@ impl App {
             self.focus = Focus::Backlinks;
         } else if self.focus == Focus::Backlinks {
             self.focus = Focus::Content;
+        }
+    }
+
+    /// `m`: toggle mouse capture. Only flips the intent here — `main.rs`'s
+    /// event loop owns the terminal and executes the actual
+    /// `EnableMouseCapture`/`DisableMouseCapture` when it sees the change.
+    /// Off, the terminal handles the mouse natively (text selection/copy)
+    /// and the app ignores clicks/wheels; the status bar shows `mouse off`.
+    pub fn toggle_mouse_capture(&mut self) {
+        self.mouse_capture = !self.mouse_capture;
+    }
+
+    /// `<` / `>`: narrow/widen the sidebar by 2 columns. The override is
+    /// absolute columns (clamped 24–120), kept across hides (`Tab`) and
+    /// resizes; `None` restores the proportional default. Content re-parses
+    /// automatically because the layout feeds the width back every frame.
+    pub fn narrow_sidebar(&mut self) {
+        self.set_sidebar_width(self.current_sidebar_width() - 2);
+    }
+
+    pub fn widen_sidebar(&mut self) {
+        self.set_sidebar_width(self.current_sidebar_width() + 2);
+    }
+
+    /// The width the next `<`/`>` step starts from: the override when set,
+    /// else the width of the last drawn sidebar (the proportional default).
+    fn current_sidebar_width(&self) -> u16 {
+        self.sidebar_width
+            .or_else(|| self.sidebar_area.map(|a| a.width))
+            .unwrap_or_else(|| ui::sidebar_width(u16::MAX))
+    }
+
+    fn set_sidebar_width(&mut self, cols: u16) {
+        self.sidebar_width = Some(cols.clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH));
+    }
+
+    /// Snapshot for the session file: the open note (vault-relative) with
+    /// its scroll, and the sidebar's mode/selection/expansion. Paths that
+    /// escape the vault root (a file opened directly) are stored verbatim.
+    pub fn session_state(&self, root: &Path) -> crate::session::SessionState {
+        fn rel(root: &Path, path: Option<&Path>) -> Option<String> {
+            let path = path?;
+            Some(
+                path.strip_prefix(root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        }
+        crate::session::SessionState {
+            note: rel(root, Some(self.viewer.path.as_path())),
+            scroll: self.viewer.scroll,
+            mode: Some(
+                match self.sidebar_mode {
+                    SidebarMode::Tree => "tree",
+                    SidebarMode::Tags => "tags",
+                }
+                .to_string(),
+            ),
+            selected: rel(
+                root,
+                self.sidebar.as_ref().and_then(|s| s.selected.as_deref()),
+            ),
+            expanded: self
+                .sidebar
+                .as_ref()
+                .map(|s| {
+                    let mut dirs: Vec<String> = s
+                        .expanded
+                        .iter()
+                        .filter_map(|p| rel(root, Some(p.as_path())))
+                        .collect();
+                    dirs.sort();
+                    dirs
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Apply a session snapshot, best-effort: missing files, entries
+    /// outside the tree, and open failures are skipped silently — the
+    /// fallback is the normal startup state (vault index at the top, the
+    /// first sidebar row selected). The restored scroll is clamped by the
+    /// next render (`run_app`'s initial `on_resize`).
+    pub fn restore_session(&mut self, state: &crate::session::SessionState, root: &Path) {
+        let abs = |rel: &str| {
+            let path = Path::new(rel);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                root.join(path)
+            }
+        };
+        if let Some(sidebar) = &mut self.sidebar {
+            for dir in &state.expanded {
+                sidebar.expanded.insert(abs(dir));
+            }
+            if let Some(selected) = &state.selected {
+                sidebar.selected = Some(abs(selected));
+                sidebar.scroll_selection_into_view();
+            }
+        }
+        match state.mode.as_deref() {
+            Some("tags") if self.sidebar.is_some() => {
+                self.sidebar_mode = SidebarMode::Tags;
+                self.refresh_tags();
+            }
+            _ => {}
+        }
+        if let Some(note) = &state.note {
+            if self.open_note(&abs(note)).is_ok() {
+                self.viewer.scroll = state.scroll;
+            }
         }
     }
 
@@ -1655,6 +1816,117 @@ mod tests {
             Focus::Content,
             "focus snaps out of hidden sidebar"
         );
+    }
+
+    #[test]
+    fn m_toggles_mouse_capture_intent() {
+        let vault_dir = vault();
+        let (_f, mut app) = app(&vault_dir);
+        assert!(app.mouse_capture, "capture on by default");
+        app.handle_key(key(KeyCode::Char('m')));
+        assert!(!app.mouse_capture, "m turns capture off");
+        app.handle_key(key(KeyCode::Char('m')));
+        assert!(app.mouse_capture, "m turns capture back on");
+    }
+
+    #[test]
+    fn sidebar_width_keys_step_clamp_and_survive_hide() {
+        let vault_dir = vault();
+        let (_f, mut app) = app(&vault_dir);
+        // The layout has not run yet: no drawn area, so the step starts
+        // from the fallback default (60) — clamped down from there.
+        app.handle_key(key(KeyCode::Char('<')));
+        assert_eq!(app.sidebar_width, Some(58));
+
+        // Draw once so the drawn area feeds the proportional default (30
+        // at 100 cols), then step from the real current width.
+        app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+        app.sidebar_width = None;
+        app.handle_key(key(KeyCode::Char('>')));
+        assert_eq!(app.sidebar_width, Some(32), "steps up from the default");
+        app.handle_key(key(KeyCode::Char('<')));
+        app.handle_key(key(KeyCode::Char('<')));
+        assert_eq!(app.sidebar_width, Some(28));
+
+        // Clamped at both ends.
+        for _ in 0..50 {
+            app.handle_key(key(KeyCode::Char('<')));
+        }
+        assert_eq!(app.sidebar_width, Some(SIDEBAR_MIN_WIDTH));
+        for _ in 0..100 {
+            app.handle_key(key(KeyCode::Char('>')));
+        }
+        assert_eq!(app.sidebar_width, Some(SIDEBAR_MAX_WIDTH));
+
+        // Survives a sidebar hide/show cycle.
+        app.handle_key(key(KeyCode::Tab));
+        assert!(!app.sidebar_visible);
+        assert_eq!(app.sidebar_width, Some(SIDEBAR_MAX_WIDTH));
+    }
+
+    #[test]
+    fn session_snapshot_and_restore_roundtrip() {
+        let vault_dir = vault();
+        let (file, mut shaped) = app(&vault_dir);
+
+        // Shape a session: open a nested note, scroll it, expand the tree,
+        // select its row.
+        shaped
+            .open_note(&vault_dir.path().join("sub/b.md"))
+            .unwrap();
+        shaped.viewer.scroll = 5;
+        if let Some(sidebar) = &mut shaped.sidebar {
+            sidebar.expanded.insert(vault_dir.path().join("sub"));
+            sidebar.selected = Some(vault_dir.path().join("sub/b.md"));
+        }
+        let state = shaped.session_state(vault_dir.path());
+        assert_eq!(state.note.as_deref(), Some("sub/b.md"));
+        assert_eq!(state.scroll, 5);
+        assert_eq!(state.expanded, vec!["sub".to_string()]);
+        assert_eq!(state.selected.as_deref(), Some("sub/b.md"));
+        assert_eq!(state.mode.as_deref(), Some("tree"));
+
+        // A fresh app restores it: note, scroll, expansion and selection.
+        let (file2, mut fresh) = app(&vault_dir);
+        assert_eq!(fresh.viewer.path, file2.path(), "precondition: index open");
+        fresh.restore_session(&state, vault_dir.path());
+        assert_eq!(fresh.viewer.path, vault_dir.path().join("sub/b.md"));
+        assert_eq!(fresh.viewer.scroll, 5);
+        assert!(fresh
+            .sidebar
+            .as_ref()
+            .unwrap()
+            .expanded
+            .contains(&vault_dir.path().join("sub")));
+        assert_eq!(
+            fresh.sidebar.as_ref().unwrap().selected,
+            Some(vault_dir.path().join("sub/b.md"))
+        );
+        assert_eq!(fresh.sidebar_mode, SidebarMode::Tree);
+
+        // Tags mode restores too.
+        let mut tagged = state;
+        tagged.mode = Some("tags".to_string());
+        fresh.restore_session(&tagged, vault_dir.path());
+        assert_eq!(fresh.sidebar_mode, SidebarMode::Tags);
+    }
+
+    #[test]
+    fn session_restore_survives_missing_note() {
+        let vault_dir = vault();
+        let (_file, mut app) = app(&vault_dir);
+        let state = crate::session::SessionState {
+            note: Some("gone.md".to_string()),
+            scroll: 3,
+            expanded: vec![],
+            selected: Some("gone.md".to_string()),
+            mode: Some("tree".to_string()),
+        };
+        app.restore_session(&state, vault_dir.path());
+        // Open failed silently: the startup note stays, scroll untouched.
+        assert_eq!(app.viewer.path, _file.path());
+        assert_eq!(app.viewer.scroll, 0);
+        assert!(app.viewer.last_error.is_none(), "no startup noise");
     }
 
     #[test]
@@ -1811,6 +2083,11 @@ mod tests {
         app.handle_key(key(KeyCode::Enter));
         assert!(app.viewer.last_error.is_some(), "error surfaced");
         assert_eq!(app.viewer.path, file.path());
+        assert_eq!(
+            app.focus,
+            Focus::Sidebar,
+            "failed open keeps the sidebar focused"
+        );
     }
 
     #[test]
@@ -2201,6 +2478,11 @@ mod tests {
         assert_eq!(app.viewer.path, vault_dir.path().join("sub/b.md"));
         assert!(app.nav.can_go_back(), "opened through the normal open path");
         assert_eq!(app.viewer.scroll, 0, "open resets the scroll");
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "note click moves focus to the content pane"
+        );
 
         // Clicking the folder again collapses it.
         app.handle_click(3, sub_row);
@@ -2213,27 +2495,60 @@ mod tests {
     }
 
     #[test]
-    fn click_sidebar_row_moves_focus_to_sidebar_then_j_moves_selection() {
+    fn click_sidebar_note_opens_and_moves_focus_to_content() {
         let vault_dir = vault();
         let (_file, mut app) = app(&vault_dir);
         app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
         app.note_viewport = Rect::new(30, 0, 70, 20);
-        assert_eq!(app.focus, Focus::Content);
+        // Start on the sidebar so the click must move the focus.
+        app.focus = Focus::Sidebar;
 
         // Row 2 (inner row 1) is `a.md` in the collapsed list [sub, a.md].
         app.handle_click(3, 2);
-        assert_eq!(app.focus, Focus::Sidebar, "sidebar click focuses sidebar");
         assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "opening a note moves focus to the content pane"
+        );
 
-        // Focus now routes j/k to the sidebar selection, not content.
-        let scroll_before = app.viewer.scroll;
-        app.handle_key(key(KeyCode::Char('k')));
+        // Focus now routes j/k to the content scroll, not the sidebar
+        // selection the click came from.
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.viewer.scroll, 1, "j scrolled the content");
         assert_eq!(
             app.sidebar.as_ref().unwrap().selected,
-            Some(vault_dir.path().join("sub")),
-            "k moved the sidebar selection"
+            Some(vault_dir.path().join("a.md")),
+            "sidebar selection untouched"
         );
-        assert_eq!(app.viewer.scroll, scroll_before, "content did not scroll");
+    }
+
+    #[test]
+    fn enter_on_sidebar_note_moves_focus_to_content() {
+        let vault_dir = vault();
+        let (_file, mut app) = app(&vault_dir);
+        app.handle_key(key(KeyCode::Char('h'))); // focus the sidebar
+        assert_eq!(app.focus, Focus::Sidebar);
+
+        // Enter on the selected folder: expands in place, sidebar keeps
+        // the focus (j/k must keep moving the tree selection).
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(
+            app.focus,
+            Focus::Sidebar,
+            "folder Enter keeps the sidebar focused"
+        );
+
+        // Enter on a note: opens it and moves focus to the content pane,
+        // so the next j/k/PgDn/wheel scrolls the note just opened.
+        app.handle_key(key(KeyCode::Char('j'))); // onto sub/b.md
+        app.handle_key(key(KeyCode::Enter));
+        assert_eq!(app.viewer.path, vault_dir.path().join("sub/b.md"));
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "note Enter moves focus to the content pane"
+        );
     }
 
     #[test]
@@ -2507,6 +2822,7 @@ mod tests {
         assert_eq!(app.viewer.path, file.path(), "tag click opens nothing");
         app.handle_click(3, 2); // note row: open
         assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
+        assert_eq!(app.focus, Focus::Content, "note click focuses content");
     }
 
     #[test]
@@ -2586,10 +2902,16 @@ mod tests {
             app.backlinks,
             vec![vault_dir.path().join("sub").join("b.md")]
         );
-        // Enter opens the backlink.
+        // Enter opens the backlink and moves focus to the content pane
+        // (consistent with the sidebar open paths).
         app.handle_key(key(KeyCode::Enter));
         assert_eq!(app.viewer.path, vault_dir.path().join("sub").join("b.md"));
         assert!(app.nav.can_go_back());
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "backlink Enter moves focus to the content pane"
+        );
 
         // b closes again; focus snaps out of the panel.
         app.handle_key(key(KeyCode::Char('b')));
@@ -2669,6 +2991,11 @@ mod tests {
         app.handle_key(key(KeyCode::Enter)); // open
         assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
         assert!(app.nav.can_go_back());
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "tag-mode Enter moves focus to the content pane"
+        );
     }
 
     #[test]

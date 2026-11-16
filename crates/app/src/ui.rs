@@ -58,7 +58,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let view_height = area.height.saturating_sub(1);
 
     let (sidebar_area, content_area) = if app.sidebar_visible {
-        let width = sidebar_width(area.width).min(area.width);
+        // Explicit override (`<`/`>`, config `sidebar_width`) wins over the
+        // proportional default; both are clamped to the real terminal width.
+        let width = app
+            .sidebar_width
+            .unwrap_or_else(|| sidebar_width(area.width))
+            .min(area.width);
         let sidebar = Some(Rect {
             x: area.x,
             y: area.y,
@@ -955,6 +960,15 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         Some(t) => format!("rendered {}", format_time(t)),
         None => "not rendered".to_string(),
     }));
+    // Mouse capture hint: only shown while capture is OFF (the surprising
+    // state — clicks/wheel are dead in-app, the terminal selects natively).
+    if !app.mouse_capture {
+        spans.push(Span::raw(" · "));
+        spans.push(Span::styled(
+            "mouse off",
+            Style::new().fg(ui.status_watch_off_fg),
+        ));
+    }
     // Git sync segment (SPEC): `✓` clean / `●` dirty, plus behind/ahead
     // arrows when the branch diverged from origin/main. Nothing at all
     // when the status is unavailable (no git, not a repository).
@@ -1083,6 +1097,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
         &[
             ("t", "sidebar mode: tree ⇄ tags"),
             ("j/k Enter", "move / open (l expands, h collapses)"),
+            ("< / >", "narrow / widen the sidebar"),
             ("sidebar *", "changed since last sync (git status)"),
         ],
     ),
@@ -1091,30 +1106,29 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
         &[
             ("u", "refresh git status (watch events too)"),
             ("Shift+T", "cycle theme (session only)"),
+            ("m", "toggle mouse capture / native select"),
             ("", "? help · q / Ctrl+C quit"),
         ],
     ),
 ];
 
 /// Footer hint inside the help popup (fixed at the bottom), in herdr's
-/// hint style: `key action` pairs separated by ` · `.
-const HELP_FOOTER: &str = " scroll j/k/↑↓/pgup/pgdn · g/G top/bottom · close esc/any key";
+/// hint style: `key action` pairs separated by ` · `. The scroll part is
+/// shown only while the body actually overflows.
+const HELP_FOOTER_SCROLL: &str = " scroll j/k/↑↓/pgup/pgdn · g/G top/bottom · close esc/any key";
+const HELP_FOOTER_CLOSE: &str = " close esc/any key";
 /// Popup title (bold, left) and close chip (right), both fixed at the top.
 const HELP_TITLE: &str = "keybinds";
 const HELP_CLOSE_CHIP: &str = "esc close";
-/// Gap between two help columns.
-const HELP_COL_GAP: usize = 3;
-/// Widest a single label may be; sets the per-column label width budget.
+/// Widest a single label may be; sets the label width budget.
 const HELP_LABEL_WIDTH: usize = 40;
 /// Popup chrome around the grid: borders (2) + scrollbar column (1) + 1 spare.
 const HELP_CHROME: u16 = 4;
-/// Most columns the grid may use (groups are packed into them greedily).
-const HELP_MAX_COLUMNS: usize = 3;
 
-/// Popup width for a full-width grid: key column (longest key
+/// Popup width for the single-column grid: key column (longest key
 /// `Backspace / Ctrl+O`, 18 cells) + gap + longest label (`unresolved
-/// (struck out, not activatable)`, 40 cells) + chrome. Used as the cap for
-/// single-column layouts.
+/// (struck out, not activatable)`, 40 cells) + chrome. The help is always
+/// one column; taller-than-screen bodies scroll behind the right scrollbar.
 const HELP_WIDTH: u16 = 18 + 1 + HELP_LABEL_WIDTH as u16 + HELP_CHROME;
 
 /// Key column width shared by every group and every column: the longest key
@@ -1208,67 +1222,29 @@ struct HelpGrid {
     spaced: bool,
 }
 
-/// Lay the help out for an available popup width `max_width` and frame
-/// height `area_height`. Picks the most columns (up to `HELP_MAX_COLUMNS`)
-/// that fit the width; within a column count, the spaced layout is preferred
-/// when the tallest column still fits the height. Falls back to a single
-/// packed column (which scrolls) when nothing fits.
-fn help_grid(max_width: u16, area_height: u16) -> HelpGrid {
-    let key_width = help_key_width();
+/// Lay the help out for a frame height `area_height`. The help is always a
+/// single packed column (all groups in order): the spaced layout (blank row
+/// between groups) when it still fits the height, the compact one otherwise
+/// (the body then scrolls behind the right scrollbar).
+fn help_grid(area_height: u16) -> HelpGrid {
     let all: Vec<&(&str, &[HelpEntry])> = HELP_SECTIONS.iter().collect();
     // Body rows the popup can show: frame minus the 2-row margin, minus the
     // 2 borders and the footer row.
     let body_budget = usize::from(area_height.saturating_sub(2)).saturating_sub(3);
-
-    let mut chosen: Option<HelpGrid> = None;
-    for columns in (1..=HELP_MAX_COLUMNS).rev() {
-        for spaced in [true, false] {
-            let packed = help_pack(HELP_SECTIONS, columns, spaced);
-            let label_widths: Vec<usize> = packed
-                .iter()
-                .map(|col| {
-                    let groups: Vec<&(&str, &[HelpEntry])> =
-                        col.groups.iter().map(|&i| &HELP_SECTIONS[i]).collect();
-                    help_label_width(&groups)
-                })
-                .collect();
-            let grid_inner: usize = label_widths
-                .iter()
-                .map(|l| key_width + 1 + l)
-                .sum::<usize>()
-                + HELP_COL_GAP * packed.len().saturating_sub(1);
-            let width = grid_inner + usize::from(HELP_CHROME);
-            let rows = packed.iter().map(|c| c.rows).max().unwrap_or(0);
-            let fits_width = width <= usize::from(max_width);
-            let fits_height = rows <= body_budget;
-            // Prefer the most columns; within that, the spaced layout when it
-            // still fits the height. The last candidate is always accepted.
-            if fits_width && (fits_height || (columns == 1 && !spaced)) {
-                chosen = Some(HelpGrid {
-                    columns: packed,
-                    label_widths,
-                    width: width as u16,
-                    rows,
-                    spaced,
-                });
-                break;
-            }
-        }
-        if chosen.is_some() {
-            break;
+    for spaced in [true, false] {
+        let packed = help_pack(HELP_SECTIONS, 1, spaced);
+        let rows = packed.iter().map(|c| c.rows).max().unwrap_or(0);
+        if rows <= body_budget || !spaced {
+            return HelpGrid {
+                label_widths: vec![help_label_width(&all)],
+                columns: packed,
+                width: HELP_WIDTH,
+                rows,
+                spaced,
+            };
         }
     }
-    chosen.unwrap_or_else(|| {
-        let packed = help_pack(HELP_SECTIONS, 1, false);
-        let rows = packed.iter().map(|c| c.rows).max().unwrap_or(0);
-        HelpGrid {
-            label_widths: vec![help_label_width(&all)],
-            columns: packed,
-            width: HELP_WIDTH,
-            rows,
-            spaced: false,
-        }
-    })
+    unreachable!("the compact layout is always accepted")
 }
 
 /// Body rows of one column's cells: header and entries, keys padded to the
@@ -1316,51 +1292,24 @@ fn help_column_lines(
     rows
 }
 
-/// Body lines of the help grid: each row joins the column cells side by side
-/// (padded to their widths, `HELP_COL_GAP` apart). Every column is padded to
-/// the same height so short columns stay blank at the bottom.
+/// Body lines of the single-column help grid: each row padded to the popup's
+/// inner width.
 fn help_body(ui: UiTheme, grid: &HelpGrid, spaced: bool) -> Vec<Line<'static>> {
-    let cells: Vec<Vec<Vec<Span<'static>>>> = grid
-        .columns
-        .iter()
-        .zip(&grid.label_widths)
-        .map(|(column, &label_width)| help_column_lines(ui, column, spaced, label_width))
-        .collect();
+    let column = &grid.columns[0];
+    let label_width = grid.label_widths[0];
+    let cells = help_column_lines(ui, column, spaced, label_width);
     let inner = grid.width.saturating_sub(HELP_CHROME) as usize;
-    (0..grid.rows)
-        .map(|row| {
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            let mut used = 0;
-            for (col, column_cells) in cells.iter().enumerate() {
-                if col > 0 {
-                    spans.push(Span::raw(" ".repeat(HELP_COL_GAP)));
-                    used += HELP_COL_GAP;
-                }
-                let cell_width = key_width_of(grid, col);
-                let mut cell_used = 0;
-                if let Some(cell) = column_cells.get(row) {
-                    for span in cell {
-                        cell_used += span.content.chars().count();
-                    }
-                    spans.extend(cell.iter().cloned());
-                }
-                let pad = cell_width.saturating_sub(cell_used);
-                if pad > 0 {
-                    spans.push(Span::raw(" ".repeat(pad)));
-                }
-                used += cell_width;
-            }
+    cells
+        .into_iter()
+        .map(|cell| {
+            let mut spans: Vec<Span<'static>> = cell;
+            let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
             if inner > used {
                 spans.push(Span::raw(" ".repeat(inner - used)));
             }
             Line::from(spans)
         })
         .collect()
-}
-
-/// Cell width of column `col` in `grid`: key column + gap + label column.
-fn key_width_of(grid: &HelpGrid, col: usize) -> usize {
-    help_key_width() + 1 + grid.label_widths[col]
 }
 
 /// Lines a PageUp/PageDown moves the help by (about a page of body rows).
@@ -1386,7 +1335,7 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         }
     }
 
-    let grid = help_grid(area.width.saturating_sub(2).max(1), area.height);
+    let grid = help_grid(area.height);
     let spaced = grid.spaced;
     let width = grid.width.min(area.width.saturating_sub(2)).max(1);
     let total = grid.rows;
@@ -1474,9 +1423,14 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         height: 1,
         ..inner
     };
+    let footer_text = if overflow {
+        HELP_FOOTER_SCROLL
+    } else {
+        HELP_FOOTER_CLOSE
+    };
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            HELP_FOOTER,
+            footer_text,
             Style::new().fg(ui.popup_dimmed_fg),
         )))
         .style(Style::new().bg(ui.content_bg)),
@@ -2488,7 +2442,7 @@ mod tests {
         let backend = TestBackend::new(100, 24);
         let mut terminal = Terminal::new(backend).unwrap();
 
-        // The centered help popup (100x24 → 58 wide at x=21): an inner
+        // The centered help popup (100x24 → 63 wide at x=18): an inner
         // cell must carry content_bg, not the terminal default.
         app.viewer.help_open = true;
         terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -2747,6 +2701,39 @@ mod tests {
         );
     }
 
+    /// `<`/`>` width override: the drawn layout places the sidebar/content
+    /// divider at the override's column instead of the proportional default.
+    #[test]
+    fn sidebar_width_override_moves_the_divider() {
+        let vault_dir = TempDir::new("ui-sbw");
+        std::fs::write(vault_dir.path().join("a.md"), "x\n").unwrap();
+        let file = ui_viewer("ui-sbw.md", "x\n");
+        let mut app = app_with_index(&file, &vault_dir);
+
+        // Default: divider at sidebar_width(100) - 1 = 29.
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(sidebar_width(100) - 1, 5)].symbol(),
+            "│"
+        );
+
+        // Override 40: divider moves to column 39.
+        app.sidebar_width = Some(40);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(39, 5)].symbol(),
+            "│",
+            "divider follows the width override"
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(sidebar_width(100) - 1, 5)].symbol(),
+            " ",
+            "old divider column no longer a border"
+        );
+    }
+
     /// Documented behavior (sidebar + tag list): the scrollbar column is inside
     /// the widget, so a click there is owned by the sidebar and maps by ROW
     /// only — it selects the row on that screen line, same as a click on the
@@ -2898,9 +2885,10 @@ mod tests {
     fn help_labels_align_to_one_key_column() {
         let width = help_key_width();
         assert_eq!(width, "Backspace / Ctrl+O".chars().count());
-        // Multi-column grid (wide terminal) and single column (smoke size).
-        for (w, h) in [(140u16, 36u16), (100, 30)] {
-            let grid = help_grid(w - 2, h);
+        // Tall frame (spaced) and short frame (compact): the key column is
+        // shared either way.
+        for h in [36u16, 30u16] {
+            let grid = help_grid(h);
             let lines = help_body(app_ui_theme(), &grid, grid.spaced);
             assert_eq!(lines.len(), grid.rows, "row count matches the grid");
             let text: Vec<String> = lines
@@ -2949,25 +2937,28 @@ mod tests {
         );
     }
 
-    /// Layout chooses the grid from the popup width: a wide terminal gets
-    /// several columns, the 100-cell smoke size keeps one column whose rows
-    /// all fit the first screen (no scroll).
+    /// Layout is always a single column: the spaced layout (blank rows
+    /// between groups) when it fits the frame height, the compact one
+    /// (which scrolls) otherwise.
     #[test]
-    fn help_grid_uses_columns_when_width_allows() {
-        let wide = help_grid(140 - 2, 36);
-        assert!(wide.columns.len() >= 2, "multi-column at 140 cols");
-        assert!(wide.width <= 140);
-        let mut all: Vec<usize> = wide.columns.iter().flat_map(|c| c.groups.clone()).collect();
+    fn help_grid_is_single_column_spaced_when_it_fits() {
+        let tall = help_grid(36);
+        assert_eq!(tall.columns.len(), 1, "always one column");
+        assert!(tall.spaced, "spaced when the body fits");
+        let mut all: Vec<usize> = tall.columns.iter().flat_map(|c| c.groups.clone()).collect();
         all.sort_unstable();
         assert_eq!(
             all,
             (0..HELP_SECTIONS.len()).collect::<Vec<_>>(),
-            "every group placed once"
+            "every group placed once, in order"
         );
+        assert!(tall.width <= 140, "sane width on a wide terminal");
 
-        let smoke = help_grid(100 - 2, 30);
-        assert_eq!(smoke.columns.len(), 1, "single column at the smoke size");
-        assert!(smoke.rows + 3 <= 30, "body fits the first screen");
+        // Short frame: compact layout, the body scrolls.
+        let short = help_grid(30);
+        assert_eq!(short.columns.len(), 1);
+        assert!(!short.spaced, "compact when the spaced body does not fit");
+        assert!(short.rows < tall.rows);
     }
 
     /// The whole body is on the first screen at the 100x30 smoke size, so
@@ -2997,10 +2988,8 @@ mod tests {
         let frame = Rect::new(0, 0, 100, 30);
         let popup = centered(
             frame,
-            help_grid(frame.width - 2, frame.height)
-                .width
-                .min(frame.width - 2),
-            (help_grid(frame.width - 2, frame.height).rows as u16 + 3).min(frame.height - 2),
+            help_grid(frame.height).width.min(frame.width - 2),
+            (help_grid(frame.height).rows as u16 + 3).min(frame.height - 2),
         );
         for y in frame.y..frame.bottom() {
             for x in frame.x..frame.right() {

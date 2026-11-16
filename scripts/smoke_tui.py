@@ -30,6 +30,8 @@ stream = pyte.ByteStream(screen)
 pid, fd = pty.fork()
 if pid == 0:
     os.environ["TERM"] = "xterm-256color"
+    # The quit-time session save must not touch the real ~/.local/state.
+    os.environ["FROND_SESSION"] = "/tmp/frond-smoke-session"
     fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     os.execv(APP, [APP, TMP])
 

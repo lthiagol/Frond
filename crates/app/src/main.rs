@@ -1,7 +1,8 @@
 //! M3: read-only TUI shell with sidebar (tree/tags), backlinks panel,
 //! wikilink navigation, navigation history, watch mode.
 //!
-//! Usage: `frond [--vault <dir>] [file.md]`
+//! Usage: `frond [--vault <dir>] [file.md]` — `frond --help` for all flags
+//! (`--config-show` prints a commented default config file).
 //!
 //! With neither `--vault` (nor a config `vault`) nor a file argument, the app
 //! prompts for the vault directory. A file argument without a vault is a
@@ -30,6 +31,7 @@ mod config;
 mod links;
 mod nav;
 mod search;
+mod session;
 mod sidebar;
 mod tags;
 mod tasks;
@@ -72,7 +74,40 @@ struct Args {
     vault: Option<PathBuf>,
     theme: Option<String>,
     watch: Option<bool>,
+    mouse: Option<bool>,
+    /// Non-TUI informational flag (`--help`/`--version`/`--config-show`):
+    /// print and exit before any terminal setup.
+    info: Option<Info>,
 }
+
+/// Informational flags served without starting the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Info {
+    Help,
+    Version,
+    ConfigShow,
+}
+
+/// Usage text for `--help` (and the on-error usage line).
+const HELP_TEXT: &str = "\
+frond — a terminal markdown vault reader
+
+Usage: frond [--vault <dir>] [--theme <name>] [file.md | file.base]
+
+Options:
+  --vault <dir>         Vault directory to index (config: vault)
+  --theme <name>        Theme by name (config: theme)
+  --watch[=true|false]  Live re-render on vault changes (config: watch)
+  --mouse[=true|false]  Mouse capture on/off; off = native text selection
+                        (config: mouse, `m` toggles at runtime)
+  --config-show         Print a commented default config.toml and exit
+  --version             Print the version and exit
+  --help                Print this help and exit
+
+With neither --vault (nor a config vault) nor a file argument, frond
+prompts for the vault directory. Config file:
+~/.config/frond/config.toml (frond --config-show prints a template).
+";
 
 fn parse_args() -> Result<Args, String> {
     parse_args_from(std::env::args().skip(1))
@@ -84,6 +119,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
     let mut vault: Option<PathBuf> = None;
     let mut theme: Option<String> = None;
     let mut watch: Option<bool> = None;
+    let mut mouse: Option<bool> = None;
+    let mut info: Option<Info> = None;
     let mut file: Option<PathBuf> = None;
     let mut args = args;
     while let Some(arg) = args.next() {
@@ -117,6 +154,18 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
                         .map_err(|_| format!("--watch expects true or false, got \"{value}\""))?,
                 );
             }
+            "--mouse" => mouse = Some(true),
+            _ if arg.starts_with("--mouse=") => {
+                let value = arg["--mouse=".len()..].to_string();
+                mouse = Some(
+                    value
+                        .parse::<bool>()
+                        .map_err(|_| format!("--mouse expects true or false, got \"{value}\""))?,
+                );
+            }
+            "--help" | "-h" => info = Some(Info::Help),
+            "--version" | "-V" => info = Some(Info::Version),
+            "--config-show" => info = Some(Info::ConfigShow),
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ => {
                 if file.is_some() {
@@ -131,6 +180,8 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
         vault,
         theme,
         watch,
+        mouse,
+        info,
     })
 }
 
@@ -189,13 +240,28 @@ fn main() {
     let mut args = match parse_args() {
         Ok(args) => args,
         Err(msg) => {
-            eprintln!(
-                "usage: frond [--vault <dir>] [--theme <name>] [--watch[=true|false]] [file.md | file.base]"
-            );
+            eprintln!("usage: frond [--vault <dir>] [--theme <name>] [--watch[=true|false]] [--mouse[=true|false]] [file.md | file.base]");
             eprintln!("error: {msg}");
             std::process::exit(2);
         }
     };
+    // Informational flags: print and exit before any terminal setup, so
+    // output can be redirected and no alternate-screen state leaks.
+    match args.info {
+        Some(Info::Help) => {
+            print!("{HELP_TEXT}");
+            return;
+        }
+        Some(Info::Version) => {
+            println!("frond {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Some(Info::ConfigShow) => {
+            print!("{}", config::DEFAULT_CONFIG_TEMPLATE);
+            return;
+        }
+        None => {}
+    }
 
     // Config file (~/.config/frond/config.toml; FROND_CONFIG overrides for
     // tests/smokes). Missing = defaults; malformed = warning + defaults.
@@ -223,6 +289,10 @@ fn main() {
         None => None,
     };
     let watch = args.watch.unwrap_or_else(|| config.watch_default());
+    // Mouse capture: CLI flag > config `mouse` key > on (the historical
+    // default). Off = the terminal keeps the mouse for native text
+    // selection; `m` toggles at runtime either way.
+    let mouse = args.mouse.or(config.mouse).unwrap_or(true);
     let theme_name = theme::effective_theme_name(
         args.theme.as_deref(),
         std::env::var("FROND_THEME").ok().as_deref(),
@@ -230,6 +300,9 @@ fn main() {
     );
 
     // Default the note to the vault's index, matching Obsidian's entry note.
+    // Whether the note came from an explicit argument matters later (an
+    // explicit file wins over the session restore), so capture it first.
+    let explicit_note = args.file.is_some();
     let file = match (args.file, &vault) {
         (Some(f), _) => absolutize(&f),
         (None, Some(v)) => absolutize(&v.join("index.md")),
@@ -256,7 +329,7 @@ fn main() {
     };
 
     install_panic_hook();
-    let mut terminal = match setup_terminal() {
+    let mut terminal = match setup_terminal(mouse) {
         Ok(t) => t,
         Err(err) => {
             eprintln!("cannot enter terminal mode: {err}");
@@ -289,6 +362,28 @@ fn main() {
                 eprintln!("warning: {warning}");
             }
             app.apply_theme(&resolved, &theme_warnings);
+            // Mouse capture default (config/flag): the App field drives the
+            // runtime toggle (`m`); setup_terminal already applied the
+            // startup state.
+            app.mouse_capture = mouse;
+            // Sidebar width override (config `sidebar_width`), same bounds
+            // as the `<`/`>` keys clamp to.
+            app.sidebar_width = config
+                .sidebar_width
+                .map(|w| w.clamp(crate::app::SIDEBAR_MIN_WIDTH, crate::app::SIDEBAR_MAX_WIDTH));
+            // Session restore: only when the note came from the defaults
+            // (no explicit file argument — that argument is the user's
+            // intent for this run). A missing or malformed session file is
+            // the normal first-run state, never a warning.
+            if !explicit_note {
+                if let Some(root) = &vault {
+                    if let Some(file) = session::session_file(root)
+                        .and_then(|path| session::SessionState::load(&path))
+                    {
+                        app.restore_session(&file, root);
+                    }
+                }
+            }
             // Config hot-reload: the theme key live-applies on change.
             if let Some(path) = config::config_path() {
                 app.watch_config(path);
@@ -301,7 +396,7 @@ fn main() {
                     app.viewer.last_error = Some(format!("open failed: {err}"));
                 }
             }
-            run_app(&mut terminal, &mut app)
+            run_app(&mut terminal, &mut app, vault.as_deref())
         })
     });
 
@@ -314,11 +409,13 @@ fn main() {
     }
 }
 
-fn setup_terminal() -> io::Result<Tui> {
+fn setup_terminal(capture_mouse: bool) -> io::Result<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     stdout.execute(EnterAlternateScreen)?;
-    stdout.execute(event::EnableMouseCapture)?;
+    if capture_mouse {
+        stdout.execute(event::EnableMouseCapture)?;
+    }
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend)
 }
@@ -372,7 +469,7 @@ fn install_panic_hook() {
     }));
 }
 
-fn run_app(terminal: &mut Tui, app: &mut App) -> io::Result<()> {
+fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::Result<()> {
     let (cols, rows) = crossterm::terminal::size().unwrap_or(FALLBACK_SIZE);
     app.viewer.on_resize(cols, rows);
 
@@ -380,9 +477,26 @@ fn run_app(terminal: &mut Tui, app: &mut App) -> io::Result<()> {
     // elapsed, regardless of the event stream. A pure timeout-reset tick
     // would starve the poll while events (e.g. mouse motion) keep arriving.
     let mut last_poll = Instant::now();
+    // Live mouse-capture state, kept in sync with `app.mouse_capture` (the
+    // `m` toggle): when they diverge, the switch is executed here — the
+    // App cannot write to the terminal itself.
+    let mut capture_on = app.mouse_capture;
 
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
+
+        if app.mouse_capture != capture_on {
+            let mut stdout = io::stdout();
+            let res = if app.mouse_capture {
+                stdout.execute(event::EnableMouseCapture)
+            } else {
+                stdout.execute(event::DisableMouseCapture)
+            };
+            // Best-effort: a failed switch leaves the current mode; the
+            // next toggle retries. Not worth tearing down the session.
+            let _ = res;
+            capture_on = app.mouse_capture;
+        }
 
         if event::poll(POLL_INTERVAL)? {
             match event::read()? {
@@ -411,6 +525,14 @@ fn run_app(terminal: &mut Tui, app: &mut App) -> io::Result<()> {
             last_poll = Instant::now();
         }
     }
+    // Clean quit: persist the session (last note + scroll, sidebar mode,
+    // selection and expansion) for the next run. Best-effort — a failed
+    // write must never turn a quit into an error.
+    if let Some(root) = vault_root {
+        if let Some(path) = session::session_file(root) {
+            let _ = app.session_state(root).save(&path);
+        }
+    }
     Ok(())
 }
 
@@ -418,6 +540,36 @@ fn run_app(terminal: &mut Tui, app: &mut App) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::testutil::TempDir;
+
+    fn parse(args: &[&str]) -> Result<Args, String> {
+        parse_args_from(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn mouse_flag_parses_and_defaults() {
+        assert!(parse(&["--mouse"]).unwrap().mouse.unwrap());
+        assert!(!parse(&["--mouse=false"]).unwrap().mouse.unwrap());
+        assert!(parse(&["--mouse=true"]).unwrap().mouse.unwrap());
+        assert_eq!(parse(&["x.md"]).unwrap().mouse, None, "unset by default");
+        assert!(parse(&["--mouse=maybe"]).is_err(), "boolean values only");
+    }
+
+    #[test]
+    fn info_flags_parse_without_value_consumption() {
+        assert_eq!(parse(&["--help"]).unwrap().info, Some(Info::Help));
+        assert_eq!(parse(&["-h"]).unwrap().info, Some(Info::Help));
+        assert_eq!(parse(&["--version"]).unwrap().info, Some(Info::Version));
+        assert_eq!(parse(&["-V"]).unwrap().info, Some(Info::Version));
+        assert_eq!(
+            parse(&["--config-show"]).unwrap().info,
+            Some(Info::ConfigShow)
+        );
+        assert_eq!(parse(&["x.md"]).unwrap().info, None);
+        // The flag does not swallow the positional file.
+        let args = parse(&["--config-show", "x.md"]).unwrap();
+        assert_eq!(args.info, Some(Info::ConfigShow));
+        assert_eq!(args.file.as_deref(), Some(Path::new("x.md")));
+    }
 
     #[test]
     fn absolutize_resolves_existing_paths_and_symlinks() {
