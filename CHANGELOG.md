@@ -2,7 +2,37 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates are UTC.
 
-## [Unreleased]
+## [0.6.0] — 2026-11-16
+
+### Added
+- **`.base` files in the sidebar tree**: `.base` tables now appear as tree
+  rows next to the `.md` notes (sorted alphabetically together with them),
+  open the table view on click/Enter/`l` like a note, and `reveal` (link
+  follow, search hit, backlink, session restore) selects their row. A
+  `.base` file previously had no tree row and no in-app entry point at
+  all — the CLI file argument was the only way to open one.
+- **`.base` wikilinks resolve**: a target explicitly ending in `.base`
+  (`[[inventories.base]]`, bare or path-style, case-insensitive) resolves
+  against the vault's base files and opens the table view. The index
+  tracks `.base` files path-only through the vault walk (their content is
+  never parsed), so created/deleted base files appear and disappear via
+  the normal watcher. A bare `[[name]]` still never matches a base,
+  matching Obsidian; explicit `.base` targets that no longer exist stay
+  `NotFound` (no suffix-match guessing).
+
+### Fixed
+- **Frontmatter links render and activate**: the metadata block's values
+  are now inline-parsed (engine, recorded as deviation 9a in
+  `VENDORED.md`). Frontmatter values like `related:` previously rendered
+  as raw `[text](vault://N/target)` syntax and were missing from the
+  clickable link list entirely — the links existed only in the vault
+  index (backlinks), never in the UI. Now `related:` entries render as
+  styled links (marker + label), resolve with the same same-folder
+  proximity hint as body links (e.g. `[[project]]` correctly lands on the
+  project note among 12 same-named `project.md`s), and open on click like
+  every other link.
+
+## [0.5.0] — 2026-11-16
 
 ### Added
 - **Status line**: `Shift+T` and config theme hot-reloads show a transient
