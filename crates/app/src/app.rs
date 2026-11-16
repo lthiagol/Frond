@@ -557,6 +557,14 @@ impl App {
             self.viewer.open_file(path)?;
         }
         self.nav.push(outgoing);
+        // Reveal the opened note in the sidebar tree: expand its ancestor
+        // folders and select it (no focus change). Link follows, search
+        // hits, backlinks and session restores all land here; sidebar
+        // opens re-select the row they just clicked — a harmless no-op.
+        // A `.base` table only expands its parent folder (no tree row).
+        if let Some(sidebar) = &mut self.sidebar {
+            sidebar.reveal(path);
+        }
         self.refresh_backlinks();
         // Debounce-gated ("rate-limited trivially"): skipped entirely when
         // the last spawn is recent — the status cannot have gone stale in
@@ -573,6 +581,11 @@ impl App {
         let outgoing = (self.current_path(), self.current_scroll() as u32);
         self.open_base_at(path, 0)?;
         self.nav.push(outgoing);
+        // A `.base` file has no tree row: reveal just expands its parent
+        // folder (see `Sidebar::reveal`).
+        if let Some(sidebar) = &mut self.sidebar {
+            sidebar.reveal(path);
+        }
         Ok(())
     }
 
@@ -2019,6 +2032,40 @@ mod tests {
         assert_eq!(app.viewer.path, _file.path());
         assert_eq!(app.viewer.scroll, 0);
         assert!(app.viewer.last_error.is_none(), "no startup noise");
+    }
+
+    /// Opening a note from anywhere but the tree (a link follow, search
+    /// hit, backlink, session restore) reveals it in the sidebar: the
+    /// ancestor folders expand and the row is selected.
+    #[test]
+    fn open_note_reveals_the_note_in_the_sidebar() {
+        let vault_dir = vault();
+        let (_file, mut app) = app(&vault_dir);
+        // The tree starts fully collapsed; the sidebar is visible.
+        assert!(!app
+            .sidebar
+            .as_ref()
+            .unwrap()
+            .expanded
+            .contains(&vault_dir.path().join("sub")));
+
+        app.open_note(&vault_dir.path().join("sub/b.md")).unwrap();
+        let sidebar = app.sidebar.as_ref().unwrap();
+        assert!(
+            sidebar.expanded.contains(&vault_dir.path().join("sub")),
+            "the note's folder expanded"
+        );
+        assert_eq!(
+            sidebar.selected,
+            Some(vault_dir.path().join("sub/b.md")),
+            "the opened note is selected"
+        );
+        assert_eq!(app.focus, Focus::Content, "no focus change");
+
+        // The reveal persists in the session snapshot (expansion set).
+        let state = app.session_state(vault_dir.path());
+        assert!(state.expanded.contains(&"sub".to_string()));
+        assert_eq!(state.selected.as_deref(), Some("sub/b.md"));
     }
 
     /// The session file lives outside the vault and is user-editable, so
