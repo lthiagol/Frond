@@ -1301,6 +1301,7 @@ impl App {
             KeyCode::Tab if plain => self.toggle_sidebar(),
             KeyCode::Char('t') if plain && self.sidebar.is_some() => self.toggle_sidebar_mode(),
             KeyCode::Char('m') if plain => self.toggle_mouse_capture(),
+            KeyCode::Char('f') if plain => self.viewer.toggle_metadata(),
             KeyCode::Char('>') if plain => self.widen_sidebar(),
             KeyCode::Char('<') if plain => self.narrow_sidebar(),
             KeyCode::Char('b') if plain => self.toggle_backlinks(),
@@ -1858,6 +1859,57 @@ mod tests {
         assert!(!app.mouse_capture, "m turns capture off");
         app.handle_key(key(KeyCode::Char('m')));
         assert!(app.mouse_capture, "m turns capture back on");
+    }
+
+    /// `f`: the frontmatter metadata block hides and comes back; the
+    /// toggle survives into later reparses (scroll/width changes).
+    #[test]
+    fn f_toggles_the_metadata_block() {
+        let file = TempFile::new(
+            "meta-toggle.md",
+            "---\ntitle: Demo\nstatus: active\n---\n# Head\n\nbody\n",
+        );
+        let viewer = Viewer::open(file.path(), 80).unwrap();
+        let mut app = App::new(viewer, None, None).unwrap();
+
+        fn first_line_text(app: &App) -> String {
+            app.viewer.lines[0]
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect()
+        }
+
+        fn has_text(app: &App, needle: &str) -> bool {
+            app.viewer
+                .lines
+                .iter()
+                .any(|l| l.spans.iter().any(|s| s.content.contains(needle)))
+        }
+
+        assert!(app.viewer.show_metadata, "shown by default");
+        assert!(has_text(&app, "Demo"), "the metadata block renders");
+        assert!(has_text(&app, "Head"), "the body renders too");
+
+        app.handle_key(key(KeyCode::Char('f')));
+        assert!(!app.viewer.show_metadata);
+        assert!(!has_text(&app, "Demo"), "the metadata block is gone");
+        assert_eq!(
+            first_line_text(&app).trim_start(),
+            "Head",
+            "the body starts at the top with the block hidden"
+        );
+
+        // Back on, and the toggle holds across an unrelated reparse.
+        app.handle_key(key(KeyCode::Char('f')));
+        assert!(app.viewer.show_metadata);
+        assert!(has_text(&app, "Demo"));
+        app.handle_key(key(KeyCode::Char('f')));
+        app.viewer.on_content_width(60);
+        assert!(
+            !has_text(&app, "Demo"),
+            "the hidden state survives a width reparse"
+        );
     }
 
     #[test]

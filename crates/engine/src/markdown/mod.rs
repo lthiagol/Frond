@@ -400,6 +400,36 @@ pub fn parse_markdown_with_width(
     file_mode: bool,
     code_line_numbers: bool,
 ) -> ParseResult {
+    parse_markdown_with_width_opts(
+        src,
+        ss,
+        theme,
+        render_width,
+        theme_colors,
+        file_mode,
+        code_line_numbers,
+        true,
+    )
+}
+
+/// [`parse_markdown_with_width`] with the frontmatter metadata block
+/// shown or hidden. Hidden, the body renders exactly as if the
+/// frontmatter block were absent — purely visual: the vault index still
+/// reads frontmatter for tags/status/wikilinks, and `source_line_map`
+/// keeps mapping body lines to their true on-disk lines (so search hits
+/// and link anchors stay accurate; only a hit *inside* the hidden block
+/// has no rendered row and degrades to the note top).
+#[allow(clippy::too_many_arguments)]
+pub fn parse_markdown_with_width_opts(
+    src: &str,
+    ss: &syntect::parsing::SyntaxSet,
+    theme: &syntect::highlighting::Theme,
+    render_width: usize,
+    theme_colors: &MarkdownTheme,
+    file_mode: bool,
+    code_line_numbers: bool,
+    show_metadata: bool,
+) -> ParseResult {
     let original_src = src;
     let (src, fm_pairs) = frontmatter::extract_frontmatter(src);
     let fm_byte_count = original_src.len() - src.len();
@@ -411,9 +441,11 @@ pub fn parse_markdown_with_width(
 
     if let Some(ref pairs) = fm_pairs {
         let vertical = frontmatter::is_vertical(pairs);
-        let tb = TableBuf::from_key_value_pairs(pairs, vertical);
-        tb.render(render_width, &mut lines, &mut Vec::new(), theme_colors);
-        state.mark_all_new(lines.len());
+        if show_metadata {
+            let tb = TableBuf::from_key_value_pairs(pairs, vertical);
+            tb.render(render_width, &mut lines, &mut Vec::new(), theme_colors);
+            state.mark_all_new(lines.len());
+        }
     }
     let mut toc: Vec<TocEntry> = Vec::new();
 

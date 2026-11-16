@@ -36,6 +36,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   row in the backlinks panel selects it and opens the note (focus moves
   to the content pane, like every other open path); clicking the panel's
   border rows or empty space keeps the previous focus-only behavior.
+- **`f` toggles the metadata block**: the note's frontmatter, which
+  renders as a key/value table at the top, can be hidden to read the
+  note itself (`f`, session toggle; the config `metadata` key sets the
+  startup default, status bar shows `metadata off` while hidden). Purely
+  visual — tags/status/backlinks come from the vault index either way.
 
 ### Changed
 - **Opening a note moves focus to the content pane**: `Enter` on a note (tree

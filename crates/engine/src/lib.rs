@@ -10,8 +10,8 @@ pub mod theme;
 pub(crate) use markdown::line_plain_text;
 
 pub use markdown::{
-    parse_markdown, parse_markdown_with_width, CodeBlockInfo, LinkId, LinkSpan, ParseResult,
-    TocEntry,
+    parse_markdown, parse_markdown_with_width, parse_markdown_with_width_opts, CodeBlockInfo,
+    LinkId, LinkSpan, ParseResult, TocEntry,
 };
 pub use theme::{
     default_markdown_theme, markdown_theme_by_preset, MarkdownTheme, MarkdownThemePreset,

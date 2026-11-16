@@ -969,6 +969,14 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             Style::new().fg(ui.status_watch_off_fg),
         ));
     }
+    // Same pattern for the metadata block: shown only while hidden.
+    if !app.viewer.show_metadata {
+        spans.push(Span::raw(" · "));
+        spans.push(Span::styled(
+            "metadata off",
+            Style::new().fg(ui.status_watch_off_fg),
+        ));
+    }
     // Git sync segment (SPEC): `✓` clean / `●` dirty, plus behind/ahead
     // arrows when the branch diverged from origin/main. Nothing at all
     // when the status is unavailable (no git, not a repository).
@@ -1088,6 +1096,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
     (
         "Content",
         &[
+            ("f", "show / hide the note's metadata block"),
             ("w (content)", "toggle watch mode"),
             ("v / 1-9", "switch table view (.base files)"),
         ],
