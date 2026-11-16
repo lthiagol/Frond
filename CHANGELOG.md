@@ -32,6 +32,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   quit with a note open (scrolled, folders expanded) and the next launch
   comes back exactly there; an explicit note argument wins over the
   restore; a corrupted session file falls back silently to the index.
+- **Backlink rows are clickable** (SPEC compliance): a click on a listed
+  row in the backlinks panel selects it and opens the note (focus moves
+  to the content pane, like every other open path); clicking the panel's
+  border rows or empty space keeps the previous focus-only behavior.
 
 ### Changed
 - **Opening a note moves focus to the content pane**: `Enter` on a note (tree
