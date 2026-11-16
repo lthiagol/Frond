@@ -85,6 +85,18 @@ improvements can be merged. Every intentional change is listed here.
    frontmatter offset, so scroll-to-source stays accurate). leaf's
    `parse_markdown_with_width` delegates with `true`, so the upstream API
    surface is unchanged and all existing call sites keep compiling.
+9a. **Metadata values are inline-parsed** (post-v1 loop 7, `tables.rs` +
+   `mod.rs`): the metadata block is built by
+   `TableBuf::from_key_value_pairs_inline`, which runs each *value* through
+   the same pulldown inline pipeline as body-table cells (keys stay plain
+   text). This matters for the app's wikilink preprocessing: frontmatter
+   values like `related:` arrive as `"[alias](vault://N/target)"` lists, and
+   without inline parsing they rendered as raw `[text](url)` syntax with the
+   links unclickable (the old call discarded the link-span sink via
+   `&mut Vec::new()`). Now the block's links register into the shared
+   `link_urls`/`link_spans` vectors (the block renders first, so its links
+   take the lowest ids) and the app's URL-exact-match mapping makes them
+   clickable like body links.
 
 ## Theme loading (the un-trim, app-side)
 

@@ -349,6 +349,45 @@ fn frontmatter_metadata_block_can_be_hidden() {
     );
 }
 
+/// Frontmatter values parse as inline markdown: a markdown link in a
+/// value — the shape the app's wikilink preprocessing gives `related:`
+/// entries (`"[alias](vault://N/target)"`) — renders as a real link
+/// (marker + label), never as raw `[text](url)` syntax, and registers
+/// into `link_urls`/`link_spans` so the app can make it clickable. The
+/// block renders before the body, so its links take the first ids.
+#[test]
+fn frontmatter_metadata_values_render_links() {
+    let (ss, theme) = test_assets();
+    let src = "---\nstatus: active\nrelated: \"[alpha](vault://0/alpha)\", \"[beta](vault://1/beta)\"\n---\n# Body\n";
+    let result =
+        parse_markdown_with_width_opts(src, &ss, &theme, 80, &test_md_theme(), false, true, true);
+    let rendered = rendered_non_empty_lines(&result.lines);
+    let related_row = rendered
+        .iter()
+        .find(|line| line.contains("alpha"))
+        .expect("related value row rendered");
+    assert!(
+        !related_row.contains("vault://"),
+        "no raw link syntax in the value cell: {related_row:?}"
+    );
+    assert!(
+        related_row.contains("alpha") && related_row.contains("beta"),
+        "both link labels render: {related_row:?}"
+    );
+    assert_eq!(
+        result.link_urls.first().map(String::as_str),
+        Some("vault://0/alpha")
+    );
+    assert_eq!(
+        result.link_urls.get(1).map(String::as_str),
+        Some("vault://1/beta")
+    );
+    assert!(
+        result.link_spans.iter().any(|s| s.link_id.0 == 0),
+        "the frontmatter link has a clickable span"
+    );
+}
+
 #[test]
 fn h2_headings_are_underlined_and_compact() {
     let (ss, theme) = test_assets();

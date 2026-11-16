@@ -1,5 +1,5 @@
 use crate::theme::MarkdownTheme;
-use pulldown_cmark::{Alignment, Event as MdEvent, Tag, TagEnd};
+use pulldown_cmark::{Alignment, Event as MdEvent, Options, Parser, Tag, TagEnd};
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
@@ -343,6 +343,96 @@ impl TableBuf {
                 .iter()
                 .map(|(_, v)| vec![CellFragment::Text(v.clone(), style, false, None)])
                 .collect();
+            Self {
+                alignments,
+                rows: vec![header_row, data_row],
+                header_count: 1,
+                current_row: vec![],
+                current_cell: vec![],
+                in_header: false,
+                inline_style: style,
+                html_style_buffer: None,
+                key_column: None,
+                fill_width: true,
+            }
+        }
+    }
+
+    /// [`Self::from_key_value_pairs`], but every value is parsed as
+    /// inline markdown so links inside values — the shape the app's
+    /// wikilink preprocessing produces (`[alias](vault://N/target)`) —
+    /// become real, clickable links instead of raw syntax. URLs register
+    /// into the caller's `link_urls` (the same vector the body parse
+    /// uses, so link ids stay globally consistent); the key column stays
+    /// plain text.
+    pub(crate) fn from_key_value_pairs_inline(
+        pairs: &[(String, String)],
+        vertical: bool,
+        link_urls: &mut Vec<String>,
+        theme: &MarkdownTheme,
+    ) -> Self {
+        // Parse options mirroring the main body parser (metadata block
+        // detection disabled — these values already had their block
+        // stripped).
+        let parser_options = Options::all()
+            - Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+            - Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS;
+        let mut inline_cell = |value: &str| -> Vec<CellFragment> {
+            let mut slot = Some(Self::new(Vec::new()));
+            for ev in Parser::new_ext(value, parser_options) {
+                if slot.is_none() {
+                    break;
+                }
+                // `lines`/`link_spans` stay empty: rendering (and the
+                // span recording that goes with it) happens later, in
+                // `render`, against the real output rows.
+                handle_table_event(
+                    &mut slot,
+                    &ev,
+                    &mut Vec::new(),
+                    0,
+                    link_urls,
+                    &mut Vec::new(),
+                    theme,
+                );
+            }
+            let mut tb = slot.unwrap_or_else(|| Self::new(Vec::new()));
+            tb.end_cell();
+            tb.current_row.pop().unwrap_or_default()
+        };
+
+        let style = CellInlineStyle::default();
+        if vertical {
+            let alignments = vec![Alignment::None; 2];
+            let rows = pairs
+                .iter()
+                .map(|(k, v)| {
+                    vec![
+                        vec![CellFragment::Text(k.clone(), style, false, None)],
+                        inline_cell(v),
+                    ]
+                })
+                .collect();
+            Self {
+                alignments,
+                rows,
+                header_count: 0,
+                current_row: vec![],
+                current_cell: vec![],
+                in_header: false,
+                inline_style: style,
+                html_style_buffer: None,
+                key_column: Some(0),
+                fill_width: true,
+            }
+        } else {
+            let alignments = vec![Alignment::None; pairs.len()];
+            let header_row: Vec<Vec<CellFragment>> = pairs
+                .iter()
+                .map(|(k, _)| vec![CellFragment::Text(k.clone(), style, false, None)])
+                .collect();
+            let data_row: Vec<Vec<CellFragment>> =
+                pairs.iter().map(|(_, v)| inline_cell(v)).collect();
             Self {
                 alignments,
                 rows: vec![header_row, data_row],
