@@ -1,4 +1,5 @@
-//! Sidebar folder tree: a collapsible listing of the vault's `.md` notes.
+//! Sidebar folder tree: a collapsible listing of the vault's `.md` notes
+//! and `.base` tables.
 //!
 //! The model is terminal-independent; rendering lives in `ui.rs`.
 
@@ -25,6 +26,8 @@ pub struct Node {
 pub enum NodeKind {
     Dir,
     Note,
+    /// A `.base` table file: opens the table view, not the note viewer.
+    Base,
 }
 
 /// A row of the sidebar as displayed: a node plus its indentation depth.
@@ -34,7 +37,7 @@ pub struct Row<'a> {
     pub depth: usize,
 }
 
-/// Collapsible tree of `.md` notes under a vault root.
+/// Collapsible tree of the vault's `.md` notes and `.base` tables.
 ///
 /// Expansion state lives in a `HashSet` of directory paths (not on the
 /// nodes), so a rescan — which rebuilds `nodes` from disk — automatically
@@ -159,13 +162,13 @@ impl Sidebar {
     }
 
     /// Reveal `path` in the tree: expand every ancestor folder and select
-    /// the note, scrolled into view. Called when a note is opened from
-    /// anywhere but the tree itself (link follow, search hit, backlink,
-    /// session restore), so the sidebar shows where the reader landed.
-    /// Paths that are not tree nodes (a `.base` table, a non-`.md` file,
-    /// or something outside the vault) still expand their ancestors below
-    /// the root, but the selection stays put — there is no row for them.
-    /// No focus change; the reader stays on the content pane.
+    /// the note or `.base` table, scrolled into view. Called when a file
+    /// is opened from anywhere but the tree itself (link follow, search
+    /// hit, backlink, session restore), so the sidebar shows where the
+    /// reader landed. Paths that are not tree nodes (a non-`.md`/`.base`
+    /// file, or something outside the vault) still expand their ancestors
+    /// below the root, but the selection stays put — there is no row for
+    /// them. No focus change; the reader stays on the content pane.
     pub fn reveal(&mut self, path: &Path) {
         // Non-normalized paths (`..` components) are lexically inside the
         // root but semantically outside: no reveal at all.
@@ -312,19 +315,20 @@ pub fn list_row_at(screen_row: u16, area: Rect, scroll: usize, rows_len: usize) 
 }
 
 /// Lists `dir`'s immediate entries as nodes; directories carry their
-/// subtree recursively. Folders first, then `.md` files, each group in
-/// case-insensitive name order. Hidden entries (`.obsidian`, `.git`,
-/// `.trash`, …) and non-markdown files are skipped.
+/// subtree recursively. Folders first, then files (`.md` notes and
+/// `.base` tables together), each group in case-insensitive name order.
+/// Hidden entries (`.obsidian`, `.git`, `.trash`, …) and other
+/// non-indexable files are skipped.
 ///
-/// Symlinks: file symlinks are followed (kept as notes if `.md`), but
-/// *directory* symlinks are skipped — a symlinked dir could loop back into
-/// the tree (stack overflow) or pull in a huge external subtree. As
+/// Symlinks: file symlinks are followed (kept as notes if `.md`/`.base`),
+/// but *directory* symlinks are skipped — a symlinked dir could loop back
+/// into the tree (stack overflow) or pull in a huge external subtree. As
 /// belt-and-braces the recursion is also depth-capped.
 const MAX_DEPTH: usize = 32;
 
 fn read_children(dir: &Path, depth: usize) -> io::Result<Vec<Node>> {
     let mut dirs: Vec<Node> = Vec::new();
-    let mut notes: Vec<Node> = Vec::new();
+    let mut files: Vec<Node> = Vec::new();
     for entry in fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
@@ -342,15 +346,21 @@ fn read_children(dir: &Path, depth: usize) -> io::Result<Vec<Node>> {
         if meta.file_type().is_symlink() {
             // Follow the link one level: a file target stays in the tree,
             // a directory target is skipped (cycle / outside-vault safety).
-            if !fs::metadata(&path)
-                .map(|m| m.is_dir())
-                .unwrap_or(true) // broken link: skip
-                && name.to_ascii_lowercase().ends_with(".md")
+            if !fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(true)
+            // broken link: skip
             {
-                notes.push(Node {
+                let lower = name.to_ascii_lowercase();
+                let kind = if lower.ends_with(".md") {
+                    NodeKind::Note
+                } else if lower.ends_with(".base") {
+                    NodeKind::Base
+                } else {
+                    continue;
+                };
+                files.push(Node {
                     name,
                     path,
-                    kind: NodeKind::Note,
+                    kind,
                     children: Vec::new(),
                 });
             }
@@ -367,18 +377,26 @@ fn read_children(dir: &Path, depth: usize) -> io::Result<Vec<Node>> {
                 kind: NodeKind::Dir,
                 children,
             });
-        } else if name.to_ascii_lowercase().ends_with(".md") {
-            notes.push(Node {
+        } else {
+            let lower = name.to_ascii_lowercase();
+            let kind = if lower.ends_with(".md") {
+                NodeKind::Note
+            } else if lower.ends_with(".base") {
+                NodeKind::Base
+            } else {
+                continue; // not an indexable file
+            };
+            files.push(Node {
                 name,
                 path,
-                kind: NodeKind::Note,
+                kind,
                 children: Vec::new(),
             });
         }
     }
     sort_by_name(&mut dirs);
-    sort_by_name(&mut notes);
-    dirs.extend(notes);
+    sort_by_name(&mut files);
+    dirs.extend(files);
     Ok(dirs)
 }
 
@@ -577,22 +595,73 @@ mod tests {
     }
 
     #[test]
-    fn reveal_non_note_and_outside_paths_expand_only() {
+    fn reveal_base_and_outside_paths() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
+        fs::write(vault.path().join("Archive").join("notes.base"), "").unwrap();
+        sb.rescan();
         sb.selected = Some(vault.path().join("alpha.md"));
 
-        // A non-`.md` path (e.g. a `.base` table): ancestors expand, the
-        // selection stays put (no tree row for it).
+        // A `.base` table now has a tree row: ancestors expand and the
+        // base row is selected like a note.
         sb.reveal(&vault.path().join("Archive").join("notes.base"));
         assert!(sb.expanded.contains(&vault.path().join("Archive")));
-        assert_eq!(sb.selected, Some(vault.path().join("alpha.md")));
+        assert_eq!(sb.selected, Some(vault.path().join("Archive/notes.base")));
 
         // Something outside the vault (a `..` escape) touches nothing.
+        sb.selected = Some(vault.path().join("alpha.md"));
         let outside = vault.path().join("..").join("elsewhere.md");
         sb.reveal(&outside);
         assert_eq!(sb.selected, Some(vault.path().join("alpha.md")));
         assert_eq!(sb.expanded.len(), 1, "no stray expansion (Archive only)");
+    }
+
+    #[test]
+    fn base_files_are_tree_rows_that_open_the_table() {
+        let vault = fixture();
+        fs::write(vault.path().join("tasks.base"), "").unwrap();
+        fs::write(vault.path().join("Archive").join("board.base"), "").unwrap();
+        let mut sb = Sidebar::new(vault.path()).unwrap();
+
+        // Files sort together case-insensitively: Archive, then its two
+        // children, then alpha.md, beta.md, tasks.base (expanded below).
+        sb.expanded.insert(vault.path().join("Archive"));
+        let rows: Vec<(&str, NodeKind)> = sb
+            .rows()
+            .iter()
+            .map(|r| (r.node.name.as_str(), r.node.kind))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("Archive", NodeKind::Dir),
+                ("board.base", NodeKind::Base),
+                ("old.md", NodeKind::Note),
+                ("alpha.md", NodeKind::Note),
+                ("beta.md", NodeKind::Note),
+                ("tasks.base", NodeKind::Base),
+            ]
+        );
+
+        // Enter on a base row reports the path (routed to the table view
+        // by `App::open_note`).
+        sb.selected = Some(vault.path().join("tasks.base"));
+        assert_eq!(
+            sb.activate(),
+            Some(vault.path().join("tasks.base")),
+            "base: returns path to open"
+        );
+        assert_eq!(
+            sb.click(sb.selection_index().unwrap()),
+            Some(vault.path().join("tasks.base")),
+            "click on a base row opens it too"
+        );
+        // `l` on a base row is a note-like activate, not a folder toggle.
+        assert_eq!(sb.selected_kind(), Some(NodeKind::Base));
+        assert_eq!(
+            sb.expand_or_activate(),
+            Some(vault.path().join("tasks.base"))
+        );
     }
 
     #[test]

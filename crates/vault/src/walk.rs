@@ -1,9 +1,11 @@
-//! Vault-root walker: lists every indexable `.md` note.
+//! Vault-root walker: lists every indexable file — `.md` notes and
+//! `.base` table definitions (the bases are path-only entries; the index
+//! never parses their content).
 //!
 //! Reuses the sidebar's hard-won lessons (`crates/app/src/sidebar.rs`):
 //! hidden entries (`.obsidian`, `.git`, …) are skipped, *directory*
 //! symlinks are skipped (cycle / outside-vault safety) while file
-//! symlinks pointing at `.md` files are kept, and recursion is
+//! symlinks pointing at `.md`/`.base` files are kept, and recursion is
 //! depth-capped as belt-and-braces.
 
 use std::fs;
@@ -20,13 +22,20 @@ pub struct WalkEntry {
     pub path: PathBuf,
 }
 
-/// Walks `root` depth-first collecting `.md` files, folders before files,
-/// case-insensitive order within each group. Fails only if `root` itself
-/// cannot be read.
+/// Walks `root` depth-first collecting `.md` and `.base` files, folders
+/// before files, case-insensitive order within each group. Fails only if
+/// `root` itself cannot be read.
 pub fn walk_vault(root: &Path) -> io::Result<Vec<WalkEntry>> {
     let mut out = Vec::new();
     walk_dir(root, 0, &mut out)?;
     Ok(out)
+}
+
+/// True when a file name is one the index cares about (`.md` or `.base`,
+/// case-insensitive).
+fn is_indexable_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".md") || lower.ends_with(".base")
 }
 
 fn walk_dir(dir: &Path, depth: usize, out: &mut Vec<WalkEntry>) -> io::Result<()> {
@@ -52,7 +61,7 @@ fn walk_dir(dir: &Path, depth: usize, out: &mut Vec<WalkEntry>) -> io::Result<()
             if !fs::metadata(&path)
                 .map(|m| m.is_dir())
                 .unwrap_or(true) // broken link: skip
-                && name.to_ascii_lowercase().ends_with(".md")
+                && is_indexable_name(&name)
             {
                 files.push(path);
             }
@@ -63,7 +72,7 @@ fn walk_dir(dir: &Path, depth: usize, out: &mut Vec<WalkEntry>) -> io::Result<()
                 continue; // pathological nesting: refuse to recurse further
             }
             dirs.push(path);
-        } else if name.to_ascii_lowercase().ends_with(".md") {
+        } else if is_indexable_name(&name) {
             files.push(path);
         }
     }
@@ -95,18 +104,27 @@ pub fn is_indexable(root: &Path, path: &Path) -> bool {
     is_md && path.strip_prefix(root).is_ok()
 }
 
+/// True when `path`'s file name is a `.base` table (case-insensitive).
+pub fn is_base_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.to_ascii_lowercase().ends_with(".base"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::TempDir;
 
     #[test]
-    fn walk_finds_md_only_skips_hidden_and_non_md() {
+    fn walk_finds_md_and_base_skips_hidden_and_other_files() {
         let dir = TempDir::new("vk-walk");
         fs::write(dir.path().join("alpha.md"), "a").unwrap();
+        fs::write(dir.path().join("tasks.base"), "b").unwrap();
         fs::write(dir.path().join("notes.txt"), "x").unwrap();
         fs::create_dir_all(dir.path().join("Archive")).unwrap();
         fs::write(dir.path().join("Archive").join("old.md"), "o").unwrap();
+        fs::write(dir.path().join("Archive").join("board.base"), "b").unwrap();
         fs::create_dir_all(dir.path().join(".obsidian")).unwrap();
 
         let paths = walk_vault(dir.path()).unwrap();
@@ -120,7 +138,15 @@ mod tests {
                     .into_owned()
             })
             .collect();
-        assert_eq!(names, vec!["Archive/old.md", "alpha.md"]);
+        assert_eq!(
+            names,
+            vec![
+                "Archive/board.base",
+                "Archive/old.md",
+                "alpha.md",
+                "tasks.base"
+            ]
+        );
     }
 
     #[test]

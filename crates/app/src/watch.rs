@@ -1,11 +1,12 @@
 //! Vault-wide change detection for the poll-based watcher.
 //!
 //! Every vault-wide poll walks the index's root (cheap: hidden entries and
-//! directory symlinks are skipped, `vault::walk_vault`), stats each `.md`
-//! file (mtime + size, same fingerprint as the single-file watcher) and
-//! feeds every added/modified/removed file into
-//! [`VaultIndex::reindex_one`]. The watcher itself holds no index state —
-//! the index owns the data, the watcher only decides *when* to refresh.
+//! directory symlinks are skipped, `vault::walk_vault` — it now lists
+//! `.base` files alongside `.md` notes), stats each file (mtime + size,
+//! same fingerprint as the single-file watcher) and feeds every
+//! added/modified/removed file into [`VaultIndex::reindex_one`]. The
+//! watcher itself holds no index state — the index owns the data, the
+//! watcher only decides *when* to refresh.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -21,15 +22,21 @@ pub struct VaultWatcher {
 }
 
 impl VaultWatcher {
-    /// Seeds the fingerprint map from the index's own note list (not a
-    /// second disk walk): a file created between `VaultIndex::build` and
-    /// this seed is then absent from `stamps`, so the first poll reports
-    /// it as an add instead of silently matching an equal stamp.
+    /// Seeds the fingerprint map from the index's own note and base lists
+    /// (not a second disk walk): a file created between
+    /// `VaultIndex::build` and this seed is then absent from `stamps`, so
+    /// the first poll reports it as an add instead of silently matching
+    /// an equal stamp.
     pub fn new(index: &VaultIndex) -> Self {
         let mut stamps = BTreeMap::new();
         for note in index.notes() {
             if let Ok(stamp) = FileStamp::of(&note.path) {
                 stamps.insert(note.path.clone(), stamp);
+            }
+        }
+        for base in index.bases() {
+            if let Ok(stamp) = FileStamp::of(base) {
+                stamps.insert(base.to_path_buf(), stamp);
             }
         }
         Self { stamps }
@@ -143,6 +150,37 @@ mod tests {
 
         // Quiet tick: no changes.
         assert!(watcher.poll(&mut index).is_empty());
+    }
+
+    #[test]
+    fn detects_base_add_and_remove() {
+        let dir = TempDir::new("watch-base");
+        write(&dir.path().join("a.md"), "a\n");
+        let mut index = VaultIndex::build(dir.path()).unwrap();
+        let mut watcher = VaultWatcher::new(&index);
+        assert!(watcher.poll(&mut index).is_empty());
+
+        // ADD: a new `.base` file is picked up (path-only in the index).
+        wait_mtime_tick();
+        let base = dir.path().join("tasks.base");
+        write(&base, "filters: []\n");
+        let changed = watcher.poll(&mut index);
+        assert_eq!(changed, vec![base.clone()]);
+        assert_eq!(index.bases().collect::<Vec<_>>(), vec![base.clone()]);
+
+        // MODIFY: content changes re-feed the path; the listing stays.
+        wait_mtime_tick();
+        write(&base, "filters:\n  and: []\n");
+        let changed = watcher.poll(&mut index);
+        assert_eq!(changed, vec![base.clone()]);
+        assert_eq!(index.bases().count(), 1);
+
+        // REMOVE: the base drops out.
+        wait_mtime_tick();
+        fs::remove_file(&base).unwrap();
+        let changed = watcher.poll(&mut index);
+        assert_eq!(changed, vec![base]);
+        assert!(index.bases().next().is_none());
     }
 
     #[test]
