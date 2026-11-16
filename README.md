@@ -10,13 +10,15 @@ main engine of this project (vendored into `crates/engine`).
 ## Features
 
 - Rendered markdown (leaf's engine, vendored): tables, lists, callouts, syntax highlighting, LaTeX, Mermaid
-- Collapsible folder-tree sidebar with status glyphs and changed-file markers, plus a tag view
+- Collapsible folder-tree sidebar (resizable with `<`/`>` or the config) with status glyphs and changed-file markers, plus a tag view
+- Click-to-open everywhere — sidebar rows, backlink rows, in-note links — with opened notes revealing in the tree and focus following the reader
 - Wikilink navigation: resolution per Obsidian rules, heading anchors, disambiguation popup, back/forward history with scroll restore
 - Backlinks panel; global vault search with jump-to-line
 - Git sync status (clean/dirty/ahead/behind) and per-note changed markers — read-only
 - `.base` table views (filters, sort, groupBy) with live refresh from the vault watcher
 - Guarded checkbox toggling — the single write feature (git-clean + unchanged-file guards, atomic write)
-- Themes (built-in presets + custom TOML themes), live config hot-reload, full mouse support
+- Session memory: the last open note with its scroll and the sidebar's mode/selection/folder expansion, saved per vault on quit and restored on the next start
+- Themes (built-in presets + custom TOML themes), live config hot-reload, full mouse support (toggleable capture for native text selection)
 
 ## Requirements
 
@@ -62,21 +64,28 @@ Options (all optional; flags override the config file):
 | `--vault <dir>` | Vault directory (wikilinks, tags, backlinks, search, sidebar) |
 | `--theme <name>` | Theme name (see Themes below) |
 | `--watch[=true\|false]` | Start with watch mode on or off (reload on file changes) |
+| `--mouse[=true\|false]` | Mouse capture on/off (off = native text selection; `m` toggles at runtime) |
+| `--config-show` | Print a commented default `config.toml` and exit |
+| `--help` / `--version` | Full usage / version |
 
-Running `frond --help` is not supported: an unknown option prints the usage
-line and exits with status 2.
+`frond --config-show > ~/.config/frond/config.toml` is the easiest way to
+bootstrap a configuration file.
 
 Press `?` inside the app for the full key list. The most used keys:
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Scroll / move selection |
+| `j` / `k`, ↑ / ↓ | Scroll / move selection |
+| `h` / `l`, ← / → | Focus sidebar / content (`l` expands a folder, `h` collapses) |
 | `Tab` | Show or hide the sidebar |
-| `h` / `l` | Focus sidebar / content |
+| `<` / `>` | Narrow / widen the sidebar |
+| `t` | Sidebar mode: tree ⇄ tags |
+| `f` | Show / hide the note's metadata block |
 | `Enter` | Open the focused link |
 | `Backspace` | Go back |
 | `s` | Search the vault |
 | `b` | Toggle backlinks |
+| `m` | Toggle mouse capture |
 | `Shift+T` | Cycle themes |
 | `q` | Quit |
 
@@ -103,16 +112,26 @@ cargo run -p app --bin frond -- --vault testvault
 ## Configuration
 
 Config file: `~/.config/frond/config.toml` (override the location with the
-`FROND_CONFIG` environment variable).
+`FROND_CONFIG` environment variable). Every key is optional; `frond
+--config-show` prints a fully commented template pinned to the real key
+vocabulary.
 
 ```toml
 theme = "ocean"                 # theme name
-vault = "/home/you/notes"       # default vault when --vault is not given (absolute path; no ~ expansion)
+vault = "~/notes"               # default vault when --vault is not given (~ is expanded)
 watch = true                    # reload on file changes
+mouse = true                    # mouse capture (off = native text selection)
+sidebar_width = 40              # sidebar columns, clamped 24-120
+metadata = true                 # render the note's frontmatter block (f toggles)
 ```
 
 Missing file means defaults. A malformed file prints a warning and falls back
 to defaults.
+
+frond also remembers where you were: the last open note with its scroll and
+the sidebar's state (mode, selection, folder expansion) are saved per vault on
+quit (`~/.local/state/frond/`, `FROND_SESSION` overrides the directory) and
+restored on the next start.
 
 ## Themes
 

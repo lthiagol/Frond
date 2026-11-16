@@ -78,6 +78,13 @@ improvements can be merged. Every intentional change is listed here.
    `has_syntax_theme` probe exists; an earlier draft of one was removed
    as dead API) — leaf's equivalent lives in its app layer
    (`theme::current_syntect_theme`).
+9. **`parse_markdown_with_width_opts`** (metadata toggle): same signature as
+   `parse_markdown_with_width` plus a trailing `show_metadata: bool` — when
+   false, the frontmatter key/value block is not rendered (the body renders
+   as if the frontmatter were absent; `source_line_map` keeps the
+   frontmatter offset, so scroll-to-source stays accurate). leaf's
+   `parse_markdown_with_width` delegates with `true`, so the upstream API
+   surface is unchanged and all existing call sites keep compiling.
 
 ## Theme loading (the un-trim, app-side)
 
