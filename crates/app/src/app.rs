@@ -603,14 +603,17 @@ impl App {
 
     /// Opens the target of a resolved wikilink, scrolling to its heading
     /// anchor when the link carried one (best-effort: unknown headings
-    /// leave the note at the top).
+    /// leave the note at the top). A `.base` target opens the table view
+    /// instead — bases have no headings, so the scroll is skipped.
     fn open_wikilink_target(&mut self, path: &Path, heading: Option<&str>) {
         if let Err(err) = self.open_note(path) {
             self.viewer.last_error = Some(format!("open failed: {err}"));
             return;
         }
         if let Some(heading) = heading {
-            self.viewer.scroll_to_heading(heading);
+            if self.base.is_none() {
+                self.viewer.scroll_to_heading(heading);
+            }
         }
     }
 
@@ -1763,7 +1766,8 @@ impl App {
                     Some(NodeKind::Dir) => {
                         sidebar.expand_or_activate();
                     }
-                    Some(NodeKind::Note) => self.focus = Focus::Content,
+                    // Notes and `.base` tables both hand focus to content.
+                    Some(NodeKind::Note) | Some(NodeKind::Base) => self.focus = Focus::Content,
                     None => {}
                 }
             }

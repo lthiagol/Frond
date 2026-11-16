@@ -1,13 +1,13 @@
 //! The vault index: notes, frontmatter, wikilinks, resolver, backlinks,
 //! tag index, and single-file incremental refresh.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::frontmatter::{parse_frontmatter_with_raw, split_frontmatter};
-use crate::walk::{is_indexable, walk_vault};
+use crate::walk::{is_base_path, is_indexable, walk_vault};
 use crate::wikilink::{extract_wikilinks, LinkRef};
 
 /// One raw-text match of a global vault search ([`VaultIndex::search`]).
@@ -108,10 +108,17 @@ pub enum Resolution {
 pub struct VaultIndex {
     root: PathBuf,
     notes: BTreeMap<PathBuf, NoteMeta>,
+    /// `.base` table files, path-only (never parsed here; the base view
+    /// reads them on demand). Exists so wikilink targets ending in
+    /// `.base` can resolve — see [`VaultIndex::resolve`].
+    bases: BTreeSet<PathBuf>,
     warnings: Vec<IndexWarning>,
     /// Lowercased note stem -> paths sharing it (len > 1 means
     /// ambiguous; resolution is case-insensitive).
     by_stem: BTreeMap<String, Vec<PathBuf>>,
+    /// Lowercased `.base` stem (name without the suffix) -> paths sharing
+    /// it, same ambiguity semantics as `by_stem`.
+    by_base_stem: BTreeMap<String, Vec<PathBuf>>,
     /// Note path -> notes linking to it. Built by resolving each link;
     /// ambiguous targets contribute to every candidate.
     backlinks: BTreeMap<PathBuf, Vec<PathBuf>>,
@@ -125,19 +132,26 @@ pub struct VaultIndex {
 }
 
 impl VaultIndex {
-    /// Walks `root` and indexes every `.md` note. Fails only if `root`
-    /// itself cannot be read; per-file problems become warnings.
+    /// Walks `root` and indexes every `.md` note; `.base` files are
+    /// collected path-only (never parsed). Fails only if `root` itself
+    /// cannot be read; per-file problems become warnings.
     pub fn build(root: &Path) -> io::Result<Self> {
         let mut index = Self {
             root: root.to_path_buf(),
             notes: BTreeMap::new(),
+            bases: BTreeSet::new(),
             warnings: Vec::new(),
             by_stem: BTreeMap::new(),
+            by_base_stem: BTreeMap::new(),
             backlinks: BTreeMap::new(),
             tags: BTreeMap::new(),
             raw_lines: BTreeMap::new(),
         };
         for entry in walk_vault(root)? {
+            if is_base_path(&entry.path) {
+                index.bases.insert(entry.path);
+                continue;
+            }
             match fs::read_to_string(&entry.path) {
                 Ok(source) => index.insert_note(&entry.path, &source),
                 Err(err) => index.warnings.push(IndexWarning {
@@ -158,6 +172,12 @@ impl VaultIndex {
     /// All indexed notes, in path order.
     pub fn notes(&self) -> impl Iterator<Item = &NoteMeta> {
         self.notes.values()
+    }
+
+    /// All known `.base` files, in path order (path-only entries; the
+    /// base view reads their content on demand).
+    pub fn bases(&self) -> impl Iterator<Item = &Path> {
+        self.bases.iter().map(|p| p.as_path())
     }
 
     /// Number of indexed notes.
@@ -286,13 +306,20 @@ impl VaultIndex {
 
     /// Resolves a wikilink target per the vault rule: bare filename
     /// first, path fallback. `target` may carry a trailing `.md` (it is
-    /// stripped). Path-style targets (`dir/name`) match against
-    /// root-relative note paths; matching is case-insensitive for both
+    /// stripped). A target ending in `.base` (case-insensitive) resolves
+    /// only against the vault's `.base` files — a bare stem without the
+    /// suffix never matches a base, matching Obsidian, where a plain
+    /// `[[name]]` cannot land on a base. Path-style targets
+    /// (`dir/name`) match against root-relative note paths; matching is
+    /// case-insensitive for both
     /// stems and paths, and a path target that no longer matches fully
     /// (e.g. after the note moved) falls back to Obsidian-style suffix
     /// matching: a unique suffix match resolves, several are ambiguous,
     /// and nothing is ever guessed.
     pub fn resolve(&self, target: &str) -> Resolution {
+        if ends_with_ci(target, ".base") {
+            return self.resolve_base(target);
+        }
         let target = target
             .strip_suffix(".md")
             .unwrap_or(target)
@@ -322,6 +349,52 @@ impl VaultIndex {
             };
         }
         match self.by_stem.get(&target.to_ascii_lowercase()) {
+            None => Resolution::NotFound,
+            Some(paths) if paths.len() == 1 => Resolution::Found(paths[0].clone()),
+            Some(paths) => Resolution::Ambiguous(paths.clone()),
+        }
+    }
+
+    /// Resolves an explicit `.base` target against the vault's base
+    /// files only: bare stem (`inventories.base`) via the basename map,
+    /// path-style (`dir/inventories.base`) against root-relative base
+    /// paths — both case-insensitive, both suffix-stripped on either
+    /// side. No suffix fallback (unlike notes): a moved base is simply
+    /// not found rather than guessed at.
+    fn resolve_base(&self, target: &str) -> Resolution {
+        let target = if ends_with_ci(target, ".base") {
+            &target[..target.len() - ".base".len()]
+        } else {
+            target
+        }
+        .trim()
+        .to_string();
+        if target.is_empty() {
+            return Resolution::NotFound;
+        }
+        if target.contains('/') {
+            let matches: Vec<PathBuf> = self
+                .bases
+                .iter()
+                .filter(|p| {
+                    let rel = p
+                        .strip_prefix(&self.root)
+                        .unwrap_or(p)
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    rel.strip_suffix(".base")
+                        .unwrap_or(&rel)
+                        .eq_ignore_ascii_case(&target)
+                })
+                .cloned()
+                .collect();
+            return match matches.len() {
+                0 => Resolution::NotFound,
+                1 => Resolution::Found(matches[0].clone()),
+                _ => Resolution::Ambiguous(matches),
+            };
+        }
+        match self.by_base_stem.get(&target.to_ascii_lowercase()) {
             None => Resolution::NotFound,
             Some(paths) if paths.len() == 1 => Resolution::Found(paths[0].clone()),
             Some(paths) => Resolution::Ambiguous(paths.clone()),
@@ -370,11 +443,27 @@ impl VaultIndex {
 
     /// Watch-driven refresh for one file: add, modify, or remove.
     ///
-    /// A missing/unreadable/non-markdown/outside-vault path removes the
-    /// note (if indexed) or does nothing; only an existing readable `.md`
-    /// under the root is (re)parsed. Derived maps are rebuilt afterwards,
-    /// so the index is never observed half-updated.
+    /// `.base` paths are tracked path-only: a present, in-vault base file
+    /// is listed, anything else (deleted, moved out) is dropped — the
+    /// index never parses base content. A missing/unreadable/non-markdown
+    /// note path removes the note (if indexed) or does nothing; only an
+    /// existing readable `.md` under the root is (re)parsed. Derived maps
+    /// are rebuilt afterwards, so the index is never observed
+    /// half-updated.
     pub fn reindex_one(&mut self, path: &Path) {
+        if is_base_path(path) {
+            let listed = path.exists() && path.strip_prefix(&self.root).is_ok();
+            let was_listed = self.bases.contains(path);
+            if listed {
+                self.bases.insert(path.to_path_buf());
+            } else {
+                self.bases.remove(path);
+            }
+            if listed != was_listed {
+                self.rebuild_derived();
+            }
+            return;
+        }
         if !is_indexable(&self.root, path) {
             self.remove_note(path);
             return;
@@ -468,7 +557,8 @@ impl VaultIndex {
         }
     }
 
-    /// Rebuilds the basename map, backlink map, and tag map from `notes`.
+    /// Rebuilds the basename map, backlink map, and tag map from `notes`
+    /// (plus the base-stem map from `bases`).
     fn rebuild_derived(&mut self) {
         self.by_stem.clear();
         for note in self.notes.values() {
@@ -476,6 +566,19 @@ impl VaultIndex {
                 .entry(note.stem.to_ascii_lowercase())
                 .or_default()
                 .push(note.path.clone());
+        }
+
+        self.by_base_stem.clear();
+        for base in &self.bases {
+            let stem = base
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            self.by_base_stem
+                .entry(stem)
+                .or_default()
+                .push(base.clone());
         }
 
         self.backlinks.clear();
@@ -796,6 +899,114 @@ mod tests {
         assert_eq!(ambiguous.len(), 1);
         assert_eq!(ambiguous[0].0, "dup");
         assert_eq!(ambiguous[0].1.len(), 2);
+    }
+
+    #[test]
+    fn resolve_base_targets_explicit_suffix_only() {
+        let vault = TempDir::new("vk-resolve-base");
+        write(&vault.path().join("inventories.base"), "filters: []\n");
+        write(&vault.path().join("a/board.base"), "filters: []\n");
+        // A note whose stem collides with a base's stem: bare `[[board]]`
+        // must still resolve to the note, never the base.
+        write(&vault.path().join("board.md"), "x\n");
+
+        let index = VaultIndex::build(vault.path()).unwrap();
+        // Bases are path-only: not counted as notes, never parsed.
+        assert_eq!(index.len(), 1);
+        assert_eq!(
+            index.bases().collect::<Vec<_>>(),
+            vec![
+                vault.path().join("a/board.base"),
+                vault.path().join("inventories.base")
+            ]
+        );
+
+        // Bare stem with the explicit `.base` suffix (case-insensitive).
+        assert_eq!(
+            index.resolve("inventories.base"),
+            Resolution::Found(vault.path().join("inventories.base"))
+        );
+        assert_eq!(
+            index.resolve("Inventories.BASE"),
+            Resolution::Found(vault.path().join("inventories.base"))
+        );
+        // Path-style base target.
+        assert_eq!(
+            index.resolve("a/board.base"),
+            Resolution::Found(vault.path().join("a/board.base"))
+        );
+        // Bare stem without the suffix never lands on a base.
+        assert_eq!(
+            index.resolve("board"),
+            Resolution::Found(vault.path().join("board.md"))
+        );
+        assert_eq!(index.resolve("inventories"), Resolution::NotFound);
+        assert_eq!(index.resolve("no/such.base"), Resolution::NotFound);
+
+        // Ambiguous bare base stems surface as ambiguous, not guessed.
+        write(&vault.path().join("b/dup.base"), "");
+        write(&vault.path().join("c/dup.base"), "");
+        let index = VaultIndex::build(vault.path()).unwrap();
+        let mut candidates = match index.resolve("dup.base") {
+            Resolution::Ambiguous(c) => c,
+            other => panic!("expected ambiguity, got {other:?}"),
+        };
+        candidates.sort();
+        assert_eq!(
+            candidates,
+            vec![
+                vault.path().join("b/dup.base"),
+                vault.path().join("c/dup.base")
+            ]
+        );
+    }
+
+    #[test]
+    fn reindex_one_tracks_base_add_and_remove() {
+        let vault = TempDir::new("vk-reindex-base");
+        write(&vault.path().join("a.md"), "---\nstatus: active\n---\na\n");
+        let mut index = VaultIndex::build(vault.path()).unwrap();
+        assert!(index.bases().next().is_none());
+
+        // ADD: a new base file appears (watch path calls reindex_one).
+        let base = vault.path().join("tasks.base");
+        write(&base, "filters: []\n");
+        index.reindex_one(&base);
+        assert_eq!(index.bases().collect::<Vec<_>>(), vec![base.clone()]);
+        assert_eq!(index.len(), 1, "a base is not a note");
+
+        // MODIFY: content change keeps the listing, adds no warnings.
+        write(&base, "filters:\n  and: []\n");
+        index.reindex_one(&base);
+        assert_eq!(index.bases().count(), 1);
+        assert!(index.warnings().is_empty());
+
+        // REMOVE: the base drops out of the resolver.
+        std::fs::remove_file(&base).unwrap();
+        index.reindex_one(&base);
+        assert!(index.bases().next().is_none());
+
+        // A renamed-away base (path now `.md`) leaves the base set.
+        write(&base, "filters: []\n");
+        index.reindex_one(&base);
+        assert_eq!(index.bases().count(), 1);
+        index.reindex_one(&vault.path().join("tasks.md")); // not present on disk
+        assert_eq!(index.bases().count(), 1, "md path never touches bases");
+    }
+
+    #[test]
+    fn base_wikilinks_register_backlinks() {
+        let vault = TempDir::new("vk-base-backlinks");
+        write(&vault.path().join("tasks.base"), "filters: []\n");
+        write(
+            &vault.path().join("dash.md"),
+            "Open [[tasks.base]] for the table.\n",
+        );
+        let index = VaultIndex::build(vault.path()).unwrap();
+        assert_eq!(
+            index.backlinks_to(&vault.path().join("tasks.base")),
+            vec![vault.path().join("dash.md")]
+        );
     }
 
     #[test]

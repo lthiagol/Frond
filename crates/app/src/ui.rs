@@ -430,7 +430,8 @@ fn sidebar_line(
     let (arrow, arrow_width) = match row.node.kind {
         NodeKind::Dir if expanded => ("▾ ", 2),
         NodeKind::Dir => ("▸ ", 2),
-        NodeKind::Note => ("", 0),
+        // Notes and `.base` tables carry no arrow.
+        NodeKind::Note | NodeKind::Base => ("", 0),
     };
     let (glyph_text, glyph_width, dimmed, glyph_style) = match glyph {
         Some((glyph, style)) => (
