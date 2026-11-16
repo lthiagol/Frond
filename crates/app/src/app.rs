@@ -736,8 +736,10 @@ impl App {
     /// note or base-table content → `Content`, the backlinks panel →
     /// `Backlinks`. The pane focus is assigned **after** the click's
     /// action runs, with one exception: a click that *opens a note or
-    /// base table from the sidebar* hands focus to `Content` (the reader
-    /// context moves with the open; folder toggles keep `Sidebar`). The
+    /// base table* (a sidebar note row, or a backlink row) hands focus to
+    /// `Content` (the reader context moves with the open; folder toggles
+    /// keep `Sidebar`, a backlink click on empty space keeps
+    /// `Backlinks`). The
     /// clicked-pane-wins rule otherwise holds: an action that does not
     /// open anything (folder toggle, checkbox) cannot leave a different
     /// pane focused. Item-level focus (the focused link/checkbox used by
@@ -784,6 +786,18 @@ impl App {
         if let Some(area) = self.backlinks_area {
             if point_in_rect(col, row, area) {
                 self.focus = Focus::Backlinks;
+                // A click on a listed row selects it and opens it (SPEC:
+                // "click/Enter opens"); the row mapping mirrors the
+                // sidebar's (border rows and empty space are focus-only).
+                if let Some(index) = crate::sidebar::list_row_at(
+                    row,
+                    area,
+                    self.backlink_scroll,
+                    self.backlinks.len(),
+                ) {
+                    self.backlink_sel = index;
+                    self.open_from_backlinks();
+                }
                 return;
             }
         }
@@ -2765,24 +2779,84 @@ mod tests {
         );
     }
 
+    /// SPEC: "click/Enter opens" a backlink. A click on a listed row
+    /// selects it and opens it (focus moves to the content pane); a click
+    /// on the panel's border rows keeps the focus-only behavior.
     #[test]
-    fn click_on_visible_backlink_row_still_maps_with_bar_present() {
+    fn click_on_visible_backlink_row_opens_it_with_bar_present() {
         let vault_dir = vault();
         let mut app = overflowing_backlinks_app(&vault_dir);
         let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
         term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
         let hit = app.backlinks_area.expect("panel drawn");
-        // Text columns (left of the bar) on the first and last visible rows
-        // still route to the panel.
-        for row in [hit.y + 1, hit.bottom() - 2] {
-            app.focus = Focus::Content;
-            app.handle_click(hit.x + 1, row);
-            assert_eq!(app.focus, Focus::Backlinks, "row {row} maps to the panel");
-        }
-        // The panel's own border rows keep routing to the panel too.
+        // First visible row (inner row 1 = bl00): click opens it.
+        app.handle_click(hit.x + 1, hit.y + 1);
+        assert_eq!(app.viewer.path, vault_dir.path().join("bl00.md"));
+        assert_eq!(
+            app.focus,
+            Focus::Content,
+            "opening a backlink moves focus to the content pane"
+        );
+
+        // Fresh panel: the last visible row (viewport 5 → bl04) opens too.
+        let mut app = overflowing_backlinks_app(&vault_dir);
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let hit = app.backlinks_area.expect("panel drawn");
+        app.handle_click(hit.x + 1, hit.bottom() - 2);
+        assert_eq!(app.viewer.path, vault_dir.path().join("bl04.md"));
+
+        // The panel's own border rows keep the focus-only behavior.
+        let mut app = overflowing_backlinks_app(&vault_dir);
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let hit = app.backlinks_area.expect("panel drawn");
         app.focus = Focus::Content;
         app.handle_click(hit.x + 1, hit.y);
         assert_eq!(app.focus, Focus::Backlinks, "title border still routes");
+        assert_eq!(app.viewer.path, vault_dir.path().join("a.md"), "no open");
+    }
+
+    /// Clicking below the last listed row (empty space in the panel)
+    /// focuses the panel without opening anything.
+    #[test]
+    fn click_on_backlinks_empty_space_is_focus_only() {
+        let vault_dir = vault();
+        // Only two backlinks: the 5-row panel has empty space below them.
+        for name in ["bl-a.md", "bl-b.md"] {
+            std::fs::write(vault_dir.path().join(name), "[[a]]\n").unwrap();
+        }
+        let (_f, mut app) = app(&vault_dir);
+        app.sidebar_visible = false;
+        app.open_note(&vault_dir.path().join("a.md")).unwrap();
+        app.backlinks_open = true;
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let hit = app.backlinks_area.expect("panel drawn");
+        // Inner rows 3..5 are below the two listed rows.
+        app.handle_click(hit.x + 1, hit.y + 4);
+        assert_eq!(app.focus, Focus::Backlinks, "empty space focuses the panel");
+        assert_eq!(app.viewer.path, vault_dir.path().join("a.md"), "no open");
+        assert_eq!(app.backlink_sel, 0, "selection untouched");
+    }
+
+    /// The row mapping goes through the panel's scroll offset: with
+    /// `backlink_scroll = 2`, the first inner row is the third entry.
+    #[test]
+    fn click_on_backlinks_row_maps_through_scroll() {
+        let vault_dir = vault();
+        let mut app = overflowing_backlinks_app(&vault_dir);
+        // Selection inside the scrolled window (the draw keeps the
+        // selection visible, so the scroll survives only with sel >= 2).
+        app.backlink_sel = 2;
+        app.backlink_scroll = 2;
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+        let hit = app.backlinks_area.expect("panel drawn");
+        app.handle_click(hit.x + 1, hit.y + 1);
+        assert_eq!(
+            app.viewer.path,
+            vault_dir.path().join("bl02.md"),
+            "scroll offset shifts which row the click opens"
+        );
     }
 
     #[test]
