@@ -438,12 +438,26 @@ pub fn parse_markdown_with_width_opts(
 
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut state = LineMapState::new();
+    // Link sinks are declared up front: the frontmatter metadata block
+    // registers its links into the same vectors the body parse uses, so
+    // link ids stay globally consistent.
+    let mut link_spans: Vec<LinkSpan> = Vec::new();
+    let mut link_urls: Vec<String> = Vec::new();
 
     if let Some(ref pairs) = fm_pairs {
         let vertical = frontmatter::is_vertical(pairs);
         if show_metadata {
-            let tb = TableBuf::from_key_value_pairs(pairs, vertical);
-            tb.render(render_width, &mut lines, &mut Vec::new(), theme_colors);
+            // Values parse as inline markdown: preprocessed wikilinks
+            // (`[alias](vault://N/target)`) inside frontmatter values
+            // (e.g. `related:`) render as real, clickable links instead
+            // of raw syntax.
+            let tb = TableBuf::from_key_value_pairs_inline(
+                pairs,
+                vertical,
+                &mut link_urls,
+                theme_colors,
+            );
+            tb.render(render_width, &mut lines, &mut link_spans, theme_colors);
             state.mark_all_new(lines.len());
         }
     }
@@ -451,8 +465,6 @@ pub fn parse_markdown_with_width_opts(
 
     let mut spans: Vec<LinkedSpan> = Vec::new();
     let mut in_heading: Option<u8> = None;
-    let mut link_spans: Vec<LinkSpan> = Vec::new();
-    let mut link_urls: Vec<String> = Vec::new();
     let mut in_code = false;
     let mut code_lang = String::new();
     let mut code_buf = String::new();
