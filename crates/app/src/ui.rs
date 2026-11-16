@@ -1079,7 +1079,10 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
             ("PgDn/PgUp", "half page · g/G, Home/End top/bottom"),
             ("mouse wheel", "scroll pane under cursor / focused"),
             ("Tab", "show / hide sidebar"),
-            ("h / l", "focus sidebar / content"),
+            (
+                "h / l, ← →",
+                "focus sidebar / content (l expands, h collapses)",
+            ),
             ("b", "toggle backlinks panel"),
             ("s", "global search (Enter opens hit line)"),
             ("Backspace / Ctrl+O", "back / forward (scroll restored)"),

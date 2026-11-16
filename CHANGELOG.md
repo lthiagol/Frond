@@ -57,6 +57,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   the sidebar focused; a failed open (error in the status bar) also keeps the
   pane that initiated the open. A wheel with the cursor over the sidebar
   column still scrolls the sidebar, regardless of focus.
+- **←/→ join `h`/`l`**: the arrows now do exactly what the vim keys do —
+  focus sidebar/content, expand/collapse a folder — completing the
+  arrow set (↑/↓ scrolled and selected already, Home/End jumped).
 - **Help popup is always a single column**: the multi-column packing
   (up to 3 side-by-side groups on wide terminals) is gone; the five groups
   render as one packed column with the scrollbar handling tall bodies, and

@@ -99,7 +99,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
 | `<` / `>` | Narrow / widen the sidebar (2-column steps, clamped) |
-| `h` / `l` | Focus sidebar / content (`l` expands a folder, `h` collapses) |
+| `h` / `l` (or ← / →) | Focus sidebar / content (`l` expands a folder, `h` collapses) |
 | `x` / `X` | Focus next/previous link **or checkbox** (document order) |
 | `f` | Show / hide the note's frontmatter metadata block |
 | `m` | Toggle mouse capture (off = the terminal selects text natively) |

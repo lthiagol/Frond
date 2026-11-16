@@ -1344,8 +1344,8 @@ impl App {
                     self.viewer.last_error = Some(format!("forward failed: {err}"));
                 }
             }
-            KeyCode::Char('h') if plain => self.key_left(),
-            KeyCode::Char('l') if plain => self.key_right(),
+            KeyCode::Char('h') | KeyCode::Left if plain => self.key_left(),
+            KeyCode::Char('l') | KeyCode::Right if plain => self.key_right(),
             KeyCode::Char('j') | KeyCode::Down if plain => match self.focus {
                 Focus::Sidebar => self.sidebar_move(1),
                 Focus::Backlinks => self.backlink_move(1),
@@ -2150,6 +2150,28 @@ mod tests {
         app.handle_key(key(KeyCode::Char('j')));
         app.handle_key(key(KeyCode::Char('l')));
         assert_eq!(app.focus, Focus::Content);
+
+        // The arrows map 1:1 onto h/l (focus and sidebar fold semantics).
+        app.handle_key(key(KeyCode::Left));
+        assert_eq!(app.focus, Focus::Sidebar);
+        app.handle_key(key(KeyCode::Right));
+        assert_eq!(app.focus, Focus::Content);
+
+        // Left on a top-level note: only the focus moved back (the first
+        // press); a second Left is a no-op — the note's parent IS the
+        // vault root, so there is nothing to collapse into.
+        app.handle_key(key(KeyCode::Left));
+        assert_eq!(app.focus, Focus::Sidebar);
+        assert_eq!(
+            app.sidebar.as_ref().unwrap().selected,
+            Some(vault_dir.path().join("a.md"))
+        );
+        app.handle_key(key(KeyCode::Left));
+        assert_eq!(
+            app.sidebar.as_ref().unwrap().selected,
+            Some(vault_dir.path().join("a.md")),
+            "top-level note: nothing to collapse"
+        );
     }
 
     #[test]
