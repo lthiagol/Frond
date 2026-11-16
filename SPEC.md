@@ -67,13 +67,19 @@ Unresolved links render dimmed/strikethrough, non-clickable.
 └────────────────────────────────────────────────────────┘
 ```
 
-- Sidebar (~30%): mode toggled with `t` (tree ⇄ tags). Tree: collapsible folders, truncation
+- Sidebar (~30%, overridable with `<`/`>` or the config `sidebar_width`
+  key, clamped 24–120 columns): mode toggled with `t` (tree ⇄ tags). Tree: collapsible folders, truncation
   with full path on focus. Notes show status glyphs from frontmatter `status:`
   (single mapping table in `crates/app/src/ui.rs`): `●` complete/resolved/active,
   `◐` in-progress/monitoring, `○` pending/planned, `◌` draft, `◉` blocked,
   `×` dimmed for archived/superseded; unknown statuses show no glyph.
   Files changed since last sync get a `*` marker.
 - Optional backlinks panel toggled with `b` (lists "N notes link here", click/Enter opens).
+- Session memory (XDG state dir, one file per vault): the last open note
+  with its scroll, plus the sidebar's mode, selection and folder expansion,
+  are saved on clean quit and restored on the next start (an explicit note
+  argument wins over the restore). `frond --config-show` prints a
+  commented default config file; `--help`/`--version` print usage/version.
 
 ## Keybindings (v1)
 
@@ -89,11 +95,13 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | PgUp / PgDn | Half page |
 | `g` / `G`, Home / End | Top / bottom |
 | Mouse wheel | Scroll the pane under the cursor / the focused pane |
-| Click (sidebar / content / backlinks) | Moves keyboard focus to the clicked pane, then acts on the click |
+| Click (sidebar / content / backlinks) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
+| `<` / `>` | Narrow / widen the sidebar (2-column steps, clamped) |
 | `h` / `l` | Focus sidebar / content (`l` expands a folder, `h` collapses) |
 | `x` / `X` | Focus next/previous link **or checkbox** (document order) |
+| `m` | Toggle mouse capture (off = the terminal selects text natively) |
 | `Enter` / click | Open focused link; Enter/click on a checkbox toggles it |
 | `Backspace` / `Ctrl+O` | Back / forward in the navigation stack (scroll restored) |
 | `b` | Toggle backlinks panel |
@@ -139,9 +147,12 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   (never silently). An unknown theme warns and falls back to the
   default; a custom theme's unknown `syntax` name falls back to the default
   syntect theme with a warning.
-- **Config `~/.config/frond/config.toml`:** `theme`, `vault`, `watch` (bool).
-  Read at startup; `--vault`/`--theme`/`--watch` override. Missing file =
+- **Config `~/.config/frond/config.toml`:** `theme`, `vault`, `watch`
+  (bool), `mouse` (bool, default on; off = native text selection),
+  `sidebar_width` (columns, clamped 24–120). Read at startup;
+  `--vault`/`--theme`/`--watch`/`--mouse` override. Missing file =
   defaults; malformed file = warning + defaults (never a crash).
+  `frond --config-show` prints a commented template of every key.
 - **Live:** `Shift+T` cycles presets, built-ins, and discovered custom
   themes with an instant re-render (session-only, never persists). The
   config file's mtime is polled on the 1 s watcher tick; a changed `theme`

@@ -66,9 +66,10 @@ if pid == 0:
     # child must not inherit a color-stripping environment.
     os.environ.pop("NO_COLOR", None)
     # Theme fixture injection (tests/smokes only): config path + theme dir
-    # redirected into /tmp.
+    # redirected into /tmp. The quit-time session save is redirected too.
     os.environ["FROND_CONFIG"] = CONFIG_FILE
     os.environ["FROND_THEMES"] = THEME_DIR
+    os.environ["FROND_SESSION"] = "/tmp/frond-m2-session"
     fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     os.execv(APP, [APP, "--vault", VAULT, f"{VAULT}/index.md"])
 
@@ -169,7 +170,8 @@ check(
 check(LONG in status_line(), "status bar shows opened note path")
 
 # --- history: back / forward ---------------------------------------------
-send("l")  # on a note: focus content
+# (focus is already on the content pane: Enter on a note moves it)
+send("l")  # no-op from the content pane
 pump(0.3)
 send("G")  # bottom of the nested note
 pump(0.4)
@@ -242,15 +244,18 @@ pump_until(lambda: "alpha body" in body_text())
 check("Alpha" in body_text() and "alpha body" in body_text(), "click on a note row opens it")
 check("alpha.md" in status_line(), "status bar reflects the clicked note")
 
-send("j")  # selection moves (focus must still be the sidebar)
+# Opening a note moves focus to the content pane: j scrolls the note (the
+# top heading scrolls off), not the sidebar selection.
+send("j")
 pump(0.3)
 check(
-    "beta.md" in status_line() and "alpha body" in body_text(),
-    "click keeps keyboard focus in the sidebar (j moved the selection, not the content)",
+    "alpha.md" in status_line() and "Alpha" not in body_text(),
+    "click opens the note focused on content (j scrolled the note)",
 )
 
-send("l")  # on a note: focus the content pane
+send("g")  # back to the top of alpha.md
 pump(0.3)
+check("Alpha" in body_text(), "g returns to the top of the note")
 wheel(True, 5, 10)  # wheel down over the sidebar column
 pump(0.3)
 check("Alpha" in body_text(), "wheel over the sidebar does not scroll the content")

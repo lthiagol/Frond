@@ -11,6 +11,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   vault-relative path when the name is shared with another note. Clicking
   it copies the vault-relative path to the clipboard (OSC 52).
 - **Keyboard hints** on the status bar's right edge when there is room.
+- **Mouse capture toggle**: `m` turns mouse capture off/on at runtime —
+  off, the terminal keeps the mouse for native text selection/copy (the
+  status bar shows `mouse off`); the config `mouse` key (default `true`)
+  and the `--mouse[=true|false]` flag set the startup default.
+- **Sidebar width override**: `<`/`>` narrow/widen the sidebar in 2-column
+  steps (clamped 24–120); the config `sidebar_width` key sets the startup
+  width. Content re-parses on every change as with a terminal resize.
+- **Session memory**: the last open note with its scroll, plus the
+  sidebar's mode, selection and folder expansion, are saved on clean quit
+  to `~/.local/state/frond/session-<hash>.toml` (one file per vault) and
+  restored on the next start; an explicit note argument wins over the
+  restore. `FROND_SESSION` redirects the directory (tests/smokes).
+- **`--config-show`**: prints a fully commented default `config.toml`
+  (pinned to the real key vocabulary by a drift test), so a starter config
+  is `frond --config-show > ~/.config/frond/config.toml`. Also added
+  `--help` (full usage) and `--version`.
+
+### Changed
+- **Opening a note moves focus to the content pane**: `Enter` on a note (tree
+  or tag mode) and a click on a note row now hand the keyboard focus to the
+  content, so the next `j`/`k`/PgDn/wheel scrolls the note just opened instead
+  of the sidebar the selection came from (`l` on a note already did). The same
+  applies to Enter on a backlink and on a search hit. Folder/tag toggles keep
+  the sidebar focused; a failed open (error in the status bar) also keeps the
+  pane that initiated the open. A wheel with the cursor over the sidebar
+  column still scrolls the sidebar, regardless of focus.
+- **Help popup is always a single column**: the multi-column packing
+  (up to 3 side-by-side groups on wide terminals) is gone; the five groups
+  render as one packed column with the scrollbar handling tall bodies, and
+  the footer advertises `scroll …` only while the body actually overflows.
+  Simpler, predictable layout at every terminal size.
 
 ## [0.4.0] — 2026-11-11
 

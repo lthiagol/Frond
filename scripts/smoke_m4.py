@@ -66,6 +66,8 @@ git("commit", "-q", "-m", "initial")
 pid, fd = pty.fork()
 if pid == 0:
     os.environ["TERM"] = "xterm-256color"
+    # The quit-time session save must not touch the real ~/.local/state.
+    os.environ["FROND_SESSION"] = "/tmp/frond-m4-session"
     # NO_COLOR would strip every SGR color; the mouse-flow checks compare
     # cell backgrounds, so the child must emit colors.
     os.environ.pop("NO_COLOR", None)

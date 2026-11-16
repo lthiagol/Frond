@@ -1,13 +1,13 @@
 //! `~/.config/frond/config.toml`: persistent settings read at startup.
 //!
-//! Keys: `theme` (string), `vault` (path), `watch` (bool). Missing file =
-//! defaults; malformed file = warning + defaults (never a crash). Unknown
-//! keys are ignored but reported (never silently). The `FROND_CONFIG` env
-//! var overrides the path (tests and smokes only — they must never write
-//! to the real `~/.config`).
+//! Keys: `theme` (string), `vault` (path), `watch` (bool), `mouse` (bool),
+//! `sidebar_width` (columns). Missing file = defaults; malformed file =
+//! warning + defaults (never a crash). Unknown keys are ignored but
+//! reported (never silently). The `FROND_CONFIG` env var overrides the path
+//! (tests and smokes only — they must never write to the real `~/.config`).
 //!
-//! Precedence with the CLI: `--vault`/`--theme`/`--watch` flags override
-//! the config values (see `main.rs`).
+//! Precedence with the CLI: `--vault`/`--theme`/`--watch`/`--mouse` flags
+//! override the config values (see `main.rs`).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -22,6 +22,10 @@ pub struct Config {
     pub theme: Option<String>,
     pub vault: Option<PathBuf>,
     pub watch: Option<bool>,
+    /// Mouse capture on/off (off = native terminal text selection).
+    pub mouse: Option<bool>,
+    /// Sidebar width override in terminal columns (clamped 24–120).
+    pub sidebar_width: Option<u16>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -30,6 +34,8 @@ struct ConfigRaw {
     theme: Option<String>,
     vault: Option<PathBuf>,
     watch: Option<bool>,
+    mouse: Option<bool>,
+    sidebar_width: Option<u16>,
     /// Keys outside our vocabulary — captured so they can be reported.
     #[serde(flatten)]
     unknown: BTreeMap<String, toml::Value>,
@@ -50,6 +56,41 @@ pub fn config_path() -> Option<PathBuf> {
                 .join("config.toml")
         })
 }
+
+/// `frond --config-show`: a fully commented default config file, printed
+/// to stdout so it can be redirected to `~/.config/frond/config.toml`.
+/// Every key is commented out — uncommenting a line activates it; missing
+/// keys fall back to the defaults noted in the comments. The drift test
+/// below pins this text to the loader's real key vocabulary.
+pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config/frond/config.toml
+#
+# Every key below is commented out: uncomment a line to activate it.
+# Missing keys fall back to the defaults noted in the comments. CLI flags
+# (--vault, --theme, --watch, --mouse) override this file. The file is
+# re-read live for the `theme` key only.
+
+# Theme by name: 14 built-ins (catppuccin-latte, catppuccin-frappe,
+# catppuccin-macchiato, catppuccin-mocha, dracula, dracula-alucard,
+# gruvbox, nord, rose-pine, rose-pine-dawn, rose-pine-moon,
+# tokyonight-day, tokyonight-night, tokyonight-storm) or custom theme
+# files in ~/.config/frond/themes/. Default: the base preset.
+# theme = "catppuccin-macchiato"
+
+# Vault directory the sidebar indexes. Default: the current directory.
+# vault = "~/notes"
+
+# Re-render live on vault changes (watcher). Default: true.
+# watch = true
+
+# Sidebar width in terminal columns, clamped 24-120. Default: 30% of the
+# terminal width, clamped 24-60.
+# sidebar_width = 40
+
+# Capture the mouse for in-app clicks and wheel scrolling. Off = the
+# terminal keeps the mouse (native text selection/copy); `m` toggles at
+# runtime. Default: true.
+# mouse = true
+"#;
 
 /// Loads the config from `path`. Returns the config plus warnings:
 /// a missing file is silently default (that is the normal first-run
@@ -85,6 +126,8 @@ fn load_status(path: &Path) -> (Config, Vec<String>, bool) {
                     theme: raw.theme,
                     vault: raw.vault,
                     watch: raw.watch,
+                    mouse: raw.mouse,
+                    sidebar_width: raw.sidebar_width,
                 },
                 warnings,
                 false,
@@ -224,7 +267,7 @@ mod tests {
         let dir = TempDir::new("cfg-values");
         std::fs::write(
             dir.path().join("config.toml"),
-            "theme = \"dracula\"\nvault = \"/tmp/vault\"\nwatch = false\n",
+            "theme = \"dracula\"\nvault = \"/tmp/vault\"\nwatch = false\nmouse = false\n",
         )
         .unwrap();
         let (config, warnings) = load_at(&dir, "config.toml");
@@ -232,7 +275,63 @@ mod tests {
         assert_eq!(config.vault.as_deref(), Some(Path::new("/tmp/vault")));
         assert_eq!(config.watch, Some(false));
         assert!(!config.watch_default());
+        assert_eq!(config.mouse, Some(false), "mouse key parses");
+        assert_eq!(config.sidebar_width, None, "absent key stays default");
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn sidebar_width_is_parsed_and_typed() {
+        let dir = TempDir::new("cfg-sbw");
+        std::fs::write(dir.path().join("config.toml"), "sidebar_width = 42\n").unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert_eq!(config.sidebar_width, Some(42));
+        assert!(warnings.is_empty());
+        // Non-integer values are malformed (warning + defaults).
+        std::fs::write(dir.path().join("config.toml"), "sidebar_width = \"wide\"\n").unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert_eq!(config, Config::default());
+        assert!(!warnings.is_empty());
+    }
+
+    /// Drift test for `--config-show`: with every `# key = value` line
+    /// uncommented, the template must parse cleanly (no unknown keys, no
+    /// malformed-file warning) and set every documented key.
+    #[test]
+    fn config_show_template_matches_the_real_vocabulary() {
+        let active: String = DEFAULT_CONFIG_TEMPLATE
+            .lines()
+            .map(|line| {
+                match line
+                    .strip_prefix("# ")
+                    .and_then(|rest| rest.split_once('='))
+                {
+                    Some((key, _))
+                        if !key.trim().is_empty()
+                            && key
+                                .trim()
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '_') =>
+                    {
+                        line.replacen("# ", "", 1)
+                    }
+                    _ => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let dir = TempDir::new("cfg-show");
+        std::fs::write(dir.path().join("config.toml"), &active).unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert!(
+            warnings.is_empty(),
+            "template must use only known keys: {warnings:?}"
+        );
+        assert_eq!(config.theme.as_deref(), Some("catppuccin-macchiato"));
+        assert_eq!(config.vault.as_deref(), Some(Path::new("~/notes")));
+        assert_eq!(config.watch, Some(true));
+        assert_eq!(config.sidebar_width, Some(40));
+        assert_eq!(config.mouse, Some(true));
     }
 
     #[test]
