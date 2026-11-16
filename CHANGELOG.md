@@ -27,6 +27,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   (pinned to the real key vocabulary by a drift test), so a starter config
   is `frond --config-show > ~/.config/frond/config.toml`. Also added
   `--help` (full usage) and `--version`.
+- **Restart smoke (M5)**: end-to-end coverage for the session memory's
+  actual promise — run frond twice against the same vault through a pty:
+  quit with a note open (scrolled, folders expanded) and the next launch
+  comes back exactly there; an explicit note argument wins over the
+  restore; a corrupted session file falls back silently to the index.
 
 ### Changed
 - **Opening a note moves focus to the content pane**: `Enter` on a note (tree
