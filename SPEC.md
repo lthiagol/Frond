@@ -101,6 +101,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `<` / `>` | Narrow / widen the sidebar (2-column steps, clamped) |
 | `h` / `l` | Focus sidebar / content (`l` expands a folder, `h` collapses) |
 | `x` / `X` | Focus next/previous link **or checkbox** (document order) |
+| `f` | Show / hide the note's frontmatter metadata block |
 | `m` | Toggle mouse capture (off = the terminal selects text natively) |
 | `Enter` / click | Open focused link; Enter/click on a checkbox toggles it |
 | `Backspace` / `Ctrl+O` | Back / forward in the navigation stack (scroll restored) |
@@ -149,8 +150,9 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   syntect theme with a warning.
 - **Config `~/.config/frond/config.toml`:** `theme`, `vault`, `watch`
   (bool), `mouse` (bool, default on; off = native text selection),
-  `sidebar_width` (columns, clamped 24–120). Read at startup;
-  `--vault`/`--theme`/`--watch`/`--mouse` override. Missing file =
+  `sidebar_width` (columns, clamped 24–120), `metadata` (bool, default
+  on; off = the note's frontmatter block does not render). Read at
+  startup; `--vault`/`--theme`/`--watch`/`--mouse` override. Missing file =
   defaults; malformed file = warning + defaults (never a crash).
   `frond --config-show` prints a commented template of every key.
 - **Live:** `Shift+T` cycles presets, built-ins, and discovered custom

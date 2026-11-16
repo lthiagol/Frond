@@ -1,7 +1,8 @@
 //! `~/.config/frond/config.toml`: persistent settings read at startup.
 //!
 //! Keys: `theme` (string), `vault` (path), `watch` (bool), `mouse` (bool),
-//! `sidebar_width` (columns). Missing file = defaults; malformed file =
+//! `sidebar_width` (columns), `metadata` (bool). Missing file = defaults;
+//! malformed file = warning + defaults (never a crash). Unknown keys are
 //! warning + defaults (never a crash). Unknown keys are ignored but
 //! reported (never silently). The `FROND_CONFIG` env var overrides the path
 //! (tests and smokes only — they must never write to the real `~/.config`).
@@ -26,6 +27,8 @@ pub struct Config {
     pub mouse: Option<bool>,
     /// Sidebar width override in terminal columns (clamped 24–120).
     pub sidebar_width: Option<u16>,
+    /// Whether the note's frontmatter metadata block renders at the top.
+    pub metadata: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -36,6 +39,7 @@ struct ConfigRaw {
     watch: Option<bool>,
     mouse: Option<bool>,
     sidebar_width: Option<u16>,
+    metadata: Option<bool>,
     /// Keys outside our vocabulary — captured so they can be reported.
     #[serde(flatten)]
     unknown: BTreeMap<String, toml::Value>,
@@ -90,6 +94,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # terminal keeps the mouse (native text selection/copy); `m` toggles at
 # runtime. Default: true.
 # mouse = true
+
+# Render the note's frontmatter as a metadata block at the top (`f`
+# toggles at runtime; tags/status in the status bar always show).
+# Default: true.
+# metadata = true
 "#;
 
 /// Loads the config from `path`. Returns the config plus warnings:
@@ -128,6 +137,7 @@ fn load_status(path: &Path) -> (Config, Vec<String>, bool) {
                     watch: raw.watch,
                     mouse: raw.mouse,
                     sidebar_width: raw.sidebar_width,
+                    metadata: raw.metadata,
                 },
                 warnings,
                 false,
@@ -332,6 +342,7 @@ mod tests {
         assert_eq!(config.watch, Some(true));
         assert_eq!(config.sidebar_width, Some(40));
         assert_eq!(config.mouse, Some(true));
+        assert_eq!(config.metadata, Some(true));
     }
 
     #[test]

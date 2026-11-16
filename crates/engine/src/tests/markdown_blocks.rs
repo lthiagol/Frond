@@ -1,6 +1,6 @@
 use super::{rendered_non_empty_lines, test_assets, test_md_theme};
 use crate::markdown::display_width;
-use crate::markdown::{parse_markdown, parse_markdown_with_width};
+use crate::markdown::{parse_markdown, parse_markdown_with_width, parse_markdown_with_width_opts};
 use crate::*;
 
 #[test]
@@ -281,6 +281,72 @@ fn frontmatter_is_ignored_in_preview() {
 
     assert!(!rendered.iter().any(|line| line.contains("title: Demo")));
     assert!(rendered.iter().any(|line| line.contains("Visible")));
+}
+
+/// `show_metadata = false` hides the rendered frontmatter block entirely
+/// (vertical and compact shapes alike); the body starts at the very top
+/// and the source map still points into the real file (frontmatter lines
+/// included).
+#[test]
+fn frontmatter_metadata_block_can_be_hidden() {
+    let (ss, theme) = test_assets();
+    let horizontal = "---\ntitle: Demo\nowner: me\n---\n# Visible\nBody\n";
+    let vertical = "---\na: 1\nb: 2\nc: 3\nd: 4\ne: 5\n---\n# Visible\nBody\n";
+
+    for src in [horizontal, vertical] {
+        let result = parse_markdown_with_width_opts(
+            src,
+            &ss,
+            &theme,
+            80,
+            &test_md_theme(),
+            false,
+            true,
+            false,
+        );
+        let lines = &result.lines;
+        let rendered = rendered_non_empty_lines(lines);
+        assert!(
+            !rendered
+                .iter()
+                .any(|line| line.contains("Demo") || line.contains("owner")),
+            "metadata block hidden: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains("Visible")),
+            "body still rendered"
+        );
+        // The "# Visible" heading's rendered row maps to its true on-disk
+        // line (frontmatter included), so scroll-to-source stays accurate
+        // with the block hidden: horizontal → line 5, vertical → line 8.
+        let expected_first = if src == horizontal { 5 } else { 8 };
+        let heading_row = lines
+            .iter()
+            .position(|l| line_plain_text(l).contains("Visible"))
+            .expect("heading rendered");
+        assert_eq!(
+            result.source_line_map.get(heading_row).copied(),
+            Some(expected_first),
+            "source map keeps the frontmatter offset"
+        );
+    }
+
+    // The shown variant (the default) still renders the block.
+    let result = parse_markdown_with_width_opts(
+        horizontal,
+        &ss,
+        &theme,
+        80,
+        &test_md_theme(),
+        false,
+        true,
+        true,
+    );
+    let rendered = rendered_non_empty_lines(&result.lines);
+    assert!(
+        rendered.iter().any(|line| line.contains("Demo")),
+        "metadata block shown by default"
+    );
 }
 
 #[test]

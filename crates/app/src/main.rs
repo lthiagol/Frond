@@ -419,6 +419,8 @@ fn main() {
             app.sidebar_width = config
                 .sidebar_width
                 .map(|w| w.clamp(crate::app::SIDEBAR_MIN_WIDTH, crate::app::SIDEBAR_MAX_WIDTH));
+            // Metadata block default (config `metadata` key; `f` toggles).
+            app.viewer.show_metadata = config.metadata.unwrap_or(true);
             // Session restore: only when the note came from the defaults
             // (no explicit file argument — that argument is the user's
             // intent for this run). A missing or malformed session file is

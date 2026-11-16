@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::SystemTime;
 
-use engine::{parse_markdown_with_width, MarkdownTheme, SyntaxAssets, TocEntry};
+use engine::{parse_markdown_with_width_opts, MarkdownTheme, SyntaxAssets, TocEntry};
 use ratatui::text::Line;
 use vault::{Resolution, VaultIndex};
 
@@ -89,6 +89,11 @@ pub struct Viewer {
     pub viewport_height: u32,
     pub render_width: usize,
     pub watch: bool,
+    /// Whether the note's frontmatter metadata block renders at the top
+    /// (`f` toggles; the config `metadata` key sets the startup default).
+    /// Off, the body renders as if the frontmatter were absent — purely
+    /// visual: tags/status/wikilinks come from the vault index either way.
+    pub show_metadata: bool,
     pub help_open: bool,
     /// First visible body line of the help popup (scrolls when the help is
     /// taller than the popup). Reset each time the popup opens.
@@ -121,6 +126,7 @@ impl Viewer {
             viewport_height: 24,
             render_width,
             watch: true,
+            show_metadata: true,
             help_open: false,
             help_scroll: 0,
             last_reload: None,
@@ -189,7 +195,7 @@ impl Viewer {
         // engine's regular markdown-link pipeline (styling, wrapping,
         // tables, LinkSpan bookkeeping) handles it.
         let (preprocessed, wikilink_refs) = preprocess_with_links(&task_preprocessed);
-        let result = parse_markdown_with_width(
+        let result = parse_markdown_with_width_opts(
             &preprocessed,
             &self.assets.syntax_set,
             &self.assets.theme,
@@ -197,6 +203,7 @@ impl Viewer {
             &self.theme,
             false,
             true,
+            self.show_metadata,
         );
         self.toc = result.toc;
         self.source_line_map = result.source_line_map;
@@ -584,6 +591,14 @@ impl Viewer {
         if self.watch {
             self.poll_file();
         }
+    }
+
+    /// `f`: show/hide the note's frontmatter metadata block. Purely a
+    /// re-render: the vault index still sees the frontmatter, so tags,
+    /// status, backlinks and frontmatter wikilinks are unaffected.
+    pub fn toggle_metadata(&mut self) {
+        self.show_metadata = !self.show_metadata;
+        self.reparse();
     }
 }
 
