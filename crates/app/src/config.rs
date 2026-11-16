@@ -73,7 +73,7 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # catppuccin-macchiato, catppuccin-mocha, dracula, dracula-alucard,
 # gruvbox, nord, rose-pine, rose-pine-dawn, rose-pine-moon,
 # tokyonight-day, tokyonight-night, tokyonight-storm) or custom theme
-# files in ~/.config/frond/themes/. Default: the base preset.
+# files in ~/.config/frond/themes/. Default: ocean.
 # theme = "catppuccin-macchiato"
 
 # Vault directory the sidebar indexes. Default: the current directory.

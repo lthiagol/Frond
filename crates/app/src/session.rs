@@ -7,7 +7,8 @@
 //! hash is FNV-1a over the canonical vault root, so two vaults never
 //! fight over one state). Paths are stored vault-relative so the file
 //! survives the vault moving on disk; entries outside the vault are
-//! stored verbatim and skipped on restore if they no longer resolve.
+//! stored verbatim but never restored (`App::restore_session` honors
+//! vault-relative entries only).
 //!
 //! `FROND_SESSION` overrides the state directory (tests and smokes only —
 //! they must never write to the real `~/.local/state`).
@@ -58,11 +59,17 @@ impl SessionState {
     }
 }
 
-/// `FROND_SESSION` overrides the directory; else the XDG state dir.
+/// `FROND_SESSION` overrides the directory; else the XDG state dir:
+/// `$XDG_STATE_HOME/frond`, falling back to `$HOME/.local/state/frond`.
 fn state_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("FROND_SESSION") {
         if !dir.is_empty() {
             return Some(PathBuf::from(dir));
+        }
+    }
+    if let Ok(dir) = std::env::var("XDG_STATE_HOME") {
+        if !dir.is_empty() {
+            return Some(PathBuf::from(dir).join("frond"));
         }
     }
     std::env::var("HOME")
@@ -153,5 +160,36 @@ mod tests {
         assert_ne!(a, b, "distinct vaults get distinct files");
         assert!(a.starts_with(dir.path()), "override directory respected");
         assert_eq!(a, a_again);
+    }
+
+    #[test]
+    fn state_dir_follows_the_xdg_precedence() {
+        // SAFETY of the env dance: single-threaded unit test process; the
+        // original values are restored.
+        let xdg = TempDir::new("sess-xdg");
+        let home = TempDir::new("sess-home");
+        let saved_home = std::env::var("HOME").ok();
+        let saved_xdg = std::env::var("XDG_STATE_HOME").ok();
+        std::env::set_var("XDG_STATE_HOME", xdg.path());
+        std::env::set_var("HOME", home.path());
+        let with_xdg = session_file(Path::new("/tmp/vault-a")).unwrap();
+        assert!(
+            with_xdg.starts_with(xdg.path()),
+            "XDG_STATE_HOME wins over HOME: {with_xdg:?}"
+        );
+        std::env::remove_var("XDG_STATE_HOME");
+        let with_home = session_file(Path::new("/tmp/vault-a")).unwrap();
+        assert!(
+            with_home.starts_with(home.path().join(".local/state/frond")),
+            "falls back to HOME/.local/state: {with_home:?}"
+        );
+        match saved_xdg {
+            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
+            None => std::env::remove_var("XDG_STATE_HOME"),
+        }
+        match saved_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
     }
 }

@@ -43,6 +43,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   the footer advertises `scroll …` only while the body actually overflows.
   Simpler, predictable layout at every terminal size.
 
+### Fixed
+- **Session save/restore honors `.base` tables**: quitting with a table
+  open now remembers the base file and its row offset (previously the
+  previous note and its stale scroll were saved); restore reopens the
+  table at that offset. Restore also honors vault-relative entries only —
+  absolute paths and `..` escapes in the (user-editable) session file are
+  skipped, matching the documented "skipped silently" contract.
+- **Mouse-off is real**: with capture disabled, mouse events are ignored
+  by the event loop too, not just expected to stop arriving.
+- **`$XDG_STATE_HOME`** is honored for the session directory before the
+  `$HOME/.local/state` fallback; `~` in the `vault` config/CLI path now
+  expands to `$HOME` (`~user` stays literal).
+- **Help footer no longer clipped** at the popup's standard width
+  (abbreviated to `scroll j/k · g/G ends · close esc/any key`).
+- **`--config-show` template** corrected: the default theme is `ocean`;
+  `~` in the example now actually expands.
+- **Space-form flag mistakes error clearly**: `--mouse false` /
+  `--watch false` fail with the `--mouse=<true|false>` hint instead of
+  silently turning the value into the file argument.
+- **Sidebar `<` cannot underflow** on degenerate drawn widths.
+- Workspace version bumped to 0.5.0 so `--version` matches the CHANGELOG.
+
 ## [0.4.0] — 2026-11-11
 
 ### Added
