@@ -1020,9 +1020,6 @@ pub fn parse_markdown_with_width_opts(
         theme_colors,
         render_width,
     );
-    for _ in 0..5 {
-        lines.push(Line::from(""));
-    }
     state.mark_all_new(lines.len());
     ParseResult {
         lines,
