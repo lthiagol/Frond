@@ -29,7 +29,54 @@ pub struct Config {
     pub sidebar_width: Option<u16>,
     /// Whether the note's frontmatter metadata block renders at the top.
     pub metadata: Option<bool>,
+    /// Startup theme group for `Shift+T`: "all", "light" or "dark".
+    pub theme_rotation: Option<String>,
+    /// Blank columns on each side of the note text (0–`MAX_MARGIN`).
+    pub margin: Option<u16>,
+    /// Status-bar icon set: "nerd" or "unicode".
+    pub icons: Option<String>,
 }
+
+/// Glyph set for the status bar's note icons. `nerd` (the default) needs
+/// a Nerd Font in the terminal; `unicode` uses only standard glyphs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IconSet {
+    #[default]
+    Nerd,
+    Unicode,
+}
+
+impl IconSet {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "nerd" => Some(Self::Nerd),
+            "unicode" => Some(Self::Unicode),
+            _ => None,
+        }
+    }
+
+    /// Icon beside a `.md` note's name (Nerd: markdown, U+E73E).
+    pub fn note(self) -> &'static str {
+        match self {
+            Self::Nerd => "\u{e73e}",
+            Self::Unicode => "¶",
+        }
+    }
+
+    /// Icon beside a `.base` table's name (Nerd: material table, U+F04EB;
+    /// unicode: ▦).
+    pub fn base(self) -> &'static str {
+        match self {
+            Self::Nerd => "\u{f04eb}",
+            Self::Unicode => "▦",
+        }
+    }
+}
+
+/// Widest note margin a config may ask for, per side, in columns.
+pub const MAX_MARGIN: u16 = 10;
+/// Note margin when the config does not set one, per side, in columns.
+pub const DEFAULT_MARGIN: u16 = 2;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -40,6 +87,9 @@ struct ConfigRaw {
     mouse: Option<bool>,
     sidebar_width: Option<u16>,
     metadata: Option<bool>,
+    theme_rotation: Option<String>,
+    margin: Option<u16>,
+    icons: Option<String>,
     /// Keys outside our vocabulary — captured so they can be reported.
     #[serde(flatten)]
     unknown: BTreeMap<String, toml::Value>,
@@ -77,7 +127,8 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # catppuccin-macchiato, catppuccin-mocha, dracula, dracula-alucard,
 # gruvbox, nord, rose-pine, rose-pine-dawn, rose-pine-moon,
 # tokyonight-day, tokyonight-night, tokyonight-storm) or custom theme
-# files in ~/.config/frond/themes/. Default: ocean.
+# files in ~/.config/frond/themes/ (each must set appearance = "light"
+# or "dark"; see docs/COLORS.md). Default: ocean.
 # theme = "catppuccin-macchiato"
 
 # Vault directory the sidebar indexes. Default: the current directory.
@@ -99,6 +150,17 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # toggles at runtime; tags/status in the status bar always show).
 # Default: true.
 # metadata = true
+
+# Which themes `Shift+T` cycles through at startup: "all", "light" or
+# "dark". Ctrl+T changes it for the session only. Default: "all".
+# theme_rotation = "all"
+
+# Blank columns on each side of the note text, 0-10. Default: 2.
+# margin = 2
+
+# Status-bar icons beside the note name: "nerd" needs a Nerd Font in the
+# terminal; "unicode" uses only standard glyphs. Default: "nerd".
+# icons = "nerd"
 "#;
 
 /// Loads the config from `path`. Returns the config plus warnings:
@@ -138,6 +200,9 @@ fn load_status(path: &Path) -> (Config, Vec<String>, bool) {
                     mouse: raw.mouse,
                     sidebar_width: raw.sidebar_width,
                     metadata: raw.metadata,
+                    theme_rotation: raw.theme_rotation,
+                    margin: raw.margin,
+                    icons: raw.icons,
                 },
                 warnings,
                 false,
@@ -307,6 +372,32 @@ mod tests {
     /// Drift test for `--config-show`: with every `# key = value` line
     /// uncommented, the template must parse cleanly (no unknown keys, no
     /// malformed-file warning) and set every documented key.
+    #[test]
+    fn icons_parse_nerd_and_unicode_and_default_to_nerd() {
+        assert_eq!(IconSet::parse("Unicode"), Some(IconSet::Unicode));
+        assert_eq!(IconSet::parse(" nerd "), Some(IconSet::Nerd));
+        assert_eq!(IconSet::parse("emoji"), None);
+        assert_eq!(IconSet::default(), IconSet::Nerd);
+        assert_eq!(IconSet::Unicode.note(), "¶");
+        assert_eq!(IconSet::Nerd.note(), "\u{e73e}");
+        assert_eq!(IconSet::Nerd.base(), "\u{f04eb}");
+        assert_eq!(IconSet::Unicode.base(), "▦");
+    }
+
+    #[test]
+    fn theme_rotation_and_margin_load_from_config() {
+        let dir = TempDir::new("config-rotation");
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "theme_rotation = \"dark\"\nmargin = 4\n",
+        )
+        .unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert!(warnings.is_empty());
+        assert_eq!(config.theme_rotation.as_deref(), Some("dark"));
+        assert_eq!(config.margin, Some(4));
+    }
+
     #[test]
     fn config_show_template_matches_the_real_vocabulary() {
         let active: String = DEFAULT_CONFIG_TEMPLATE

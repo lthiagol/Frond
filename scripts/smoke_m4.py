@@ -215,9 +215,11 @@ check(not ("/" in status_line() and "▏" in status_line()), "popup closed after
 # --- guarded checkbox toggle (clean tree) ----------------------------------
 task_row = find_row("a task")
 check(task_row is not None, "task line rendered with its checkbox")
-# Sidebar is 30 cols; a depth-1 checkbox glyph sits at content col 0.
+# Sidebar is 30 cols, then the note's left margin (default 2); a depth-1
+# checkbox glyph sits at the first text column after it.
 # Cycle: - [ ] -> - [~] (in-progress, rendered ◐) -> - [x] -> - [ ].
-click(30, task_row)
+CONTENT_X = 30 + 2
+click(CONTENT_X, task_row)
 pump(0.8)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()
@@ -236,13 +238,13 @@ git("commit", "-q", "-m", "toggle 1")
 send("u")
 pump(0.8)
 check("✓" in status_line(), "clean again after committing the toggle")
-click(30, task_row)
+click(CONTENT_X, task_row)
 pump(0.8)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()
 check("- [x] a task" in on_disk, "second click wrote the checked state - [x]")
 check("☑" in body_text(), "the reloaded render shows the checked glyph")
-click(30, task_row)
+click(CONTENT_X, task_row)
 pump(0.8)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()
@@ -260,7 +262,7 @@ check("alpha.md *" in body_text(), "changed note marked with * in the tree")
 check("beta.md *" not in body_text(), "unchanged note unmarked")
 
 # --- guarded toggle refuses on a dirty tree --------------------------------
-click(30, find_row("a task"))
+click(CONTENT_X, find_row("a task"))
 pump(0.5)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()

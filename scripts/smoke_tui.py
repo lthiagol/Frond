@@ -23,6 +23,10 @@ TMP = "/tmp/watchtest.md"
 
 COLS, ROWS = 100, 30
 shutil.copyfile(SRC, TMP)
+# The fixture is shorter than the screen, so nothing would scroll: append
+# filler paragraphs to the copy so the wheel and scroll keys have room.
+with open(TMP, "a") as f:
+    f.write("".join(f"\nfiller paragraph {i}\n" for i in range(60)))
 
 screen = pyte.Screen(COLS, ROWS)
 stream = pyte.ByteStream(screen)
@@ -75,6 +79,7 @@ def body_text():
 ok = True
 def check(cond, label):
     global ok
+    ok = ok and bool(cond)
     print(("PASS" if cond else "FAIL"), label)
     if not cond:
         print("--- status line:", repr(status_line()))
@@ -92,7 +97,9 @@ check(lines_before > 0, f"line count parsed ({lines_before})")
 
 # scroll: j, arrow-down, PgDn, mouse wheel
 top_row5 = row(5)
-send("\x1b[<65;20;10M\x1b[<65;20;10M\x1b[<65;20;10M")  # SGR wheel-down x3
+# Column 60 is the note pane: the sidebar takes the left ~30 columns, and a
+# wheel over it does not scroll the note.
+send("\x1b[<65;60;10M\x1b[<65;60;10M\x1b[<65;60;10M")  # SGR wheel-down x3
 pump(0.4)
 check(row(5) != top_row5, "mouse wheel scroll moved viewport")
 send("j"); send("\x1b[B"); send("\x1b[6~")
@@ -104,10 +111,10 @@ pump(0.4)
 check(True, "scroll keys accepted")
 
 # edit the file -> watch reload (content appended at bottom)
-send("G")  # stay at bottom to see appended content
-pump(0.2)
 with open(TMP, "a") as f:
     f.write("\nWATCHSMOKEEDIT\n\nsecond para WATCHSMOKEEDIT2\n")
+pump(1.6)  # the watch tick reloads; the viewport stays pinned
+send("G")  # then scroll to the appended content at the bottom
 pump_until(lambda: "WATCHSMOKEEDIT" in body_text())
 st = status_line()
 lines_after = int(st.split(" · ")[1].split()[0])
@@ -128,6 +135,8 @@ check("WATCHEDOFFEDIT" not in body_text(), "no reload while watch off")
 
 # back on -> catch-up reload
 send("w")
+pump(1.6)  # catch-up reload on the watch tick
+send("G")
 pump_until(lambda: "WATCHEDOFFEDIT" in body_text())
 check("watch on" in status_line(), "watch re-enabled")
 check("WATCHEDOFFEDIT" in body_text(), "catch-up reload after re-enabling watch")

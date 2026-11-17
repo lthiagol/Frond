@@ -86,7 +86,8 @@ Press `?` inside the app for the full key list. The most used keys:
 | `s` | Search the vault |
 | `b` | Toggle backlinks |
 | `m` | Toggle mouse capture |
-| `Shift+T` | Cycle themes |
+| `Shift+T` | Cycle themes (within the group set by `Ctrl+T`) |
+| `Ctrl+T` | Theme group for `Shift+T`: all → light → dark (session only) |
 | `q` | Quit |
 
 Clicking a rendered checkbox (or pressing `Enter` on it) cycles its state.
@@ -123,6 +124,9 @@ watch = true                    # reload on file changes
 mouse = true                    # mouse capture (off = native text selection)
 sidebar_width = 40              # sidebar columns, clamped 24-120
 metadata = true                 # render the note's frontmatter block (f toggles)
+theme_rotation = "all"          # Shift+T group at startup: all, light or dark
+margin = 2                      # blank columns on each side of the note (0-10)
+icons = "nerd"                  # status-bar note icon: nerd (needs a Nerd Font) or unicode
 ```
 
 Missing file means defaults. A malformed file prints a warning and falls back
@@ -138,8 +142,11 @@ restored on the next start.
 - 4 presets (`arctic`, `forest`, `ocean`, `solarized`) and 14 built-ins
   (catppuccin, dracula, gruvbox, nord, rose-pine, tokyonight variants).
 - Custom themes: TOML files in `~/.config/frond/themes/` (override with the
-  `FROND_THEMES` environment variable). Format: `base` + `syntax` + `[ui]` +
-  `[markdown]`. Unknown keys are reported as warnings, never silently ignored.
+  `FROND_THEMES` environment variable). Format: `appearance` (required:
+  `"light"` or `"dark"`) + `base` + `syntax` + `[ui]` + `[markdown]`. Unknown
+  keys are reported as warnings, never silently ignored.
+- `Shift+T` cycles the themes in the current group; `Ctrl+T` changes the group
+  between all, light and dark. It does not change the theme on screen.
 - Resolution order: `--theme` > `FROND_THEME` env var > config `theme` > default (`ocean`).
 - Colour roles for every key are documented in [`docs/COLORS.md`](docs/COLORS.md).
 

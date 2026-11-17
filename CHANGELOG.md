@@ -2,6 +2,45 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates are UTC.
 
+## [Unreleased]
+
+### Added
+- **Theme groups**: `Ctrl+T` cycles the `Shift+T` rotation through all themes,
+  light themes and dark themes (session only). The status line shows the
+  group and how many themes it has. Config `theme_rotation = "all" | "light" |
+  "dark"` sets the startup group. `Shift+T` still cycles as before.
+- **Theme appearance**: every theme is light or dark. Presets and built-ins
+  declare it; custom theme files must set `appearance = "light" | "dark"`
+  (see `docs/COLORS.md`). A custom file without it is skipped with a load
+  error.
+- **Note margin**: config `margin` sets the blank columns on each side of the
+  note text (0–10, default 2).
+- **Status-bar icons**: config `icons = "nerd" | "unicode"` (default `nerd`).
+  The note name on the status bar has an icon: the markdown glyph (U+E73E) for
+  `.md` notes in nerd mode and `¶` in unicode mode; `.base` tables show the
+  material table glyph (U+F04EB) in nerd mode and `▦` in unicode mode. `nerd`
+  needs a Nerd Font in the terminal.
+
+### Changed
+- The note text is inset by the margin on both sides. It was flush left with 2
+  columns only on the right.
+- `Ctrl+T` changes only the `Shift+T` group. It no longer moves the theme on
+  screen; `Shift+T` does that.
+- The status bar shows only the name of the note or the focused row, never the
+  full path. A name shared by another note is not disambiguated there (the
+  sidebar and the wikilink popup still show folders).
+- Notes no longer end with 5 blank rows. Scrolled to the end, the last line sits
+  on the bottom row.
+- Custom theme files written before this release need an `appearance` line.
+  The bundled themes already have one.
+
+### Fixed
+- The margin columns next to the note are painted with the theme background.
+  They used to show the terminal background, which is black on many setups.
+- Scrolling to the bottom of a note that needs a scrollbar could stop short by
+  as many rows as paragraphs re-wrapped at the narrower width. The scroll was
+  clamped against the wider wrap before the scrollbar was known.
+
 ## [0.6.0] — 2026-11-16
 
 ### Added

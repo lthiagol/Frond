@@ -128,23 +128,38 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // overflows, the scrollbar takes the right column and the text
         // re-wraps one column narrower. Narrowing only ever adds lines, so
         // an overflowing note keeps overflowing and the bar stays consistent.
-        let full_width = content_area.width.saturating_sub(2) as usize;
-        app.viewer.on_content_width(full_width);
-        app.viewer.on_viewport_height(note_full.height + 1);
-        let bar_shown = app.viewer.lines.len() > note_rows && note_full.width > 3;
+        // The text sits inside a symmetric margin (config `margin`, blank
+        // columns on each side). The scrollbar, when shown, takes the last
+        // column, so the right side is the margin plus that column.
+        let margin = app.note_margin;
+        let text_full = Rect {
+            x: note_full.x + margin,
+            width: note_full.width.saturating_sub(2 * margin),
+            ..note_full
+        };
+        let full_width = text_full.width as usize;
+        let bar_shown = app.viewer.line_count_at(full_width) > note_rows && note_full.width > 3;
+        let wrap_width = if bar_shown {
+            full_width.saturating_sub(1).max(1)
+        } else {
+            full_width
+        };
+        app.viewer.on_content_width(wrap_width);
         let note_area = if bar_shown {
-            app.viewer
-                .on_content_width(full_width.saturating_sub(1).max(1));
             Rect {
-                width: note_full.width - 1,
-                ..note_full
+                width: text_full.width.saturating_sub(1),
+                ..text_full
             }
         } else {
-            note_full
+            text_full
         };
         app.note_viewport = note_area;
         app.viewer.on_viewport_height(note_full.height + 1);
 
+        // The text widget paints only its own cells, so the margin columns
+        // would keep the terminal background: paint the whole note area first.
+        f.buffer_mut()
+            .set_style(note_full, Style::new().bg(ui.content_bg));
         let text = ratatui::text::Text::from(app.viewer.lines.clone());
         // `Paragraph::scroll` takes `u16`; the viewer's scroll is `u32` so very
         // large files are not truncated in scroll math. u16::MAX scroll offset
@@ -852,9 +867,9 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
     }
 }
 
-/// The status bar's path label. Sidebar focused → the focused entry's full
-/// path (or `#tag`); content focused → the open note's file name, or its
-/// vault-relative path when that name is shared by another indexed note.
+/// The status bar's name label. Content focused → the open note's name;
+/// sidebar focused → the focused row's name (`#tag` for a tag). Notes and
+/// bases carry an icon; folders and tags show their bare name.
 fn status_path_label(app: &App, sidebar_focused: bool) -> String {
     if !sidebar_focused {
         return note_status_label(app);
@@ -864,11 +879,11 @@ fn status_path_label(app: &App, sidebar_focused: bool) -> String {
             .sidebar
             .as_ref()
             .and_then(|sidebar| sidebar.selected_path())
-            .map(|p| p.display().to_string())
+            .map(|path| file_label(app, path))
             .unwrap_or_else(|| "(empty vault)".to_string()),
         SidebarMode::Tags => {
             if let Some(path) = app.tags.selected_path() {
-                path.display().to_string()
+                file_label(app, path)
             } else if let Some(crate::tags::Selection::Tag(tag)) = &app.tags.selected {
                 format!("#{tag}")
             } else {
@@ -878,24 +893,22 @@ fn status_path_label(app: &App, sidebar_focused: bool) -> String {
     }
 }
 
-/// The open note's label on the status bar: its file name, or the
-/// vault-relative path when another indexed note shares that name.
+/// The open note's label on the status bar: its icon and file name.
 fn note_status_label(app: &App) -> String {
-    let current = app.current_path();
-    let Some(name) = current.file_name().map(|n| n.to_os_string()) else {
-        return current.display().to_string();
-    };
-    let ambiguous = match &app.index {
-        Some(index) => index
-            .borrow()
-            .notes()
-            .any(|note| note.path != current && note.path.file_name() == Some(name.as_os_str())),
-        None => false,
-    };
-    if ambiguous {
-        app.current_relative_path().display().to_string()
-    } else {
-        name.to_string_lossy().into_owned()
+    file_label(app, &app.current_path())
+}
+
+/// `path`'s file name, prefixed by its icon when it is a note (`.md`) or a
+/// base (`.base`). Any other path (a folder) keeps the bare name.
+fn file_label(app: &App, path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("md") => format!("{} {name}", app.icons.note()),
+        Some("base") => format!("{} {name}", app.icons.base()),
+        _ => name,
     }
 }
 
@@ -1119,6 +1132,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
         &[
             ("u", "refresh git status (watch events too)"),
             ("Shift+T", "cycle theme (session only)"),
+            ("Ctrl+T", "theme group: all → light → dark"),
             ("m", "toggle mouse capture; off: wheel = arrows"),
             ("", "? help · q / Ctrl+C quit"),
         ],
@@ -1499,6 +1513,71 @@ mod tests {
         terminal.backend().to_string()
     }
 
+    /// The note sits inside the configured margin on both sides: the text
+    /// starts `margin` columns in, and the viewport the mouse uses matches.
+    #[test]
+    fn note_text_starts_after_the_configured_margin() {
+        let file = ui_viewer("ui-margin.md", "first line here\n");
+        let mut app = app_for(&file, None);
+        app.note_margin = 3;
+        app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(2, 0)].symbol(), " ", "left margin is blank");
+        assert_eq!(
+            buffer[(0, 0)].bg,
+            Color::Rgb(9, 9, 9),
+            "left margin painted"
+        );
+        assert_eq!(
+            buffer[(99, 0)].bg,
+            Color::Rgb(9, 9, 9),
+            "right margin painted"
+        );
+        assert_eq!(buffer[(3, 0)].symbol(), "f", "text starts at the margin");
+        assert_eq!(app.note_viewport.x, 3);
+        assert_eq!(app.note_viewport.width, 94, "100 less 3 per side");
+    }
+
+    /// Scrolling to the bottom of an overflowing note must land on the
+    /// bottom, even when the scrollbar re-wraps the note one column
+    /// narrower. Each paragraph below is exactly the full text width, so
+    /// the narrower wrap adds a line to every paragraph. The scroll must
+    /// not be clamped against the provisional full-width wrap on the way.
+    #[test]
+    fn bottom_scroll_survives_the_scrollbar_rewrap() {
+        let paragraph = "abcdefghi abcdefghi abcdefghi abcdefghi abcdefghi \
+                         abcdefghi abcdefghi abcdefghi abcdefghi abcdefgh";
+        let mut body = String::new();
+        for _ in 0..120 {
+            body.push_str(paragraph);
+            body.push_str("\n\n");
+        }
+        body.push_str("LAST MARKER LINE\n");
+        let file = ui_viewer("ui-bottom-scroll.md", &body);
+        let mut app = app_for(&file, None);
+        render(&mut app);
+        app.viewer.scroll_bottom();
+        let screen = render(&mut app);
+        assert_eq!(
+            app.viewer.scroll,
+            app.viewer.max_scroll(),
+            "scroll kept at bottom"
+        );
+        let rows: Vec<&str> = screen.lines().collect();
+        let note_rows = &rows[..rows.len() - 1];
+        let marker_row = note_rows.iter().rposition(|r| r.contains("LAST MARKER"));
+        // Only the note's final paragraph break follows the last text line,
+        // so it sits on the row just above the bottom.
+        assert_eq!(
+            marker_row,
+            Some(note_rows.len() - 2),
+            "last line above the paragraph break"
+        );
+    }
+
     fn ui_viewer(name: &str, content: &str) -> TempFile {
         TempFile::new(name, content)
     }
@@ -1563,12 +1642,14 @@ mod tests {
     }
 
     #[test]
-    fn status_bar_shows_relative_path_when_name_is_ambiguous() {
+    fn status_bar_shows_only_the_name_when_the_name_is_shared() {
         let dir = name_vault();
         let mut app = status_app(&dir, "a/index.md");
         let screen = render_at(&mut app, 100);
         let row = status_row(&screen);
-        assert!(row.contains("a/index.md"), "relative path shown: {row}");
+        let label = format!("{} index.md", app.icons.note());
+        assert!(row.contains(&label), "bare name with its icon: {row}");
+        assert!(!row.contains("a/index.md"), "no relative path: {row}");
         assert!(
             !row.contains(&dir.path().display().to_string()),
             "vault root not on the bar: {row}"
@@ -1576,17 +1657,38 @@ mod tests {
     }
 
     #[test]
-    fn status_bar_keeps_full_path_when_sidebar_focused() {
+    fn status_bar_shows_only_the_name_when_sidebar_focused() {
         let dir = name_vault();
         let mut app = status_app(&dir, "solo.md");
         app.handle_key(key(KeyCode::Char('h')));
         assert_eq!(app.focus, crate::app::Focus::Sidebar);
         let screen = render_at(&mut app, 100);
         let row = status_row(&screen);
-        let focused = dir.path().join("a");
         assert!(
-            row.contains(&focused.display().to_string()),
-            "focused sidebar entry shows its full path: {row}"
+            row.trim_start_matches('"').starts_with("a ") && row.contains(" lines"),
+            "focused folder shows its name, no path: {row}"
+        );
+        assert!(
+            !row.contains(&dir.path().display().to_string()),
+            "no full path on the bar: {row}"
+        );
+    }
+
+    #[test]
+    fn status_bar_icons_follow_the_icon_set() {
+        let dir = name_vault();
+        let mut app = status_app(&dir, "solo.md");
+        let screen = render_at(&mut app, 100);
+        assert!(
+            status_row(&screen)
+                .contains(&format!("{} solo.md", crate::config::IconSet::Nerd.note())),
+            "nerd is the default note icon"
+        );
+        app.icons = crate::config::IconSet::Unicode;
+        let screen = render_at(&mut app, 100);
+        assert!(
+            status_row(&screen).contains("¶ solo.md"),
+            "unicode note icon"
         );
     }
 
@@ -1598,7 +1700,8 @@ mod tests {
         let area = app.status_name_area.expect("name segment recorded");
         assert_eq!(area.y, 23, "status row");
         assert_eq!(area.x, 0);
-        assert_eq!(area.width as usize, "solo.md".len());
+        let label = format!("{} solo.md", app.icons.note());
+        assert_eq!(area.width as usize, UnicodeWidthStr::width(label.as_str()));
         app.handle_key(key(KeyCode::Char('h')));
         render_at(&mut app, 100);
         assert!(app.status_name_area.is_none(), "sidebar focus: no name");
@@ -1722,7 +1825,7 @@ mod tests {
             !screen.contains("vault"),
             "no sidebar block without --vault"
         );
-        assert_eq!(app.viewer.render_width, 98, "full width minus margins");
+        assert_eq!(app.viewer.render_width, 96, "full width minus margins");
     }
 
     #[test]
@@ -1737,17 +1840,19 @@ mod tests {
             screen.contains("alpha.md"),
             "sidebar should list vault notes"
         );
-        // Content re-wrapped to the narrower area: 100 - 30 - 2 = 68.
-        assert_eq!(app.viewer.render_width, 68);
+        // Content re-wrapped to the narrower area: 100 - 30 - 2 margins = 66.
+        assert_eq!(app.viewer.render_width, 66);
 
         // Focus the sidebar: the status bar shows the selected entry's path
         // (the first row is the `sub` folder — dirs sort first).
         app.handle_key(key(KeyCode::Char('h')));
         let screen = render(&mut app);
-        let expected = vault_dir.path().join("sub");
         assert!(
-            screen.contains(&expected.display().to_string()),
-            "status bar shows focused sidebar path"
+            status_row(&screen)
+                .trim_start_matches('"')
+                .starts_with("sub ")
+                && status_row(&screen).contains(" lines"),
+            "status bar shows the focused folder's name"
         );
     }
 
@@ -1775,7 +1880,7 @@ mod tests {
         let screen = render(&mut app);
         assert!(!screen.contains("vault"), "sidebar hidden after Tab");
         // Focus snapped back to content; full content width restored.
-        assert_eq!(app.viewer.render_width, 98);
+        assert_eq!(app.viewer.render_width, 96);
     }
 
     // --- M3 rendering --------------------------------------------------
@@ -2573,7 +2678,7 @@ mod tests {
             !column_has_bar(buffer, 99, 0..23),
             "no bar when content fits"
         );
-        assert_eq!(app.note_viewport.width, 100, "text width untouched");
+        assert_eq!(app.note_viewport.width, 96, "text width less the margins");
     }
 
     #[test]
@@ -2589,7 +2694,10 @@ mod tests {
         // area), spanning the note rows (status line excluded).
         assert!(column_has_bar(buffer, 99, 0..23), "bar drawn at right edge");
         // Text is narrowed: the note viewport stops one column short of the edge.
-        assert_eq!(app.note_viewport.x + app.note_viewport.width, 99);
+        assert_eq!(
+            app.note_viewport.x + app.note_viewport.width,
+            99 - app.note_margin
+        );
         // No text cell is drawn under the bar column.
         for y in 0..23 {
             let sym = buffer[(99, y)].symbol();
@@ -2635,8 +2743,8 @@ mod tests {
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         // The viewport recorded for clicks is exactly the drawn text area.
         let vp = app.note_viewport;
-        assert_eq!(vp.width, 99);
-        assert_eq!(vp.x, 0);
+        assert_eq!(vp.width, 95, "100 columns less the margins and the bar");
+        assert_eq!(vp.x, app.note_margin);
         // A click on the bar column is outside the note viewport: no-op.
         let before = app.viewer.scroll;
         let focus_before = app.focus;
@@ -2966,7 +3074,7 @@ mod tests {
     /// (which scrolls) otherwise.
     #[test]
     fn help_grid_is_single_column_spaced_when_it_fits() {
-        let tall = help_grid(36);
+        let tall = help_grid(40);
         assert_eq!(tall.columns.len(), 1, "always one column");
         assert!(tall.spaced, "spaced when the body fits");
         let mut all: Vec<usize> = tall.columns.iter().flat_map(|c| c.groups.clone()).collect();

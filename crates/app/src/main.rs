@@ -410,6 +410,32 @@ fn main() {
                 eprintln!("warning: {warning}");
             }
             app.apply_theme(&resolved, &theme_warnings);
+            // Theme group for `Shift+T` (config `theme_rotation`; `Ctrl+T`
+            // changes it for the session). An unknown value warns and keeps
+            // "all".
+            if let Some(value) = config.theme_rotation.as_deref() {
+                match theme::ThemeRotation::parse(value) {
+                    Some(rotation) => app.theme_rotation = rotation,
+                    None => eprintln!(
+                        "warning: config theme_rotation \"{value}\" is not all, light or dark; using all"
+                    ),
+                }
+            }
+            // Status-bar icons (config `icons`). An unknown value warns and
+            // keeps the default, nerd.
+            if let Some(value) = config.icons.as_deref() {
+                match config::IconSet::parse(value) {
+                    Some(icons) => app.icons = icons,
+                    None => eprintln!(
+                        "warning: config icons \"{value}\" is not nerd or unicode; using nerd"
+                    ),
+                }
+            }
+            // Note margin (config `margin`, blank columns per side).
+            app.note_margin = config
+                .margin
+                .unwrap_or(config::DEFAULT_MARGIN)
+                .min(config::MAX_MARGIN);
             // Mouse capture default (config/flag): the App field drives the
             // runtime toggle (`m`); setup_terminal already applied the
             // startup state.

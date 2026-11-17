@@ -4,6 +4,31 @@ Every chrome color the app styles lives in `UiTheme` (`crates/app/src/theme.rs`)
 custom theme files set these names under `[ui]`. Note-content colors are the
 engine's `MarkdownTheme` (leaf's own palette, not documented here).
 
+## Appearance: light or dark
+
+Every theme declares whether it is light or dark. The `Shift+T` cycle filters
+on it: `Ctrl+T` moves between all themes, light themes only and dark themes
+only (session only; `theme_rotation` in config.toml sets the startup group).
+
+- **Presets** (`crates/app/src/theme.rs`, `preset_appearance`): `arctic` is
+  light; `forest`, `ocean` and `solarized` are dark.
+- **Built-ins** (`crates/app/src/builtin_themes.rs`): each entry sets
+  `appearance: Appearance::Light` or `Dark`. Light: `catppuccin-latte`,
+  `dracula-alucard`, `rose-pine-dawn`, `tokyonight-day`. The rest are dark.
+- **Custom theme files** must set it at the top of the file:
+
+  ```toml
+  appearance = "light"   # or "dark"; required
+  base = "arctic"
+  ```
+
+  A file without it, or with any other value, is not loaded. It is reported
+  as a load error that names the file and the key.
+
+The value must match the theme's `content_bg`: a light theme has a light
+background. The test `declared_appearance_matches_the_background_of_every_theme`
+checks every preset and built-in, so a mislabelled theme fails the suite.
+
 ## The keys
 
 | Key | Role in this app | Source role (leaf) |

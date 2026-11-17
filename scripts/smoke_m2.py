@@ -38,6 +38,7 @@ os.makedirs(THEME_DIR, exist_ok=True)
 with open(os.path.join(THEME_DIR, "nightshade.toml"), "w") as f:
     f.write(
         'base = "ocean"\n'
+        'appearance = "dark"\n'
         'syntax = "base16-ocean.dark"\n'
         "\n[ui]\n"
         'content_bg = "#010203"\n'
@@ -154,7 +155,10 @@ check("index.md" in screen_no_status(), "Tab shows sidebar again")
 # --- folder expand + open a note -----------------------------------------
 send("h")  # focus sidebar
 pump(0.3)
-check(f"{VAULT}/projects" in status_line(), "status bar shows focused folder path")
+check(
+    "projects ·" in status_line() and f"{VAULT}/projects" not in status_line(),
+    "status bar shows the focused folder name, not its path",
+)
 send("l")  # expand projects
 pump(0.3)
 check(LONG[:20] in body_text(), "folder expanded, child visible")
@@ -193,6 +197,7 @@ send("G")
 pump(0.3)
 with open(f"{VAULT}/projects/{LONG}", "a") as f:
     f.write("\nM2WATCHEDIT\n\nsecond para M2WATCHEDIT2\n")
+pump(1.6)  # the watch tick (1 s) reloads the note; the viewport stays pinned
 send("G")  # appended lines land below the pinned viewport; scroll to them
 pump_until(lambda: "M2WATCHEDIT" in body_text())
 check("M2WATCHEDIT" in body_text(), "watch reload works with sidebar layout")

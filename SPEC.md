@@ -69,7 +69,7 @@ Unresolved links render dimmed/strikethrough, non-clickable.
 
 - Sidebar (~30%, overridable with `<`/`>` or the config `sidebar_width`
   key, clamped 24–120 columns): mode toggled with `t` (tree ⇄ tags). Tree: collapsible folders, truncation
-  with full path on focus. Notes show status glyphs from frontmatter `status:`
+  with the focused name on the status bar. Notes show status glyphs from frontmatter `status:`
   (single mapping table in `crates/app/src/ui.rs`): `●` complete/resolved/active,
   `◐` in-progress/monitoring, `○` pending/planned, `◌` draft, `◉` blocked,
   `×` dimmed for archived/superseded; unknown statuses show no glyph.
@@ -110,7 +110,8 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `u` | Sync status refresh (also auto on watch events) |
 | `v` / `1`–`9` | Switch table view while a `.base` file is open |
 | `w` | Toggle watch mode (content pane) |
-| `Shift+T` | Cycle theme: presets, built-ins, then custom themes (session-only) |
+| `Shift+T` | Cycle theme within the current group: presets, built-ins, then custom themes (session-only) |
+| `Ctrl+T` | Theme group for `Shift+T`: all → light → dark. Changes the group only; the status line shows the group and its size (session-only) |
 | `?` | Help popup: a centered single column with grouped sections (bold headers, one blank line between groups, keys aligned to one column) over a dimmed background, with a fixed title/footer; `j`/`k`/arrows, PgUp/PgDn, `g`/`G` scroll it; any other key closes it |
 | `q` / `Ctrl+C` | Quit |
 
@@ -141,6 +142,10 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   listed warning (never silently). `[diff]` has no diff view.
 - **Theme dirs:** `~/.config/frond/themes/` (frond-format TOML files only; the
   leaf compat directory is no longer read).
+- **Appearance:** every theme is light or dark. Presets and built-ins declare
+  it in code; a custom file must set `appearance = "light"` or `"dark"`, and
+  a file without a valid value is skipped with a load error. The rotation
+  groups (`Shift+T` / `Ctrl+T`) filter on it. Details in `docs/COLORS.md`.
 - **Resolution:** `--theme` flag > `FROND_THEME` env > config.toml `theme` key >
   default (`ocean`). A name resolves as a preset, then a built-in, then a
   discovered custom file. A custom file whose name matches a preset or
@@ -151,7 +156,12 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 - **Config `~/.config/frond/config.toml`:** `theme`, `vault`, `watch`
   (bool), `mouse` (bool, default on; off = native text selection),
   `sidebar_width` (columns, clamped 24–120), `metadata` (bool, default
-  on; off = the note's frontmatter block does not render). Read at
+  on; off = the note's frontmatter block does not render),
+  `theme_rotation` (`all` | `light` | `dark`, default `all`: the group
+  `Shift+T` starts in), `margin` (blank columns on each side of the note,
+  0–10, default 2), `icons` (`nerd` | `unicode`, default `nerd`: the note
+  and base icons on the status bar; `nerd` needs a Nerd Font in the terminal).
+  Read at
   startup; `--vault`/`--theme`/`--watch`/`--mouse` override. Missing file =
   defaults; malformed file = warning + defaults (never a crash).
   `frond --config-show` prints a commented template of every key.
