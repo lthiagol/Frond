@@ -459,9 +459,19 @@ fn source_line_map_plain_document_is_aligned_with_first_event() {
     let src = "# Title\n\nfirst paragraph\n";
     let parsed = parse_markdown(src, &ss, &theme, &test_md_theme(), false, true);
     let first = parsed.source_line_map[0];
-    let last_content_idx = parsed.lines.len().saturating_sub(6);
+    let paragraph_idx = parsed
+        .lines
+        .iter()
+        .position(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+                .contains("first paragraph")
+        })
+        .expect("paragraph rendered");
     assert_eq!(first, 1);
-    assert_eq!(parsed.source_line_map[last_content_idx], 3);
+    assert_eq!(parsed.source_line_map[paragraph_idx], 3);
 }
 
 /// Nested list items flush after the inner list ends, so the flush-time
