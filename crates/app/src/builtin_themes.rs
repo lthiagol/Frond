@@ -26,7 +26,7 @@
 use engine::{MarkdownTheme, MarkdownThemePreset};
 use ratatui::style::Color;
 
-use crate::theme::UiTheme;
+use crate::theme::{Appearance, UiTheme};
 
 /// One `[markdown]` field name, so a ported theme can store its palette as
 /// `(key, color)` overrides applied over the base preset (the ported files
@@ -142,6 +142,7 @@ impl MdKey {
 /// cycle order).
 pub(crate) struct BuiltinTheme {
     pub name: &'static str,
+    pub appearance: Appearance,
     pub base: MarkdownThemePreset,
     pub syntax: Option<&'static str>,
     pub ui: UiTheme,
@@ -151,6 +152,7 @@ pub(crate) struct BuiltinTheme {
 pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     BuiltinTheme {
         name: "catppuccin-frappe",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {
@@ -226,6 +228,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "catppuccin-latte",
+        appearance: Appearance::Light,
         base: MarkdownThemePreset::Arctic,
         syntax: Some("InspiredGitHub"),
         ui: UiTheme {
@@ -301,6 +304,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "catppuccin-macchiato",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {
@@ -376,6 +380,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "catppuccin-mocha",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-mocha.dark"),
         ui: UiTheme {
@@ -451,6 +456,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "dracula",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-eighties.dark"),
         ui: UiTheme {
@@ -526,6 +532,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "dracula-alucard",
+        appearance: Appearance::Light,
         base: MarkdownThemePreset::Arctic,
         syntax: Some("InspiredGitHub"),
         ui: UiTheme {
@@ -601,6 +608,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "gruvbox",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {
@@ -676,6 +684,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "nord",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {
@@ -751,6 +760,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "rose-pine",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {
@@ -826,6 +836,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "rose-pine-dawn",
+        appearance: Appearance::Light,
         base: MarkdownThemePreset::Arctic,
         syntax: Some("InspiredGitHub"),
         ui: UiTheme {
@@ -901,6 +912,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "rose-pine-moon",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {
@@ -976,6 +988,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "tokyonight-day",
+        appearance: Appearance::Light,
         base: MarkdownThemePreset::Arctic,
         syntax: Some("InspiredGitHub"),
         ui: UiTheme {
@@ -1051,6 +1064,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "tokyonight-night",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {
@@ -1126,6 +1140,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
     },
     BuiltinTheme {
         name: "tokyonight-storm",
+        appearance: Appearance::Dark,
         base: MarkdownThemePreset::OceanDark,
         syntax: Some("base16-ocean.dark"),
         ui: UiTheme {

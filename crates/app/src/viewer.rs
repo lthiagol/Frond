@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::SystemTime;
 
-use engine::{parse_markdown_with_width_opts, MarkdownTheme, SyntaxAssets, TocEntry};
+use engine::{parse_markdown_with_width_opts, MarkdownTheme, ParseResult, SyntaxAssets, TocEntry};
 use ratatui::text::Line;
 use vault::{Resolution, VaultIndex};
 
@@ -105,6 +105,17 @@ pub struct Viewer {
     stamp: Option<FileStamp>,
     /// Vault index used to resolve wikilinks at parse time.
     index: Option<SharedIndex>,
+    /// Rendered line counts per wrap width, see [`Viewer::line_count_at`].
+    line_counts: Option<LineCounts>,
+}
+
+/// Line counts of one source under one theme and metadata setting, per
+/// wrap width. Valid only while all three inputs are unchanged.
+struct LineCounts {
+    source: String,
+    show_metadata: bool,
+    theme: MarkdownTheme,
+    by_width: Vec<(usize, usize)>,
 }
 
 impl Viewer {
@@ -135,6 +146,7 @@ impl Viewer {
             theme: engine::default_markdown_theme(),
             stamp: None,
             index: None,
+            line_counts: None,
         };
         viewer.open_file(path)?;
         Ok(viewer)
@@ -195,16 +207,7 @@ impl Viewer {
         // engine's regular markdown-link pipeline (styling, wrapping,
         // tables, LinkSpan bookkeeping) handles it.
         let (preprocessed, wikilink_refs) = preprocess_with_links(&task_preprocessed);
-        let result = parse_markdown_with_width_opts(
-            &preprocessed,
-            &self.assets.syntax_set,
-            &self.assets.theme,
-            self.render_width,
-            &self.theme,
-            false,
-            true,
-            self.show_metadata,
-        );
+        let result = self.render_preprocessed(&preprocessed, self.render_width);
         self.toc = result.toc;
         self.source_line_map = result.source_line_map;
         let states = self.classify_links(&wikilink_refs);
@@ -230,6 +233,52 @@ impl Viewer {
         }
         self.base_lines = result.lines;
         self.restyle_links();
+    }
+
+    /// The engine render of already-preprocessed source at `width`.
+    fn render_preprocessed(&self, preprocessed: &str, width: usize) -> ParseResult {
+        parse_markdown_with_width_opts(
+            preprocessed,
+            &self.assets.syntax_set,
+            &self.assets.theme,
+            width,
+            &self.theme,
+            false,
+            true,
+            self.show_metadata,
+        )
+    }
+
+    /// Rendered line count at `width`, cached per width while the source,
+    /// theme and metadata setting are unchanged. `ui::draw` asks for the
+    /// full-width count on every frame to decide the scrollbar; this keeps
+    /// that from re-rendering the note on each redraw.
+    pub fn line_count_at(&mut self, width: usize) -> usize {
+        let width = width.max(20);
+        let fresh = self.line_counts.as_ref().is_some_and(|cache| {
+            cache.show_metadata == self.show_metadata
+                && cache.theme == self.theme
+                && cache.source == self.source
+        });
+        if !fresh {
+            self.line_counts = Some(LineCounts {
+                source: self.source.clone(),
+                show_metadata: self.show_metadata,
+                theme: self.theme,
+                by_width: Vec::new(),
+            });
+        }
+        let cache = self.line_counts.as_ref().expect("cache set above");
+        if let Some(&(_, count)) = cache.by_width.iter().find(|(w, _)| *w == width) {
+            return count;
+        }
+        let (task_preprocessed, _) = preprocess_tasks(&self.source);
+        let (preprocessed, _) = preprocess_with_links(&task_preprocessed);
+        let count = self.render_preprocessed(&preprocessed, width).lines.len();
+        if let Some(cache) = self.line_counts.as_mut() {
+            cache.by_width.push((width, count));
+        }
+        count
     }
 
     /// Resolution state for every preprocessed wikilink (document order).
@@ -531,13 +580,15 @@ impl Viewer {
     /// Single source of truth for the render width: the content area's
     /// width (sidebar excluded), as measured in `ui::draw`. Re-parses when
     /// it changes (e.g. sidebar shown/hidden or a terminal resize).
+    /// Does not clamp the scroll: `ui::draw` may set a provisional width
+    /// (the full width, before the scrollbar is known) and the clamp must
+    /// run against the final wrap, via `on_viewport_height`.
     pub fn on_content_width(&mut self, width: usize) {
         let new_width = width.max(20);
         if new_width != self.render_width {
             self.render_width = new_width;
             self.parse_source();
         }
-        self.clamp_scroll();
     }
 
     /// Single source of truth for the viewport height: the actual frame
@@ -612,6 +663,40 @@ mod tests {
         let file = TempFile::new(name, content);
         let viewer = Viewer::open(file.path(), 80).unwrap();
         (file, viewer)
+    }
+
+    /// The cached count must equal what the viewer actually renders, and must
+    /// follow each input it depends on: the source, the wrap width, and the
+    /// metadata setting.
+    #[test]
+    fn line_count_at_matches_the_render_and_follows_its_inputs() {
+        let body = "word ".repeat(40);
+        let (file, mut v) = viewer("count.md", &format!("---\nstatus: x\n---\n{body}\n"));
+        assert_eq!(
+            v.line_count_at(80),
+            v.lines.len(),
+            "matches the drawn lines"
+        );
+        assert!(
+            v.line_count_at(30) > v.line_count_at(80),
+            "narrower wraps to more lines"
+        );
+        assert_eq!(
+            v.line_count_at(80),
+            v.lines.len(),
+            "cache keeps the width-80 count"
+        );
+
+        file.rewrite(&format!("{body}\n\n{body}\n"));
+        v.reload();
+        assert_eq!(v.line_count_at(80), v.lines.len(), "new source is counted");
+
+        v.toggle_metadata();
+        assert_eq!(
+            v.line_count_at(80),
+            v.lines.len(),
+            "metadata toggle is counted"
+        );
     }
 
     #[test]

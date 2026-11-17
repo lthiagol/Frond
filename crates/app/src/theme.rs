@@ -70,9 +70,75 @@ pub struct UiTheme {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Theme {
     pub name: String,
+    /// Declared background family; `Shift+T` / `Ctrl+T` filter on it.
+    pub appearance: Appearance,
     pub markdown: MarkdownTheme,
     pub ui: UiTheme,
     pub syntax: Option<String>,
+}
+
+/// Whether a theme is light or dark. Every theme declares one: presets
+/// and built-ins in code, custom theme files via `appearance = "light"`
+/// or `"dark"` (required — see `docs/COLORS.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Appearance {
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "light" => Some(Self::Light),
+            "dark" => Some(Self::Dark),
+            _ => None,
+        }
+    }
+}
+
+/// Which appearances `Shift+T` cycles through (`Ctrl+T` changes it for the
+/// session; `theme_rotation` in config.toml sets the startup value).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeRotation {
+    #[default]
+    All,
+    Light,
+    Dark,
+}
+
+impl ThemeRotation {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "all" => Some(Self::All),
+            "light" => Some(Self::Light),
+            "dark" => Some(Self::Dark),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Light => "light",
+            Self::Dark => "dark",
+        }
+    }
+
+    /// The next group in `Ctrl+T` order: all → light → dark → all.
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Light,
+            Self::Light => Self::Dark,
+            Self::Dark => Self::All,
+        }
+    }
+
+    pub fn allows(self, appearance: Appearance) -> bool {
+        matches!(
+            (self, appearance),
+            (Self::All, _) | (Self::Light, Appearance::Light) | (Self::Dark, Appearance::Dark)
+        )
+    }
 }
 
 // --- color parsing (ported from leaf resolution.rs) -----------------------
@@ -301,6 +367,7 @@ struct DiffOverrides {
 #[serde(default)]
 struct ThemeFileRaw {
     base: Option<String>,
+    appearance: Option<String>,
     syntax: Option<String>,
     ui: UiOverrides,
     markdown: MarkdownOverrides,
@@ -315,6 +382,16 @@ fn build_theme(name: &str, raw: ThemeFileRaw) -> Result<(Theme, Vec<String>), St
             .ok_or_else(|| format!("unknown base theme \"{base}\" for custom theme \"{name}\""))?,
         None => MarkdownThemePreset::default(),
     };
+    // Required: a custom theme must declare its background family so the
+    // light/dark rotation can place it. Without it the file is skipped
+    // with this message (never guessed from the colors).
+    let appearance = raw
+        .appearance
+        .as_deref()
+        .and_then(Appearance::parse)
+        .ok_or_else(|| {
+            format!("custom theme \"{name}\" must set appearance = \"light\" or \"dark\"")
+        })?;
 
     let mut markdown = engine::markdown_theme_by_preset(base);
     raw.markdown.apply_to(&mut markdown);
@@ -347,6 +424,7 @@ fn build_theme(name: &str, raw: ThemeFileRaw) -> Result<(Theme, Vec<String>), St
     Ok((
         Theme {
             name: name.to_string(),
+            appearance,
             markdown,
             ui,
             syntax: raw.syntax,
@@ -499,10 +577,22 @@ pub fn preset_name(preset: MarkdownThemePreset) -> &'static str {
     }
 }
 
+/// Background family of a preset: arctic is the light base, the other
+/// three are dark (`ui_by_preset` pairs each with its base palette).
+pub fn preset_appearance(preset: MarkdownThemePreset) -> Appearance {
+    match preset {
+        MarkdownThemePreset::Arctic => Appearance::Light,
+        MarkdownThemePreset::Forest
+        | MarkdownThemePreset::OceanDark
+        | MarkdownThemePreset::SolarizedDark => Appearance::Dark,
+    }
+}
+
 /// Preset theme with its paired chrome palette.
 pub fn preset_theme(preset: MarkdownThemePreset) -> Theme {
     Theme {
         name: preset_name(preset).to_string(),
+        appearance: preset_appearance(preset),
         markdown: engine::markdown_theme_by_preset(preset),
         ui: ui_by_preset(preset),
         syntax: preset_syntax(preset).map(str::to_string),
@@ -525,6 +615,7 @@ fn builtin_theme(name: &str) -> Option<Theme> {
     }
     Some(Theme {
         name: spec.name.to_string(),
+        appearance: spec.appearance,
         markdown,
         ui: spec.ui,
         syntax: spec.syntax.map(str::to_string),
@@ -725,10 +816,39 @@ impl ThemeChoices {
         &self.entries[self.index]
     }
 
-    /// Advances to the next theme (wrapping) and returns it.
-    pub fn cycle(&mut self) -> &ThemeChoice {
-        self.index = (self.index + 1) % self.entries.len();
+    /// The first entry at or after `from` (wrapping) whose appearance the
+    /// rotation allows; `None` when the rotation matches nothing.
+    pub fn find_allowed(&self, from: usize, rotation: ThemeRotation) -> Option<usize> {
+        let len = self.entries.len();
+        (0..len)
+            .map(|step| (from + step) % len)
+            .find(|&i| rotation.allows(self.entries[i].theme.appearance))
+    }
+
+    /// Whether the next `Shift+T` step wraps past the end of the cycle
+    /// (the caller re-scans the theme dirs before wrapping).
+    pub fn next_wraps(&self, rotation: ThemeRotation) -> bool {
+        let from = (self.index + 1) % self.entries.len();
+        self.find_allowed(from, rotation)
+            .is_none_or(|next| next <= self.index)
+    }
+
+    /// Advances to the next theme the rotation allows (wrapping) and
+    /// returns it; stays put when nothing matches.
+    pub fn cycle(&mut self, rotation: ThemeRotation) -> &ThemeChoice {
+        let from = (self.index + 1) % self.entries.len();
+        if let Some(next) = self.find_allowed(from, rotation) {
+            self.index = next;
+        }
         self.current()
+    }
+
+    /// How many entries the rotation allows (the status line reports it).
+    pub fn count_in(&self, rotation: ThemeRotation) -> usize {
+        self.entries
+            .iter()
+            .filter(|choice| rotation.allows(choice.theme.appearance))
+            .count()
     }
 
     /// Positions the cycle on the named theme, if present.
@@ -884,7 +1004,7 @@ mod tests {
         let file = dir.path().join("sample.toml");
         std::fs::write(
             &file,
-            "base = \"ocean\"\nsyntax = \"base16-ocean.dark\"\n\n\
+            "base = \"ocean\"\nappearance = \"dark\"\nsyntax = \"base16-ocean.dark\"\n\n\
              [ui]\ncontent_bg = \"#010203\"\nsidebar_bg = \"#030405\"\n\
              status_bg = \"#060708\"\nbogus_key = \"#ffffff\"\n\n\
              [markdown]\nheading_1 = \"#0a0b0c\"\ntext = \"#0d0e0f\"\n\
@@ -936,7 +1056,7 @@ mod tests {
         let file = dir.path().join("leafish.toml");
         std::fs::write(
             &file,
-            "base = \"forest\"\n\
+            "base = \"forest\"\nappearance = \"dark\"\n\
              [ui]\n\
              toc_accent = \"#010203\"\n\
              toc_border = \"#040506\"\n\
@@ -966,7 +1086,7 @@ mod tests {
         let file = dir.path().join("mixed.toml");
         std::fs::write(
             &file,
-            "[ui]\ntoc_accent = \"#010203\"\ncontent_bg = \"#040506\"\n",
+            "appearance = \"dark\"\n[ui]\ntoc_accent = \"#010203\"\ncontent_bg = \"#040506\"\n",
         )
         .unwrap();
         let (theme, warnings) = load_theme_file(&file, "mixed").unwrap();
@@ -979,7 +1099,11 @@ mod tests {
     fn custom_theme_defaults_to_ocean_base_and_optional_syntax() {
         let dir = TempDir::new("theme-nobase");
         let file = dir.path().join("bare.toml");
-        std::fs::write(&file, "[ui]\ncontent_bg = \"#111111\"\n").unwrap();
+        std::fs::write(
+            &file,
+            "appearance = \"dark\"\n[ui]\ncontent_bg = \"#111111\"\n",
+        )
+        .unwrap();
         let (theme, warnings) = load_theme_file(&file, "bare").unwrap();
         assert_eq!(theme.syntax, None, "no syntax key: no override");
         assert!(warnings.is_empty());
@@ -995,7 +1119,7 @@ mod tests {
     fn custom_theme_rejects_unknown_base() {
         let dir = TempDir::new("theme-badbase");
         let file = dir.path().join("bad.toml");
-        std::fs::write(&file, "base = \"not-a-preset\"\n").unwrap();
+        std::fs::write(&file, "base = \"not-a-preset\"\nappearance = \"dark\"\n").unwrap();
         let err = load_theme_file(&file, "bad").unwrap_err();
         assert!(err.contains("unknown base theme"), "{err}");
     }
@@ -1040,7 +1164,11 @@ mod tests {
     #[test]
     fn resolve_theme_accepts_presets_builtins_and_customs() {
         let dir = TempDir::new("theme-resolve");
-        std::fs::write(dir.path().join("myscheme.toml"), "base = \"ocean\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("myscheme.toml"),
+            "base = \"ocean\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         let custom = discover_custom_themes(&[dir.path().to_path_buf()]);
 
         // Preset names (leaf's aliases included) all resolve.
@@ -1110,8 +1238,16 @@ mod tests {
     #[test]
     fn choices_are_presets_builtins_customs_and_cycle_wraps() {
         let dir = TempDir::new("theme-cycle");
-        std::fs::write(dir.path().join("z-theme.toml"), "base = \"ocean\"\n").unwrap();
-        std::fs::write(dir.path().join("a-theme.toml"), "base = \"forest\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("z-theme.toml"),
+            "base = \"ocean\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("a-theme.toml"),
+            "base = \"forest\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         let custom = discover_custom_themes(&[dir.path().to_path_buf()]);
         let (mut choices, warnings) = ThemeChoices::build(&custom);
         assert!(warnings.is_empty());
@@ -1138,20 +1274,20 @@ mod tests {
         );
         // Default position is ocean (index 2).
         assert_eq!(choices.current().theme.name, "ocean");
-        assert_eq!(choices.cycle().theme.name, "solarized");
+        assert_eq!(choices.cycle(ThemeRotation::All).theme.name, "solarized");
         assert_eq!(
-            choices.cycle().theme.name,
+            choices.cycle(ThemeRotation::All).theme.name,
             "catppuccin-frappe",
             "built-ins follow the presets"
         );
         // Cycling through everything wraps back to the first preset.
         let mut guard = 0;
         while choices.current().theme.name != "arctic" {
-            choices.cycle();
+            choices.cycle(ThemeRotation::All);
             guard += 1;
             assert!(guard <= choices.entries.len(), "cycle does not wrap");
         }
-        assert_eq!(choices.cycle().theme.name, "forest");
+        assert_eq!(choices.cycle(ThemeRotation::All).theme.name, "forest");
         // select() positions on a name, unknown names report false.
         assert!(choices.select("ocean"));
         assert_eq!(choices.current().theme.name, "ocean");
@@ -1162,9 +1298,21 @@ mod tests {
     #[test]
     fn unparsable_custom_theme_is_skipped_with_a_warning() {
         let dir = TempDir::new("theme-broken-file");
-        std::fs::write(dir.path().join("good.toml"), "base = \"ocean\"\n").unwrap();
-        std::fs::write(dir.path().join("bad.toml"), "base = \"nope\"\n").unwrap();
-        std::fs::write(dir.path().join("noisy.toml"), "[ui]\nbogus = \"#ffffff\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("good.toml"),
+            "base = \"ocean\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("bad.toml"),
+            "base = \"nope\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("noisy.toml"),
+            "appearance = \"dark\"\n[ui]\nbogus = \"#ffffff\"\n",
+        )
+        .unwrap();
         let custom = discover_custom_themes(&[dir.path().to_path_buf()]);
         let (choices, load_errors) = ThemeChoices::build(&custom);
         assert_eq!(
@@ -1201,9 +1349,21 @@ mod tests {
         // load: one cycle entry per name (the reserved theme), and the
         // shadowed file surfaces a warning — never silently.
         let dir = TempDir::new("theme-collision");
-        std::fs::write(dir.path().join("dracula.toml"), "base = \"forest\"\n").unwrap();
-        std::fs::write(dir.path().join("ocean.toml"), "base = \"forest\"\n").unwrap();
-        std::fs::write(dir.path().join("mine.toml"), "base = \"ocean\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("dracula.toml"),
+            "base = \"forest\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("ocean.toml"),
+            "base = \"forest\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("mine.toml"),
+            "base = \"ocean\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         let custom = discover_custom_themes(&[dir.path().to_path_buf()]);
 
         // Cycle: single "dracula" entry (the built-in), the preset-named
@@ -1431,5 +1591,103 @@ mod tests {
             assert_eq!(theme.ui.sidebar_bg, *sidebar_bg, "{name} sidebar_bg");
             assert_eq!(theme.ui.status_bg, *status_bg, "{name} status_bg");
         }
+    }
+
+    /// Every theme's declared appearance must match its own background:
+    /// a light theme with a dark `content_bg` (or the reverse) fails here,
+    /// so the labels cannot drift from the colors they describe.
+    #[test]
+    fn declared_appearance_matches_the_background_of_every_theme() {
+        fn background_is_light(theme: &Theme) -> bool {
+            let Color::Rgb(r, g, b) = theme.ui.content_bg else {
+                panic!("{}: content_bg is not an RGB color", theme.name);
+            };
+            0.2126 * f64::from(r) + 0.7152 * f64::from(g) + 0.0722 * f64::from(b) > 128.0
+        }
+        let presets = [
+            MarkdownThemePreset::Arctic,
+            MarkdownThemePreset::Forest,
+            MarkdownThemePreset::OceanDark,
+            MarkdownThemePreset::SolarizedDark,
+        ];
+        let mut themes: Vec<Theme> = presets.into_iter().map(preset_theme).collect();
+        themes.extend(
+            crate::builtin_themes::BUILTIN_THEMES
+                .iter()
+                .map(|spec| builtin_theme(spec.name).unwrap()),
+        );
+        for theme in &themes {
+            assert_eq!(
+                theme.appearance == Appearance::Light,
+                background_is_light(theme),
+                "{} declares {:?} but its background disagrees",
+                theme.name,
+                theme.appearance
+            );
+        }
+    }
+
+    #[test]
+    fn custom_theme_must_declare_its_appearance() {
+        let dir = TempDir::new("theme-appearance");
+        let missing = dir.path().join("missing.toml");
+        std::fs::write(&missing, "base = \"ocean\"\n").unwrap();
+        let err = load_theme_file(&missing, "missing").unwrap_err();
+        assert!(err.contains("must set appearance"), "{err}");
+
+        let bogus = dir.path().join("bogus.toml");
+        std::fs::write(&bogus, "appearance = \"sepia\"\n").unwrap();
+        assert!(load_theme_file(&bogus, "bogus").is_err());
+
+        let light = dir.path().join("light.toml");
+        std::fs::write(&light, "appearance = \"Light\"\n").unwrap();
+        let (theme, _) = load_theme_file(&light, "light").unwrap();
+        assert_eq!(theme.appearance, Appearance::Light);
+    }
+
+    #[test]
+    fn theme_rotation_parses_steps_and_filters() {
+        assert_eq!(ThemeRotation::parse(" Dark "), Some(ThemeRotation::Dark));
+        assert_eq!(ThemeRotation::parse("sepia"), None);
+        assert_eq!(ThemeRotation::All.next(), ThemeRotation::Light);
+        assert_eq!(ThemeRotation::Light.next(), ThemeRotation::Dark);
+        assert_eq!(ThemeRotation::Dark.next(), ThemeRotation::All);
+        assert!(ThemeRotation::Light.allows(Appearance::Light));
+        assert!(!ThemeRotation::Light.allows(Appearance::Dark));
+        assert!(ThemeRotation::All.allows(Appearance::Dark));
+    }
+
+    #[test]
+    fn cycle_stays_inside_the_rotation_group_and_wraps() {
+        let (mut choices, _) = ThemeChoices::build(&BTreeMap::new());
+        let light: Vec<String> = choices
+            .entries
+            .iter()
+            .filter(|c| c.theme.appearance == Appearance::Light)
+            .map(|c| c.theme.name.clone())
+            .collect();
+        assert!(light.len() >= 2, "the light group has several themes");
+        assert_eq!(choices.count_in(ThemeRotation::Light), light.len());
+
+        // From the default (dark) theme, the first step enters the light group
+        // at the first light theme after it; one full pass then covers the
+        // group exactly once, and the pass wraps back to where it started.
+        choices.cycle(ThemeRotation::Light);
+        let start = choices.current().theme.name.clone();
+        let mut seen = Vec::new();
+        for _ in 0..light.len() {
+            seen.push(choices.current().theme.name.clone());
+            choices.cycle(ThemeRotation::Light);
+        }
+        let mut sorted = seen.clone();
+        sorted.sort();
+        let mut expected = light.clone();
+        expected.sort();
+        assert_eq!(sorted, expected, "one pass visits each light theme once");
+        assert_eq!(
+            choices.current().theme.name,
+            start,
+            "the pass wraps to its start"
+        );
     }
 }

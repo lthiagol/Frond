@@ -18,7 +18,7 @@ use crate::nav::Nav;
 use crate::search::{SearchMode, SearchState};
 use crate::sidebar::{NodeKind, Sidebar};
 use crate::tags::TagList;
-use crate::theme::{Theme, ThemeChoices};
+use crate::theme::{Theme, ThemeChoices, ThemeRotation};
 use crate::ui;
 use crate::viewer::{Focusable, SharedIndex, Viewer};
 use crate::watch::VaultWatcher;
@@ -144,6 +144,13 @@ pub struct App {
     /// by `<`/`>` and the config `sidebar_width` key, clamped 24–120.
     pub sidebar_width: Option<u16>,
     theme_choices: ThemeChoices,
+    /// Which appearances `Shift+T` cycles (session-only; `Ctrl+T` advances
+    /// it, `theme_rotation` in config.toml sets the startup value).
+    pub theme_rotation: ThemeRotation,
+    /// Blank columns on each side of the note text (config `margin`).
+    pub note_margin: u16,
+    /// Status-bar icon set (config `icons`).
+    pub icons: crate::config::IconSet,
     /// Discovered custom theme files (name → path), reused by config
     /// hot-reloads without re-walking the theme dirs.
     discovered_themes: BTreeMap<String, PathBuf>,
@@ -222,6 +229,9 @@ impl App {
             // Default theme (ocean) until main applies the resolved one.
             theme_ui: crate::theme::ui_by_preset(engine::MarkdownThemePreset::default()),
             theme_choices: ThemeChoices::default(),
+            theme_rotation: ThemeRotation::default(),
+            note_margin: crate::config::DEFAULT_MARGIN,
+            icons: crate::config::IconSet::default(),
             discovered_themes: BTreeMap::new(),
             config_watch: None,
             last_config_check: None,
@@ -434,20 +444,20 @@ impl App {
         load_errors
     }
 
-    /// `Shift+T`: cycles to the next theme (presets, then discovered
-    /// custom themes, wrapping) and applies it instantly. Session-only —
-    /// never writes the config. The newly selected theme's warnings
-    /// surface in the status bar. Wrapping past the last entry re-scans
-    /// the theme dirs first, so custom themes added mid-session join the
-    /// rotation (discovery parses every custom theme file eagerly inside
-    /// `ThemeChoices::build` — a dir listing plus the parses, cheap at
-    /// realistic theme counts).
+    /// `Shift+T`: cycles to the next theme the rotation allows (presets,
+    /// then built-ins, then discovered custom themes; wrapping) and applies
+    /// it instantly. Session-only — never writes the config. The newly
+    /// selected theme's warnings surface in the status bar. Wrapping past
+    /// the last entry re-scans the theme dirs first, so custom themes added
+    /// mid-session join the rotation (discovery parses every custom theme
+    /// file eagerly inside `ThemeChoices::build` — a dir listing plus the
+    /// parses, cheap at realistic theme counts).
     pub fn cycle_theme(&mut self) {
         let mut load_errors = Vec::new();
-        if self.theme_choices.index + 1 >= self.theme_choices.entries.len() {
+        if self.theme_choices.next_wraps(self.theme_rotation) {
             load_errors = self.rediscover_themes();
         }
-        let choice = self.theme_choices.cycle().clone();
+        let choice = self.theme_choices.cycle(self.theme_rotation).clone();
         self.apply_theme(&choice.theme, &choice.warnings);
         self.set_status(format!("theme: {}", choice.theme.name));
         // Re-discovery load errors surface when the applied theme itself
@@ -456,6 +466,19 @@ impl App {
         if !load_errors.is_empty() && self.viewer.last_error.is_none() {
             self.viewer.last_error = Some(load_errors.join("; "));
         }
+    }
+
+    /// `Ctrl+T`: advances the `Shift+T` rotation (all → light → dark →
+    /// all) for this session. Only the group changes: the theme on screen
+    /// stays, and `Shift+T` is what moves to a theme in the group.
+    /// Session-only, like `Shift+T`.
+    pub fn rotate_theme_group(&mut self) {
+        self.theme_rotation = self.theme_rotation.next();
+        let count = self.theme_choices.count_in(self.theme_rotation);
+        self.set_status(format!(
+            "theme group: {} ({count} themes)",
+            self.theme_rotation.name()
+        ));
     }
 
     /// The active theme's name (used by the tests; also cheap status
@@ -1407,6 +1430,9 @@ impl App {
             // `Shift+T`: theme cycling (session-only). `t` stays the
             // sidebar-mode toggle; Shift is how terminals deliver `T`.
             KeyCode::Char('T') if plain => self.cycle_theme(),
+            KeyCode::Char('t') if key.modifiers == KeyModifiers::CONTROL => {
+                self.rotate_theme_group()
+            }
             // `.base` table view switching: `v` cycles, digits jump.
             KeyCode::Char('v') if plain && self.base.is_some() => self.base_cycle_view(),
             KeyCode::Char(c) if plain && self.base.is_some() && c.is_ascii_digit() && c != '0' => {
@@ -1816,6 +1842,7 @@ mod tests {
     use vault::VaultIndex;
 
     use crate::testutil::{TempDir, TempFile};
+    use crate::theme::Appearance;
 
     /// A tiny vault: root/a.md, root/sub/b.md, root/sub/c.md.
     fn vault() -> TempDir {
@@ -4574,7 +4601,11 @@ mod tests {
     #[test]
     fn shift_t_cycles_presets_then_customs_and_wraps() {
         let dir = TempDir::new("app-cycle");
-        std::fs::write(dir.path().join("zeta.toml"), "base = \"ocean\"\n").unwrap();
+        std::fs::write(
+            dir.path().join("zeta.toml"),
+            "base = \"ocean\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         let custom = crate::theme::discover_custom_themes(&[dir.path().to_path_buf()]);
         let dirs = vec![dir.path().to_path_buf()];
         let (_f, mut app) = theme_app();
@@ -4780,7 +4811,11 @@ mod tests {
         // The theme file appears mid-session; the very next config tick
         // (no config change needed) re-checks the pending name, re-scans
         // the theme dirs, and applies it.
-        std::fs::write(themes.join("latecomer.toml"), "base = \"forest\"\n").unwrap();
+        std::fs::write(
+            themes.join("latecomer.toml"),
+            "base = \"forest\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         app.poll_config();
         assert_eq!(
             app.theme_name(),
@@ -4838,7 +4873,11 @@ mod tests {
 
         // X's file appears later: the next tick must apply nothing (Y
         // stays) — the stale pending no longer exists.
-        std::fs::write(themes.join("missing-x.toml"), "base = \"forest\"\n").unwrap();
+        std::fs::write(
+            themes.join("missing-x.toml"),
+            "base = \"forest\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         app.poll_config();
         assert_eq!(
             app.theme_name(),
@@ -4852,7 +4891,11 @@ mod tests {
         let dir = TempDir::new("app-cycle-rediscover");
         let themes = dir.path().join("themes");
         std::fs::create_dir(&themes).unwrap();
-        std::fs::write(themes.join("alpha.toml"), "base = \"ocean\"\n").unwrap();
+        std::fs::write(
+            themes.join("alpha.toml"),
+            "base = \"ocean\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         let custom = crate::theme::discover_custom_themes(std::slice::from_ref(&themes));
         let (_f, mut app) = theme_app();
         let (_theme, _warnings, _load_errors) =
@@ -4868,7 +4911,11 @@ mod tests {
 
         // A second custom theme file appears; the cycle is at its end,
         // so the next Shift+T re-scans and rotates into the new theme.
-        std::fs::write(themes.join("zulu.toml"), "base = \"forest\"\n").unwrap();
+        std::fs::write(
+            themes.join("zulu.toml"),
+            "base = \"forest\"\nappearance = \"dark\"\n",
+        )
+        .unwrap();
         app.cycle_theme();
         assert_eq!(
             app.theme_name(),
@@ -4885,6 +4932,39 @@ mod tests {
     // --- status line loop: transient info message, copy path -------------
 
     /// Shift+T sets the `theme: <name>` info message (not an error).
+    #[test]
+    fn ctrl_t_changes_only_the_group_and_shift_t_moves_the_theme() {
+        let (_f, mut app) = theme_app();
+        let (theme, warnings, _) = app.install_theme_choices("ocean", &[], &BTreeMap::new());
+        app.apply_theme(&theme, &warnings);
+        let ctrl_t = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
+        let shift_t = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT);
+        assert_eq!(app.theme_rotation, ThemeRotation::All);
+
+        // all → light: the group changes, the theme on screen does not.
+        app.handle_key(ctrl_t);
+        assert_eq!(app.theme_rotation, ThemeRotation::Light);
+        assert_eq!(app.theme_name(), "ocean", "Ctrl+T does not move the theme");
+        let status = app.last_status.clone().expect("status set");
+        assert_eq!(status.text, "theme group: light (5 themes)");
+
+        // Shift+T moves into the light group.
+        app.handle_key(shift_t);
+        assert_eq!(
+            app.theme_choices.current().theme.appearance,
+            Appearance::Light
+        );
+
+        // light → dark: Shift+T then cycles dark themes.
+        app.handle_key(ctrl_t);
+        assert_eq!(app.theme_rotation, ThemeRotation::Dark);
+        app.handle_key(shift_t);
+        assert_eq!(
+            app.theme_choices.current().theme.appearance,
+            Appearance::Dark
+        );
+    }
+
     #[test]
     fn cycle_theme_sets_status_message() {
         let (_f, mut app) = theme_app();

@@ -211,7 +211,10 @@ check(
     "Dup One" in body_text() and "unique-one-body" in body_text(),
     "popup Enter opened the first candidate (docs/dup.md)",
 )
-check("docs/dup.md" in status_line(), "status bar shows the disambiguated path")
+check(
+    "dup.md" in status_line() and "docs/dup.md" not in status_line(),
+    "status bar shows the bare name of the opened note",
+)
 
 # Same link again, second candidate this time: j moves the popup
 # selection, Enter opens refs/dup.md.
@@ -232,7 +235,10 @@ check(
     "Dup Two" in body_text() and "unique-two-body" in body_text(),
     "j + Enter opened the second candidate (refs/dup.md)",
 )
-check("refs/dup.md" in status_line(), "status bar shows refs/dup.md")
+check(
+    "dup.md" in status_line() and "refs/dup.md" not in status_line(),
+    "status bar shows the bare name, not refs/dup.md",
+)
 
 # --- heading anchor: [[alpha#Deep Section]] opens scrolled ----------------
 pos = sidebar_pos_of("index.md")
