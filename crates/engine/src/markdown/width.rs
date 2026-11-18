@@ -4,7 +4,6 @@ use unicode_width::UnicodeWidthStr;
 
 pub(crate) const TAB_STOP: usize = 4;
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 fn is_cjk(c: char) -> bool {
     matches!(
         c as u32,
@@ -18,7 +17,6 @@ fn is_cjk(c: char) -> bool {
     )
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn soft_break_joiner(prev: Option<char>, next: Option<char>) -> &'static str {
     match (prev, next) {
         (Some(p), Some(n)) if is_cjk(p) && is_cjk(n) => "",
@@ -30,7 +28,6 @@ pub(crate) fn line_plain_text(line: &Line<'_>) -> String {
     line.spans.iter().map(|s| s.content.as_ref()).collect()
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(super) fn is_code_gutter_span(content: &str) -> bool {
     let inner = content.strip_prefix('│').and_then(|s| s.strip_suffix('│'));
     match inner {
@@ -49,7 +46,6 @@ pub(super) fn is_code_gutter_span(content: &str) -> bool {
     }
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 fn line_searchable_text(line: &Line<'_>, marker: &str) -> String {
     let collect_filtered = |spans: &[ratatui::text::Span<'_>]| -> String {
         spans
@@ -87,7 +83,6 @@ fn line_searchable_text(line: &Line<'_>, marker: &str) -> String {
     collect_filtered(&spans[start..end])
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn build_searchable_lines(lines: &[Line<'_>]) -> Vec<String> {
     super::with_link_marker(|marker| {
         lines

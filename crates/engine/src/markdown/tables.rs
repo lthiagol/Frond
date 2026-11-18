@@ -308,7 +308,6 @@ impl TableBuf {
         }
     }
 
-    #[allow(dead_code)] // vendored leaf surface, see VENDORED.md
     pub(crate) fn from_key_value_pairs(pairs: &[(String, String)], vertical: bool) -> Self {
         let style = CellInlineStyle::default();
         if vertical {

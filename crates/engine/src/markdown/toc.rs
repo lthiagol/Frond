@@ -5,14 +5,12 @@ pub struct TocEntry {
     pub line: usize,
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) struct TocLevels {
     pub(crate) root: u8,
     pub(crate) sub: Option<u8>,
 }
 
 impl TocLevels {
-    #[allow(dead_code)] // vendored leaf surface, see VENDORED.md
     pub(crate) fn display_level(&self, level: u8) -> Option<u8> {
         if level == self.root {
             Some(1)
@@ -31,7 +29,6 @@ fn distinct_levels(toc: &[TocEntry]) -> Vec<u8> {
     levels
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn toc_levels(toc: &[TocEntry]) -> Option<TocLevels> {
     let levels = distinct_levels(toc);
     let &top = levels.first()?;

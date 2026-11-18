@@ -1,5 +1,8 @@
-// Unused leaf items carry item-level `#[allow(dead_code)]` (VENDORED.md), so
-// dead code introduced by our own edits in this tree is still reported.
+// Deviation from upstream (VENDORED.md): `dead_code` is allowed module-wide.
+// leaf's app consumes this surface (search highlight, link markers, bullet
+// glyphs); the engine ships it unused until those milestones land.
+#![allow(dead_code)]
+
 mod blocks;
 mod fences;
 mod footnotes;
@@ -73,7 +76,6 @@ pub(crate) fn with_link_marker<R>(f: impl FnOnce(&str) -> R) -> R {
     LINK_MARKER.with(|c| f(&c.borrow()))
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn set_link_marker(marker: &str) {
     LINK_MARKER.with(|c| {
         c.borrow_mut().replace_range(.., marker);
