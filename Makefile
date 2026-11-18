@@ -1,7 +1,12 @@
 # frond — build/test/clean
 # Read-only Obsidian-style terminal viewer. See SPEC.md.
 
-CARGO ?= cargo
+# Cargo: use the one on PATH, else rustup's default location. A shell
+# whose PATH lacks ~/.cargo/bin (a fresh login shell, a terminal launched
+# from a desktop file, a CI image) would otherwise fail every target with
+# "cargo: command not found". Override with `make CARGO=... <target>` or
+# an exported CARGO.
+CARGO ?= $(shell command -v cargo 2>/dev/null || echo $(HOME)/.cargo/bin/cargo)
 
 .PHONY: help build release test smoke fmt clippy check run clean clean-fixtures
 
