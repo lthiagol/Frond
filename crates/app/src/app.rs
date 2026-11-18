@@ -104,6 +104,24 @@ pub enum Flow {
     Quit,
 }
 
+/// Widget geometry as of the last draw. `ui::draw` refreshes it every
+/// frame; click and wheel handlers (which run between frames) route by it.
+#[derive(Debug, Default)]
+pub struct Layout {
+    /// The note viewport, for click → link mapping.
+    pub note_viewport: Rect,
+    /// The sidebar widget (`None` while hidden).
+    pub sidebar_area: Option<Rect>,
+    /// The backlinks panel (`None` while closed).
+    pub backlinks_area: Option<Rect>,
+    /// The search popup (`None` while closed): routes result-row clicks and
+    /// wheels by position.
+    pub search_area: Option<Rect>,
+    /// The status bar's note-name segment (`None` when no name segment is
+    /// drawn): routes the copy-path click.
+    pub status_name_area: Option<Rect>,
+}
+
 pub struct App {
     pub viewer: Viewer,
     /// `Some` only when `--vault` was passed; the sidebar is hidden until
@@ -134,24 +152,19 @@ pub struct App {
     pub git: Option<GitStatus>,
     /// Vault-wide change detection (poll-based; see `watch.rs`).
     pub watcher: Option<VaultWatcher>,
-    /// The note viewport's geometry as of the last draw, for click →
-    /// link mapping (set by `ui::draw` every frame).
-    pub note_viewport: Rect,
-    /// The sidebar widget's geometry as of the last draw (`None` while
-    /// the sidebar is hidden); routes sidebar clicks/wheels by position.
-    pub sidebar_area: Option<Rect>,
-    /// The backlinks panel's geometry as of the last draw (`None` while
-    /// the panel is closed); routes panel clicks to focus.
-    pub backlinks_area: Option<Rect>,
-    /// The search popup's geometry as of the last draw (`None` while the
-    /// popup is closed); routes result-row clicks and wheels by position.
-    pub search_area: Option<Rect>,
+    /// Widget geometry as of the last draw (see [`Layout`]).
+    pub layout: Layout,
     /// Last `viewer.last_reload` value we reacted to with a sidebar rescan
     /// (loose refresh: the tree is re-walked only after a watch reload).
     last_rescan: Option<SystemTime>,
     last_vault_scan: Option<Instant>,
     /// When the git status was last actually spawned (debounce clock).
     last_git_refresh: Option<Instant>,
+    /// In-flight background `git status` query (see [`Self::refresh_git`]).
+    git_job: Option<std::sync::mpsc::Receiver<Option<GitStatus>>>,
+    /// A refresh was requested while one was in flight: run once more when
+    /// it lands, so the final state is never missed.
+    git_rerun: bool,
     /// Active theme (chrome + markdown palette). Cycled with `Shift+T`,
     /// replaced by config hot-reloads; session-only, never persisted.
     pub theme_ui: crate::theme::UiTheme,
@@ -199,9 +212,6 @@ pub struct App {
     /// Transient info message for the status bar (`STATUS_MESSAGE_TTL`).
     /// Shown only while `viewer.last_error` is `None`.
     pub last_status: Option<StatusMessage>,
-    /// The status bar's note-name segment as of the last draw (`None`
-    /// when no name segment is drawn); routes the copy-path click.
-    pub status_name_area: Option<Rect>,
     /// A clipboard copy requested by a click, waiting for the event loop
     /// to write its OSC 52 sequence to the terminal (kept out of the
     /// render buffer; see `main.rs`).
@@ -244,13 +254,12 @@ impl App {
             watcher,
             mouse_capture: true,
             sidebar_width: None,
-            note_viewport: Rect::default(),
-            sidebar_area: None,
-            backlinks_area: None,
-            search_area: None,
+            layout: Layout::default(),
             last_rescan: None,
             last_vault_scan: None,
             last_git_refresh: None,
+            git_job: None,
+            git_rerun: false,
             // Default theme (ocean) until main applies the resolved one.
             theme_ui: crate::theme::ui_by_preset(engine::MarkdownThemePreset::default()),
             theme_choices: ThemeChoices::default(),
@@ -265,7 +274,6 @@ impl App {
             pending_theme_scan: None,
             base: None,
             last_status: None,
-            status_name_area: None,
             pending_clipboard: None,
         };
         app.refresh_tags();
@@ -274,11 +282,12 @@ impl App {
         Ok(app)
     }
 
-    /// Runs the read-only git status queries for the vault root.
-    ///
-    /// **Synchronous**: each query blocks the UI thread until `git`
-    /// returns (up to three short-lived processes), which on a very large
-    /// repository can be noticeable.
+    /// Starts the read-only git status queries for the vault root on a
+    /// worker thread; [`Self::poll_git`] (from `poll`) installs the result,
+    /// so a slow `git status` on a large repository never stalls the UI.
+    /// At most one query runs at a time; a request made meanwhile re-runs
+    /// once when it finishes. (The write guard, `git_write_guard`, stays
+    /// synchronous on purpose: it must see the exact current state.)
     ///
     /// On demand only: startup (`force`), the `u` key (`force`), every
     /// successful note open (SPEC: status is "refreshed on open, watch
@@ -300,10 +309,59 @@ impl App {
             return;
         }
         self.last_git_refresh = Some(now);
-        // Extract the root before spawning (no borrow may cross the git
-        // subprocess calls).
+        if self.git_job.is_some() {
+            self.git_rerun = true;
+            return;
+        }
         let root = index.borrow().root().to_path_buf();
-        self.git = vault::git::read_status(&root);
+        self.spawn_git(root);
+    }
+
+    fn spawn_git(&mut self, root: PathBuf) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // The receiver may be gone (app quit): nothing to report to.
+            let _ = tx.send(vault::git::read_status(&root));
+        });
+        self.git_job = Some(rx);
+    }
+
+    /// Installs a finished background git query, and starts the queued
+    /// re-run if one was requested meanwhile. Called every `poll` tick.
+    fn poll_git(&mut self) {
+        use std::sync::mpsc::TryRecvError;
+        let Some(rx) = &self.git_job else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(status) => self.git = status,
+            Err(TryRecvError::Empty) => return,
+            // The worker died without a result: keep the last status.
+            Err(TryRecvError::Disconnected) => {}
+        }
+        self.git_job = None;
+        if std::mem::take(&mut self.git_rerun) {
+            if let Some(index) = &self.index {
+                let root = index.borrow().root().to_path_buf();
+                self.spawn_git(root);
+            }
+        }
+    }
+
+    /// Test helper: blocks until no git query is in flight or queued.
+    #[cfg(test)]
+    pub fn wait_git(&mut self) {
+        while let Some(rx) = self.git_job.take() {
+            if let Ok(status) = rx.recv() {
+                self.git = status;
+            }
+            if std::mem::take(&mut self.git_rerun) {
+                if let Some(index) = &self.index {
+                    let root = index.borrow().root().to_path_buf();
+                    self.spawn_git(root);
+                }
+            }
+        }
     }
 
     /// The displayed file's path relative to the vault root (the note's
@@ -834,14 +892,14 @@ impl App {
         if self.any_popup_open() {
             return;
         }
-        if let Some(area) = self.status_name_area {
+        if let Some(area) = self.layout.status_name_area {
             if point_in_rect(col, row, area) {
                 self.copy_current_relative_path();
                 return;
             }
         }
         if self.sidebar_visible {
-            if let Some(area) = self.sidebar_area {
+            if let Some(area) = self.layout.sidebar_area {
                 if point_in_rect(col, row, area) {
                     let opened = self.sidebar_click(row, area);
                     // Clicked-pane-wins, except that an open moves the
@@ -854,7 +912,7 @@ impl App {
                 }
             }
         }
-        if let Some(area) = self.backlinks_area {
+        if let Some(area) = self.layout.backlinks_area {
             if point_in_rect(col, row, area) {
                 self.focus = Focus::Backlinks;
                 // A click on a listed row selects it and opens it (SPEC:
@@ -877,7 +935,7 @@ impl App {
             self.focus = Focus::Content;
             return;
         }
-        let area = self.note_viewport;
+        let area = self.layout.note_viewport;
         // Right edge included: the scrollbar column sits just past the
         // text rect and must never reach the link/checkbox hit-test.
         if !point_in_rect(col, row, area) {
@@ -915,7 +973,7 @@ impl App {
         let Some(base) = &self.base else {
             return;
         };
-        let area = self.note_viewport;
+        let area = self.layout.note_viewport;
         if area.width < 3
             || area.height < 3
             || col < area.x + 1
@@ -940,7 +998,7 @@ impl App {
     /// keyboard's Enter semantics). Border/footer/empty rows and input
     /// mode are no-ops; clicks outside the popup do nothing at all.
     fn search_click(&mut self, col: u16, row: u16) {
-        let Some(popup) = self.search_area else {
+        let Some(popup) = self.layout.search_area else {
             return;
         };
         if !point_in_rect(col, row, popup) || row <= popup.y {
@@ -1079,6 +1137,7 @@ impl App {
         // Config hot-reload rides the same 1 s cadence as the vault scan.
         let now = Instant::now();
         self.expire_status_at(now);
+        self.poll_git();
         if self
             .last_config_check
             .is_none_or(|t| now.duration_since(t) >= VAULT_SCAN_INTERVAL)
@@ -1305,6 +1364,70 @@ impl App {
         }
     }
 
+    /// Keys while the disambiguation popup is open: j/k move, Enter opens
+    /// the chosen note, Ctrl+C quits, anything else cancels the popup.
+    fn handle_disambiguation_key(&mut self, key: KeyEvent) -> Flow {
+        let plain = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
+        let Some(d) = &mut self.disambiguation else {
+            return Flow::Continue;
+        };
+        let last = d.candidates.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down if plain => {
+                d.selected = (d.selected + 1).min(last);
+            }
+            KeyCode::Char('k') | KeyCode::Up if plain => {
+                d.selected = d.selected.saturating_sub(1);
+            }
+            KeyCode::Enter if plain => {
+                if let Some(chosen) = self.disambiguation.take() {
+                    self.open_wikilink_target(
+                        &chosen.candidates[chosen.selected],
+                        chosen.heading.as_deref(),
+                    );
+                }
+            }
+            // Ctrl+C quits even while the popup is open (mirrors the
+            // main loop; everything else cancels the popup).
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => return Flow::Quit,
+            _ => self.disambiguation = None,
+        }
+        Flow::Continue
+    }
+
+    /// Keys while the help popup is open: scrolling keys scroll it, every
+    /// other key closes it.
+    fn handle_help_key(&mut self, key: KeyEvent) -> Flow {
+        let plain = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
+        // Help scrolls with j/k/arrows, PgUp/PgDn, g/G; every other key
+        // closes it (as before). Scroll positions are clamped at draw
+        // time (`ui::draw_help`), so the step here can overshoot safely.
+        let page = crate::ui::HELP_PAGE_STEP;
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down if plain => {
+                self.viewer.help_scroll = self.viewer.help_scroll.saturating_add(1);
+            }
+            KeyCode::Char('k') | KeyCode::Up if plain => {
+                self.viewer.help_scroll = self.viewer.help_scroll.saturating_sub(1);
+            }
+            KeyCode::PageDown if plain => {
+                self.viewer.help_scroll = self.viewer.help_scroll.saturating_add(page);
+            }
+            KeyCode::PageUp if plain => {
+                self.viewer.help_scroll = self.viewer.help_scroll.saturating_sub(page);
+            }
+            KeyCode::Char('g') | KeyCode::Home if plain => self.viewer.help_scroll = 0,
+            KeyCode::Char('G') | KeyCode::End if plain => {
+                self.viewer.help_scroll = usize::MAX;
+            }
+            _ => {
+                self.viewer.help_open = false;
+                self.viewer.help_scroll = 0;
+            }
+        }
+        Flow::Continue
+    }
+
     /// Handles one key press. The search popup (if open) gets the key
     /// first; then the disambiguation popup; then any key closes the help
     /// popup; `q` and Ctrl+C quit; everything else is focus-dependent.
@@ -1315,58 +1438,11 @@ impl App {
         if self.search.open {
             return self.handle_search_key(key);
         }
-        if let Some(d) = &mut self.disambiguation {
-            let last = d.candidates.len().saturating_sub(1);
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down if plain => {
-                    d.selected = (d.selected + 1).min(last);
-                }
-                KeyCode::Char('k') | KeyCode::Up if plain => {
-                    d.selected = d.selected.saturating_sub(1);
-                }
-                KeyCode::Enter if plain => {
-                    if let Some(chosen) = self.disambiguation.take() {
-                        self.open_wikilink_target(
-                            &chosen.candidates[chosen.selected],
-                            chosen.heading.as_deref(),
-                        );
-                    }
-                }
-                // Ctrl+C quits even while the popup is open (mirrors the
-                // main loop; everything else cancels the popup).
-                KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => return Flow::Quit,
-                _ => self.disambiguation = None,
-            }
-            return Flow::Continue;
+        if self.disambiguation.is_some() {
+            return self.handle_disambiguation_key(key);
         }
         if self.viewer.help_open {
-            // Help scrolls with j/k/arrows, PgUp/PgDn, g/G; every other key
-            // closes it (as before). Scroll positions are clamped at draw
-            // time (`ui::draw_help`), so the step here can overshoot safely.
-            let page = crate::ui::HELP_PAGE_STEP;
-            match key.code {
-                KeyCode::Char('j') | KeyCode::Down if plain => {
-                    self.viewer.help_scroll = self.viewer.help_scroll.saturating_add(1);
-                }
-                KeyCode::Char('k') | KeyCode::Up if plain => {
-                    self.viewer.help_scroll = self.viewer.help_scroll.saturating_sub(1);
-                }
-                KeyCode::PageDown if plain => {
-                    self.viewer.help_scroll = self.viewer.help_scroll.saturating_add(page);
-                }
-                KeyCode::PageUp if plain => {
-                    self.viewer.help_scroll = self.viewer.help_scroll.saturating_sub(page);
-                }
-                KeyCode::Char('g') | KeyCode::Home if plain => self.viewer.help_scroll = 0,
-                KeyCode::Char('G') | KeyCode::End if plain => {
-                    self.viewer.help_scroll = usize::MAX;
-                }
-                _ => {
-                    self.viewer.help_open = false;
-                    self.viewer.help_scroll = 0;
-                }
-            }
-            return Flow::Continue;
+            return self.handle_help_key(key);
         }
         match key.code {
             KeyCode::Char('q') if plain => return Flow::Quit,
@@ -1506,7 +1582,7 @@ impl App {
     /// popups gate the wheel like clicks.
     pub fn handle_wheel_at(&mut self, col: u16, row: u16, down: bool) {
         if self.search.open {
-            if let Some(popup) = self.search_area {
+            if let Some(popup) = self.layout.search_area {
                 if point_in_rect(col, row, popup) {
                     self.search.move_selection(if down { 3 } else { -3 });
                 }
@@ -1517,7 +1593,7 @@ impl App {
             return;
         }
         if self.sidebar_visible {
-            if let Some(area) = self.sidebar_area {
+            if let Some(area) = self.layout.sidebar_area {
                 if point_in_rect(col, row, area) {
                     self.sidebar_move(if down { 3 } else { -3 });
                     return;
@@ -1673,7 +1749,7 @@ impl App {
     /// else the width of the last drawn sidebar (the proportional default).
     fn current_sidebar_width(&self) -> u16 {
         self.sidebar_width
-            .or_else(|| self.sidebar_area.map(|a| a.width))
+            .or_else(|| self.layout.sidebar_area.map(|a| a.width))
             .unwrap_or_else(|| ui::sidebar_width(u16::MAX))
     }
 

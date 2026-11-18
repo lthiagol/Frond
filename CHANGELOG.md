@@ -13,6 +13,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   concurrent instances cannot clobber each other.
 
 ### Changed
+- Git status refresh runs on a worker thread (no UI stall on large repos), and
+  git is invoked with `--no-optional-locks` so a refresh can never block your
+  own concurrent `git commit` on `index.lock`. The checkbox write guard stays
+  synchronous.
+- Theme palette fields are listed once (`with_markdown_fields!`) and generate
+  both the config overrides and the built-in theme keys; a test catches an
+  engine field missing from the list.
 - Performance: only the visible slice of a note is cloned per frame; a watch
   tick reindexes all changed notes with one derived-state rebuild; syntect
   assets load once per process (theme cycling is instant); search avoids

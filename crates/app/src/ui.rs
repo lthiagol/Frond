@@ -92,7 +92,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     };
     // Geometry for the mouse handlers (click/wheel routing): fresh every
     // frame, `None` while the sidebar is hidden.
-    app.sidebar_area = sidebar_area;
+    app.layout.sidebar_area = sidebar_area;
 
     if app.base.is_some() {
         // A `.base` file is open: the content area is its table (the
@@ -102,8 +102,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             height: view_height,
             ..content_area
         };
-        app.note_viewport = note_area;
-        app.backlinks_area = None;
+        app.layout.note_viewport = note_area;
+        app.layout.backlinks_area = None;
         draw_base_table(f, note_area, app, ui);
     } else {
         // The backlinks panel (`b`) takes the bottom slice of the content area.
@@ -153,7 +153,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         } else {
             text_full
         };
-        app.note_viewport = note_area;
+        app.layout.note_viewport = note_area;
         app.viewer.on_viewport_height(note_full.height + 1);
 
         // The text widget paints only its own cells, so the margin columns
@@ -188,7 +188,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
 
         // Geometry for click routing (focus on click), fresh every frame.
-        app.backlinks_area = None;
+        app.layout.backlinks_area = None;
         if panel_height > 0 {
             let panel = Rect {
                 y: content_area.y + view_height - panel_height,
@@ -242,11 +242,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // Record the popup geometry for the mouse handlers before the
         // index borrow (which would block the `&mut` access).
         let popup = crate::search::popup_geometry(area, app.search.mode, app.search.hits.len());
-        app.search_area = Some(popup);
+        app.layout.search_area = Some(popup);
         let index = app.index.as_ref().map(|i| i.borrow());
         draw_search(f, area, app, ui, index.as_deref());
     } else {
-        app.search_area = None;
+        app.layout.search_area = None;
     }
 }
 
@@ -625,7 +625,7 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
     } else {
         area.right()
     };
-    app.backlinks_area = Some(Rect {
+    app.layout.backlinks_area = Some(Rect {
         width: hit_right - area.x,
         ..area
     });
@@ -739,10 +739,10 @@ fn draw_disambiguation(
 /// the search state's mode. Results rows are `relpath:line snippet` with
 /// the match highlighted; a stateless scroll window keeps the selection
 /// visible when there are more hits than rows. The popup rectangle was
-/// recorded into `app.search_area` by `draw` (the mouse handlers map
+/// recorded into `app.layout.search_area` by `draw` (the mouse handlers map
 /// clicks/wheels through it, using the same row math as below).
 fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<&VaultIndex>) {
-    let popup = app.search_area.unwrap_or_else(|| {
+    let popup = app.layout.search_area.unwrap_or_else(|| {
         crate::search::popup_geometry(area, app.search.mode, app.search.hits.len())
     });
     let footer = match app.search.mode {
@@ -947,7 +947,7 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
     }
     // The note-name segment (clickable: copies the vault-relative path)
     // exists only in content focus; the sidebar's full path is not a name.
-    app.status_name_area = if sidebar_focused {
+    app.layout.status_name_area = if sidebar_focused {
         None
     } else {
         let width = (UnicodeWidthStr::width(path.as_str()) as u16).min(area.width);
