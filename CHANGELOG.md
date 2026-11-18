@@ -2,7 +2,7 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates are UTC.
 
-## [Unreleased]
+## [0.6.1] — 2026-11-17
 
 ### Fixed
 - A wikilink with a non-ASCII target (`[[ééé]]`) no longer panics the index
