@@ -97,12 +97,14 @@ lines_before = int(status_line().split(" · ")[1].split()[0])
 check(lines_before > 0, f"line count parsed ({lines_before})")
 
 # scroll: j, arrow-down, PgDn, mouse wheel
-top_row5 = row(5)
+body_before = body_text()
 # Column 60 is the note pane: the sidebar takes the left ~30 columns, and a
 # wheel over it does not scroll the note.
 send("\x1b[<65;60;10M\x1b[<65;60;10M\x1b[<65;60;10M")  # SGR wheel-down x3
 pump(0.4)
-check(row(5) != top_row5, "mouse wheel scroll moved viewport")
+# Compare the whole body, not a single row: a fixed row can sit in a blank
+# gap on both sides of a small scroll and read unchanged.
+check(body_text() != body_before, "mouse wheel scroll moved viewport")
 send("j"); send("\x1b[B"); send("\x1b[6~")
 pump(0.4)
 send("G")
