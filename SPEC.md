@@ -30,30 +30,47 @@ crates/
   engine/    leaf's src/markdown/ vendored, minimal changes:
              expose ParseResult (styled lines, TOC, link spans, source-line maps),
              add wikilink preprocessing hook
-  vault/     vault model:
+  vault/     vault model (dependency-free):
              - index: walk .md files -> path, frontmatter (status, tags, created,
                updated, archived), wikilinks out; backlink map derived
              - resolver: bare-filename -> path map, ambiguity detection
-             - watcher: notify on vault dir -> dirty paths -> reindex + event bus
+             - base: the .base YAML subset parser + the table model
+             - watcher: poll the vault dir -> dirty paths -> reindex
              - git: status --porcelain, rev-list ahead/behind, changed-files list
   app/       ratatui shell:
              - state: navigation stack, current note + scroll pos, sidebar mode,
-               search state
+               search state, quick-switcher state
              - layout, rendering, keybindings, mouse
 ```
 
 ### Data flow
 
-1. Startup: `vault::index` walks the vault (≈480 notes — fast, no daemon), builds link/tag maps.
-2. Note opened: raw md → wikilink preprocessing (`[[target|alias]]` → `[alias](vault://target)`) → `engine::parse` → styled lines.
-3. Watcher event (file changed/deleted): reindex that file, if it's the visible note re-parse and redraw; refresh git status.
+1. Startup: `vault::index` walks the vault (fast, no daemon), builds link/tag maps. The vault root is `--vault`, else the config's `vault` key, else (with a file argument) the current directory; with neither, the app prompts for the vault directory.
+2. Note opened: raw md → wikilink preprocessing (`[[target|alias]]` → `[alias](vault://<n>/<target>)`, the target percent-encoded, an optional `#heading` appended) → `engine::parse` → styled lines.
+3. Watch tick (every 250 ms): the open file's mtime+size stamp is polled
+   (re-parse + redraw when it changed); once a second the whole vault is
+   re-walked and the changed notes are reindexed (the sidebar tree, the
+   tags and the backlinks are refreshed). The git status is refreshed too
+   (debounced, on a worker thread).
 4. Wikilink activated: resolve via vault index → push current note on back stack → open target (scroll pos saved per note in the stack).
 
 ### Wikilink resolution
 
-Per vault rule: bare filename first (`[[stem-analysis]]`), path fallback (`[[archive/index]]`).
-Ambiguous basenames render with a warning marker and resolve on click via a small popup if needed.
-Unresolved links render dimmed/strikethrough, non-clickable.
+Per vault rule: a target without a `/` matches the bare file name
+(`[[stem-analysis]]`, case-insensitive, `.md` optional); a target with a
+`/` matches the vault-relative path (`[[archive/index]]`, with the
+suffix optional on either side), falling back to a path *suffix* match
+(`[[index]]` → `archive/index.md`). A `.base` target resolves against the
+vault's base tables only.
+An ambiguous basename is resolved *at parse time* by proximity: the
+candidate in the nearest ancestor folder of the linking note wins (the
+note's own folder first). Two candidates equally near are never guessed
+between — only then does the link open the
+disambiguation popup; the ambiguous link is painted in the theme's
+warning colour (`status_dirty_fg`) — there is no marker glyph.
+An unresolved link keeps the link's own colour, struck through and
+dimmed; it can still be focused with `x`/`X`, but activating it is an
+error (`unresolved link: <target>`), never a guess.
 
 ## Layout
 
@@ -63,19 +80,28 @@ Unresolved links render dimmed/strikethrough, non-clickable.
 │ tree|tags    │                                         │
 │              │                                         │
 ├──────────────┴─────────────────────────────────────────┤
-│ status bar: path · status badge · tags · git ↓2 ↑1 · q │
-└────────────────────────────────────────────────────────┘
+│ status bar: name · size · watch · rendered · git ↓2 ↑1  │
+└─────────────────────────────────────────────────────────┘
 ```
 
-- Sidebar (~30%, overridable with `<`/`>` or the config `sidebar_width`
-  key, clamped 24–120 columns): mode toggled with `t` (tree ⇄ tags). Tree: collapsible folders, truncation
+- Sidebar (~30% of the terminal, clamped 24–60 columns; overridable with
+  `<`/`>` or the config `sidebar_width` key, clamped 24–120): mode toggled
+  with `t` (tree ⇄ tags). Tree: collapsible folders, truncation
   with the focused name on the status bar. Notes show status glyphs from frontmatter `status:`
   (single mapping table in `crates/app/src/ui.rs`): `●` complete/resolved/active,
   `◐` in-progress/monitoring, `○` pending/planned, `◌` draft, `◉` blocked,
   `×` dimmed for archived/superseded; unknown statuses show no glyph.
-  Files changed since last sync get a `*` marker.
-- Optional backlinks panel toggled with `b` (lists "N notes link here", click/Enter opens).
-- Session memory (XDG state dir, one file per vault): the last open note
+  Files whose git status marks them as changed in the working tree get a
+  `*` marker.
+  `.base` tables are tree rows too (alphabetically among the notes) and
+  open the table view.
+- Optional backlinks panel toggled with `b` (the panel title is
+  `backlinks (N)`; `no notes link here` is its empty state; click/Enter
+  opens a listed note). Opening it moves the focus to the panel, closing
+  it returns the focus to the content pane.
+- Session memory (XDG state dir — `XDG_STATE_HOME/frond`, else
+  `~/.local/state/frond`; `FROND_SESSION` overrides it; one file per
+  vault, named after a hash of the vault root): the last open note
   with its scroll, plus the sidebar's mode, selection and folder expansion,
   are saved on clean quit and restored on the next start (an explicit note
   argument wins over the restore). `frond --config-show` prints a
@@ -84,8 +110,9 @@ Unresolved links render dimmed/strikethrough, non-clickable.
 ## Keybindings (v1)
 
 From leaf, the app inherited scroll keys, the mouse wheel, and the `?` help
-popup (leaf's app-layer `/` search, TOC `t`, quick switcher `Ctrl+P`, and
-history `Ctrl+H` were not vendored). The table below is the real key set —
+popup (leaf's app-layer `/` search, TOC `t` and history `Ctrl+H` were not
+vendored; the quick switcher `Ctrl+P` was re-implemented from scratch in
+frond — see "Quick switcher" below). The table below is the real key set —
 verified against `crates/app/src/app.rs::handle_key` and the help popup in
 `crates/app/src/ui.rs`:
 
@@ -94,27 +121,27 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `j` / `k`, arrows | Scroll (content); move selection (sidebar, backlinks) |
 | PgUp / PgDn | Half page |
 | `g` / `G`, Home / End | Top / bottom |
-| Mouse wheel | Scroll the pane under the cursor / the focused pane |
-| Click (sidebar / content / backlinks) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane |
+| Mouse wheel | Scroll the content pane; over the sidebar, the backlinks panel or a popup it moves that pane's selection instead |
+| Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a popup row selects it (a second click on the selected row opens it) |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
 | `<` / `>` | Narrow / widen the sidebar (2-column steps, clamped) |
-| `h` / `l` (or ← / →) | Focus sidebar / content (`l` expands a folder, `h` collapses) |
+| `h` / `l` (or ← / →) | Focus sidebar / content (`l` expands a folder, `l` on a note row moves the focus to the content; `h` collapses a folder, `h` on a note row collapses to its parent); from the backlinks panel `h` returns to the content |
 | `x` / `X` | Focus next/previous link **or checkbox** (document order) |
 | `f` | Show / hide the note's frontmatter metadata block |
 | `m` | Toggle mouse capture (off = the terminal selects text natively) |
 | `Enter` / click | Open focused link; Enter/click on a checkbox toggles it |
 | `Backspace` / `Ctrl+O` | Back / forward in the navigation stack (scroll restored) |
-| `b` | Toggle backlinks panel |
+| `b` | Toggle backlinks panel (opening moves the focus into it) |
 | `s` | Global vault search (Enter opens the hit line) |
 | `Ctrl+P` | Quick switcher: fuzzy jump to a note by name (Enter opens it) |
 | `u` | Sync status refresh (also auto on watch events) |
 | `v` / `1`–`9` | Switch table view while a `.base` file is open |
 | `w` | Toggle watch mode (content pane) |
 | `Shift+T` | Cycle theme within the current group: presets, built-ins, then custom themes (session-only) |
-| `Ctrl+T` | Theme group for `Shift+T`: all → light → dark. Changes the group only; the status line shows the group and its size (session-only) |
-| `?` | Help popup: a centered single column with grouped sections (bold headers, one blank line between groups, keys aligned to one column) over a dimmed background, with a fixed title/footer; `j`/`k`/arrows, PgUp/PgDn, `g`/`G` scroll it; any other key closes it |
-| `q` / `Ctrl+C` | Quit |
+| `Ctrl+T` | Theme group for `Shift+T`: all → light → dark → all. Changes the group only; the status line shows the group and its size (session-only) |
+| `?` | Help popup: a centered single column with grouped sections (bold headers, keys aligned to one column) over a dimmed background, with a fixed title/footer; `j`/`k`/arrows, PgUp/PgDn, `g`/`G` scroll it; any other key closes it. The blank line between the groups is dropped when the body does not fit — then it scrolls behind a scrollbar |
+| `q` / `Ctrl+C` | Quit (while the help popup is open, `Ctrl+C` closes the popup instead) |
 
 ## Themes & configuration
 
@@ -135,14 +162,18 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   rose-pine-dawn, rose-pine-moon, tokyonight-day/night/storm) are compiled
   into the binary (ported from the user's leaf theme files, `[ui]` keys
   translated to the app vocabulary at port time). Custom theme files
-  (TOML: `base` + `syntax` + `[ui]` + `[markdown]`) load with preset
-  inheritance — `[markdown]` field names are the engine's own; `[ui]` uses
+  (TOML: `base` + `appearance` + `syntax` + `[ui]` + `[markdown]`) load
+  with preset inheritance — `[markdown]` field names are the engine's own;
+  `[ui]` uses
   the app's own vocabulary (`sidebar_*`, `status_*`, `popup_*`) ONLY —
   leaf's `[ui]` key names are not accepted in custom files (they warn as
   unknown). Unknown `[ui]`/`[diff]`/`[markdown]` keys are ignored with a
-  listed warning (never silently). `[diff]` has no diff view.
+  listed warning (never silently). `[diff]` has no diff view. An unknown
+  `base` preset is a hard load error (the file is skipped and named), and
+  so is a missing or invalid `appearance`.
 - **Theme dirs:** `~/.config/frond/themes/` (frond-format TOML files only; the
-  leaf compat directory is no longer read).
+  leaf compat directory is no longer read). `FROND_THEMES` overrides the
+  directory (tests and smokes only).
 - **Appearance:** every theme is light or dark. Presets and built-ins declare
   it in code; a custom file must set `appearance = "light"` or `"dark"`, and
   a file without a valid value is skipped with a load error. The rotation
@@ -155,7 +186,9 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   default; a custom theme's unknown `syntax` name falls back to the default
   syntect theme with a warning.
 - **Config `~/.config/frond/config.toml`:** `theme`, `vault`, `watch`
-  (bool), `mouse` (bool, default on; off = native text selection),
+  (bool, default on: the *open note* re-renders when the file changes —
+  the vault-wide scan behind the sidebar and the index always runs),
+  `mouse` (bool, default on; off = native text selection),
   `sidebar_width` (columns, clamped 24–120), `metadata` (bool, default
   on; off = the note's frontmatter block does not render),
   `theme_rotation` (`all` | `light` | `dark`, default `all`: the group
@@ -164,23 +197,33 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   and base icons on the status bar; `nerd` needs a Nerd Font in the terminal).
   Read at
   startup; `--vault`/`--theme`/`--watch`/`--mouse` override. Missing file =
-  defaults; malformed file = warning + defaults (never a crash).
+  defaults; malformed file = warning + defaults (never a crash); unknown
+  keys are ignored *with a warning* (never silently).
   `frond --config-show` prints a commented template of every key.
 - **Live:** `Shift+T` cycles presets, built-ins, and discovered custom
-  themes with an instant re-render (session-only, never persists). The
+  themes with an instant re-render, filtered by the current rotation group
+  (session-only, never persists). The
   config file's mtime is polled on the 1 s watcher tick; a changed `theme`
   key live-applies. `vault` path changes apply on the next launch; `watch`
   stays the `w`-key session toggle.
 
 ## Status bar
 
-`~/notes/projects/…/note.md · ● complete · #aws #infrastructure · ↓2 ↑1 · 09:30`
+`¶ index.md · 12 lines · watch on · rendered 09:30 · ✓`
 
+- Segments, in order: the name label, the size (`N lines`, or `N rows ·
+  view X/Y: <name>` while a `.base` table is open), the watch indicator
+  (`watch on` / `watch off`), the last render time (`rendered HH:MM:SS`),
+  the git segment and — last — an error or info message.
 - Git segment: `✓` clean / `●` dirty / `↓n ↑n` behind/ahead; refreshed on open, watch events, and `u`.
-- Frontmatter `status:` is the badge source of truth (per vault rules).
-- Path label: content focus shows the note's file name (`index.md`); when
-  another indexed note has the same name, the vault-relative path. Sidebar
-  focus shows the full path (or `#tag`).
+- The frontmatter `status:` badge is **not** on the status bar: the status
+  glyph (`●`, `◐`, …) sits next to the note in the sidebar tree, and the
+  tags are listed in the sidebar's tag view.
+- Path label: content focus shows the open note's **file name** (with its
+  icon: `¶` for a note, `▦` for a `.base` table); sidebar focus shows the
+  focused row's name (or `#tag` in the tag view). The full path is never
+  shown — a name shared by two notes is not disambiguated here (the
+  sidebar and the wikilink popup still show folders).
 - Clicking the note-name segment copies the vault-relative path via OSC 52
   (`copied: <rel>`); a failed write shows an error instead.
 - Info messages (`theme: <name>`, `copied: …`) show in a neutral color for
@@ -247,7 +290,8 @@ watch/reload + reindex pipeline picks the change up on the next poll.
 
 ## `.base` table views (post-v1 loop 6)
 
-Opening a `.base` file (CLI argument) renders its first `type: table`
+Opening a `.base` file (as a CLI argument, or from its row in the sidebar
+tree) renders its first `type: table`
 view instead of the markdown viewer: a bordered block, a header row
 built from the view's `order` (with `properties:` displayName mappings),
 and one row per matching note. `v` cycles views, `1`–`9` jump; `j/k`,
@@ -286,3 +330,8 @@ edits move rows between views through the normal watch pipeline.
 2. **M2 — Shell**: sidebar tree, status bar, navigation stack + back.
 3. **M3 — Vault**: index (frontmatter/tags/links), wikilink resolution + navigation, backlinks, tag view.
 4. **M4 — Polish**: global search, git sync status + changed-file markers, unresolved-link handling.
+
+All four are shipped. The work after them (each documented in its own
+section above): the guarded checkbox write, the `.base` table views, the
+theme groups, the note margin, the status-bar icon sets, the quick
+switcher, and the session memory.

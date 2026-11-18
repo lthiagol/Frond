@@ -5,8 +5,9 @@
 //! (`--config-show` prints a commented default config file).
 //!
 //! With neither `--vault` (nor a config `vault`) nor a file argument, the app
-//! prompts for the vault directory. A file argument without a vault is a
-//! single-file viewer. With a vault, `Tab` shows/hides the sidebar tree; `h`/`l` move focus between
+//! prompts for the vault directory. A file argument without a vault is
+//! opened on its own, without a sidebar; the vault index is then the
+//! current directory. With a vault, `Tab` shows/hides the sidebar tree; `h`/`l` move focus between
 //! sidebar and content; `Backspace`/`Ctrl+O` walk the navigation history.
 //!
 //! Keys: j/k, arrows, PgUp/PgDn, g/G, Home/End, mouse wheel to scroll;

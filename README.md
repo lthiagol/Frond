@@ -52,11 +52,14 @@ make release    # release build: target/release/frond
 frond                          # no vault given: prompts for the vault directory
 frond --vault ~/notes          # open a vault (index.md is shown first)
 frond --vault ~/notes project.md   # open a specific note inside the vault
-frond some-note.md             # single-file viewer, no vault
+frond some-note.md             # open a file without a vault: no sidebar
 ```
 
 If you start `frond` without `--vault` (and no `vault` key in the config
 file), it asks for the vault directory. Relative paths and `~/` are accepted.
+Without `--vault` there is no sidebar, but the current directory is still
+indexed (the opened file's own folder is *not* searched), so wikilinks,
+backlinks and the search keep working.
 
 Options (all optional; flags override the config file):
 

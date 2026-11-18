@@ -127,8 +127,9 @@ pub struct Layout {
 
 pub struct App {
     pub viewer: Viewer,
-    /// `Some` only when `--vault` was passed; the sidebar is hidden until
-    /// shown with Tab.
+    /// `Some` only when `--vault` was passed — without it there is no
+    /// sidebar (the vault *index* is still built, from the current
+    /// directory).
     pub sidebar: Option<Sidebar>,
     pub sidebar_visible: bool,
     pub sidebar_mode: SidebarMode,
