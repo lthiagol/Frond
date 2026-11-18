@@ -10,7 +10,8 @@
 //! sidebar and content; `Backspace`/`Ctrl+O` walk the navigation history.
 //!
 //! Keys: j/k, arrows, PgUp/PgDn, g/G, Home/End, mouse wheel to scroll;
-//! `w` toggles watch; `s` is the global vault search; `u` refreshes the
+//! `w` toggles watch; `s` is the global vault search; `Ctrl+P` is the
+//! quick note switcher; `u` refreshes the
 //! git sync status; `Shift+T` cycles the theme; `?` toggles the help
 //! popup; `v`/`1`–`9` switch table views while a `.base` file is open;
 //! `q`/Ctrl+C quits.
@@ -30,6 +31,7 @@ mod clipboard;
 mod config;
 mod links;
 mod nav;
+mod quick;
 mod search;
 mod session;
 mod sidebar;

@@ -14,6 +14,7 @@ main engine of this project (vendored into `crates/engine`).
 - Click-to-open everywhere — sidebar rows, backlink rows, in-note links — with opened notes revealing in the tree and focus following the reader
 - Wikilink navigation: resolution per Obsidian rules, heading anchors, disambiguation popup, back/forward history with scroll restore
 - Backlinks panel; global vault search with jump-to-line
+- Quick switcher (`Ctrl+P`): fuzzy jump to a note by name
 - Git sync status (clean/dirty/ahead/behind) and per-note changed markers — read-only
 - `.base` table views (filters, sort, groupBy) with live refresh from the vault watcher
 - Guarded checkbox toggling — the single write feature (git-clean + unchanged-file guards, atomic write)
@@ -84,6 +85,7 @@ Press `?` inside the app for the full key list. The most used keys:
 | `Enter` | Open the focused link |
 | `Backspace` | Go back |
 | `s` | Search the vault |
+| `Ctrl+P` | Quick switcher: jump to a note by name |
 | `b` | Toggle backlinks |
 | `m` | Toggle mouse capture |
 | `Shift+T` | Cycle themes (within the group set by `Ctrl+T`) |
