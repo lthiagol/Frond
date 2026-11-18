@@ -2,37 +2,14 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates are UTC.
 
-## [0.6.1] — 2026-11-17
+## [Unreleased]
 
 ### Fixed
-- A wikilink with a non-ASCII target (`[[ééé]]`) no longer panics the index
-  build (and with it the whole app at startup).
-- Link, checkbox and status-glyph states no longer use fixed ANSI colours:
-  ambiguous links and status glyphs follow the active theme's roles, unresolved
-  links are struck through and dimmed in their own colour, and the focused
-  link/checkbox is inverse video (legible on every theme, light ones included;
-  a contrast test covers all built-in themes).
-- Atomic-write temp files (task toggle, session save) are pid/counter-named so
-  concurrent instances cannot clobber each other.
+- The mouse-wheel smoke check compares the whole body text instead of a single
+  row, so a scroll is no longer missed when the sampled row happens to be a
+  blank gap.
 
-### Changed
-- Git status refresh runs on a worker thread (no UI stall on large repos), and
-  git is invoked with `--no-optional-locks` so a refresh can never block your
-  own concurrent `git commit` on `index.lock`. The checkbox write guard stays
-  synchronous.
-- Theme palette fields are listed once (`with_markdown_fields!`) and generate
-  both the config overrides and the built-in theme keys; a test catches an
-  engine field missing from the list.
-- Performance: only the visible slice of a note is cloned per frame; a watch
-  tick reindexes all changed notes with one derived-state rebuild; syntect
-  assets load once per process (theme cycling is instant); global search
-  scans all-ASCII notes with one substring search (~5x faster on a 3,000-note
-  vault, for ~10% more memory); path-style link resolution is a map lookup; base column
-  widths are cached; sidebar scroll bookkeeping walks the tree once.
-- Package renamed `app` → `frond` (`cargo run -p frond`); navigation history is
-  capped at 500 entries; one shared vault listing implementation for the
-  sidebar and the indexer; CI workflow added (`.github/workflows/ci.yml`);
-  smoke fixtures live in a private per-user scratch dir.
+## [0.6.1] — 2026-11-17
 
 ### Added
 - **Theme groups**: `Ctrl+T` cycles the `Shift+T` rotation through all themes,
@@ -50,8 +27,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   `.md` notes in nerd mode and `¶` in unicode mode; `.base` tables show the
   material table glyph (U+F04EB) in nerd mode and `▦` in unicode mode. `nerd`
   needs a Nerd Font in the terminal.
+- CI workflow added (`.github/workflows/ci.yml`).
 
 ### Changed
+- Git status refresh runs on a worker thread (no UI stall on large repos), and
+  git is invoked with `--no-optional-locks` so a refresh can never block your
+  own concurrent `git commit` on `index.lock`. The checkbox write guard stays
+  synchronous.
+- Theme palette fields are listed once (`with_markdown_fields!`) and generate
+  both the config overrides and the built-in theme keys; a test catches an
+  engine field missing from the list.
+- Performance: only the visible slice of a note is cloned per frame; a watch
+  tick reindexes all changed notes with one derived-state rebuild; syntect
+  assets load once per process (theme cycling is instant); global search
+  scans all-ASCII notes with one substring search (~5x faster on a 3,000-note
+  vault, for ~10% more memory); path-style link resolution is a map lookup; base column
+  widths are cached; sidebar scroll bookkeeping walks the tree once.
+- Package renamed `app` → `frond` (`cargo run -p frond`); navigation history is
+  capped at 500 entries; one shared vault listing implementation for the
+  sidebar and the indexer; smoke fixtures live in a private per-user scratch
+  dir.
 - The note text is inset by the margin on both sides. It was flush left with 2
   columns only on the right.
 - `Ctrl+T` changes only the `Shift+T` group. It no longer moves the theme on
@@ -65,6 +60,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   The bundled themes already have one.
 
 ### Fixed
+- A wikilink with a non-ASCII target (`[[ééé]]`) no longer panics the index
+  build (and with it the whole app at startup).
+- Link, checkbox and status-glyph states no longer use fixed ANSI colours:
+  ambiguous links and status glyphs follow the active theme's roles, unresolved
+  links are struck through and dimmed in their own colour, and the focused
+  link/checkbox is inverse video (legible on every theme, light ones included;
+  a contrast test covers all built-in themes).
+- Atomic-write temp files (task toggle, session save) are pid/counter-named so
+  concurrent instances cannot clobber each other.
 - The margin columns next to the note are painted with the theme background.
   They used to show the terminal background, which is black on many setups.
 - Scrolling to the bottom of a note that needs a scrollbar could stop short by
