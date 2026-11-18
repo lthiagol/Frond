@@ -1,4 +1,4 @@
-//! M3: read-only TUI shell with sidebar (tree/tags), backlinks panel,
+//! Read-only TUI shell with sidebar (tree/tags), backlinks panel,
 //! wikilink navigation, navigation history, watch mode.
 //!
 //! Usage: `frond [--vault <dir>] [file.md]` — `frond --help` for all flags
@@ -736,11 +736,9 @@ mod tests {
 
     #[test]
     fn tilde_expands_to_home() {
-        // SAFETY of the env dance: single-threaded unit test process; the
-        // original HOME is restored so other tests see the real value.
         let home = TempDir::new("tilde-home");
-        let saved = std::env::var("HOME").ok();
-        std::env::set_var("HOME", home.path());
+        let mut env = testutil::EnvGuard::lock();
+        env.set("HOME", home.path());
         assert_eq!(
             expand_tilde(Path::new("~/notes")),
             home.path().join("notes")
@@ -750,11 +748,7 @@ mod tests {
         assert_eq!(expand_tilde(Path::new("~other/x")), Path::new("~other/x"));
         assert_eq!(expand_tilde(Path::new("rel/x")), Path::new("rel/x"));
         // No usable $HOME: unchanged.
-        std::env::remove_var("HOME");
+        env.remove("HOME");
         assert_eq!(expand_tilde(Path::new("~/notes")), Path::new("~/notes"));
-        match saved {
-            Some(h) => std::env::set_var("HOME", h),
-            None => std::env::remove_var("HOME"),
-        }
     }
 }

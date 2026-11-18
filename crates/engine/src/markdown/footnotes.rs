@@ -23,6 +23,7 @@ pub(super) fn to_superscript(n: usize) -> String {
     n.to_string().chars().map(latex::to_superscript).collect()
 }
 
+#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn is_footnote_number(text: &str) -> bool {
     !text.is_empty()
         && text

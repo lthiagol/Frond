@@ -122,7 +122,8 @@ impl TagList {
     }
 
     /// Does this row carry the selection?
-    fn row_matches(row: &TagRow<'_>, selected: &Option<Selection>) -> bool {
+    /// Does this row carry the selection? (The renderer's highlight test.)
+    pub fn row_matches(row: &TagRow<'_>, selected: &Option<Selection>) -> bool {
         match (selected, row.note) {
             (Some(Selection::Tag(tag)), None) => *tag == row.group.tag,
             (Some(Selection::Note { tag, path }), Some(note)) => {
@@ -130,11 +131,6 @@ impl TagList {
             }
             _ => false,
         }
-    }
-
-    /// Public predicate for the renderer: does this row carry the selection?
-    pub fn row_matches_pub(row: &TagRow<'_>, selected: &Option<Selection>) -> bool {
-        Self::row_matches(row, selected)
     }
 
     /// Index of the selected row in `rows()`, if still present.

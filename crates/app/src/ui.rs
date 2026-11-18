@@ -160,14 +160,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // would keep the terminal background: paint the whole note area first.
         f.buffer_mut()
             .set_style(note_full, Style::new().bg(ui.content_bg));
-        let text = ratatui::text::Text::from(app.viewer.lines.clone());
-        // `Paragraph::scroll` takes `u16`; the viewer's scroll is `u32` so very
-        // large files are not truncated in scroll math. u16::MAX scroll offset
-        // can still not be reached on real terminals, so clamping here is safe.
-        let scroll = app.viewer.scroll.min(u16::MAX as u32) as u16;
+        // Lines are pre-wrapped (one row each), so only the visible window is
+        // cloned and the paragraph needs no scroll offset of its own.
+        let first = (app.viewer.scroll as usize).min(app.viewer.lines.len());
+        let last = first
+            .saturating_add(note_area.height as usize)
+            .min(app.viewer.lines.len());
+        let text = ratatui::text::Text::from(app.viewer.lines[first..last].to_vec());
         Paragraph::new(text)
             .style(Style::new().bg(ui.content_bg))
-            .scroll((scroll, 0))
             .render(note_area, f.buffer_mut());
         if bar_shown {
             let bar = Rect {
@@ -291,7 +292,7 @@ fn draw_base_table(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
 pub enum StatusStyle {
     /// Plain default text.
     Normal,
-    /// Demoted/inactive state: `Color::DarkGray` (name dimmed too).
+    /// Demoted/inactive state: the theme's dimmed color (name dimmed too).
     Dimmed,
     /// Live/current state: `Color::Green` + bold (status-bar clean `✓`).
     Green,
@@ -301,12 +302,14 @@ pub enum StatusStyle {
 
 impl StatusStyle {
     /// The style applied to the glyph span itself.
-    pub fn glyph_style(self) -> Style {
+    pub fn glyph_style(self, ui: UiTheme) -> Style {
         match self {
             StatusStyle::Normal => Style::new(),
-            StatusStyle::Dimmed => Style::new().fg(Color::DarkGray),
-            StatusStyle::Green => Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
-            StatusStyle::Red => Style::new().fg(Color::Red),
+            StatusStyle::Dimmed => Style::new().fg(ui.dimmed_fg),
+            StatusStyle::Green => Style::new()
+                .fg(ui.status_success_fg)
+                .add_modifier(Modifier::BOLD),
+            StatusStyle::Red => Style::new().fg(ui.status_error_fg),
         }
     }
 }
@@ -329,6 +332,13 @@ pub fn status_glyph(status: Option<&str>) -> Option<(&'static str, StatusStyle)>
     }
 }
 
+/// Paints the selected-row highlight over every span of a list row.
+fn highlight_selection(spans: &mut [Span<'_>], ui: UiTheme) {
+    for span in spans {
+        span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
+    }
+}
+
 fn draw_sidebar(
     f: &mut Frame,
     area: Rect,
@@ -342,7 +352,8 @@ fn draw_sidebar(
     sidebar.on_viewport_height(inner_height.max(1));
     sidebar.scroll_selection_into_view();
 
-    let rows_total = sidebar.rows().len();
+    let rows = sidebar.rows();
+    let rows_total = rows.len();
     let overflow = rows_total > inner_height;
     // Text area: the bordered inner area, minus the scrollbar column when
     // the rows overflow (the bar sits on the inner right edge, so the
@@ -350,7 +361,6 @@ fn draw_sidebar(
     let text_area = list_text_area(area, overflow);
     let inner_width = text_area.width as usize;
 
-    let rows = sidebar.rows();
     let window: Vec<Line<'static>> = rows
         .iter()
         .skip(sidebar.scroll)
@@ -366,7 +376,39 @@ fn draw_sidebar(
         })
         .collect();
 
-    let border = if focused {
+    render_list_panel(
+        f,
+        ListPanel {
+            area,
+            text_area,
+            title: " vault ".into(),
+            focused,
+            scroll: sidebar.scroll,
+            rows_total,
+            overflow,
+        },
+        window,
+        ui,
+    );
+}
+
+/// Geometry and chrome of one bordered list panel (sidebar tree, tag
+/// list, backlinks) for [`render_list_panel`].
+struct ListPanel {
+    area: Rect,
+    text_area: Rect,
+    title: String,
+    focused: bool,
+    scroll: usize,
+    rows_total: usize,
+    overflow: bool,
+}
+
+/// The shared tail of the three list panels: bordered block on
+/// `sidebar_bg`, the visible row window, and the scrollbar when the rows
+/// overflow. Keeps the panels' click geometry (`list_row_at`) identical.
+fn render_list_panel(f: &mut Frame, panel: ListPanel, window: Vec<Line<'static>>, ui: UiTheme) {
+    let border = if panel.focused {
         ui.sidebar_border_focused
     } else {
         ui.sidebar_border_unfocused
@@ -376,21 +418,20 @@ fn draw_sidebar(
             .style(Style::new().bg(ui.sidebar_bg))
             .borders(Borders::ALL)
             .border_style(Style::new().fg(border))
-            .title(" vault "),
-        area,
+            .title(panel.title),
+        panel.area,
     );
     f.render_widget(
         Paragraph::new(window).style(Style::new().bg(ui.sidebar_bg)),
-        text_area,
+        panel.text_area,
     );
-    if overflow {
-        let bar = list_scrollbar_area(area);
+    if panel.overflow {
         draw_scrollbar(
             f,
-            bar,
-            rows_total,
-            sidebar.scroll,
-            inner_height,
+            list_scrollbar_area(panel.area),
+            panel.rows_total,
+            panel.scroll,
+            panel.area.height.saturating_sub(2) as usize,
             ui.popup_dimmed_fg,
             ui.sidebar_bg,
         );
@@ -453,7 +494,7 @@ fn sidebar_line(
             format!("{glyph} "),
             2,
             style == StatusStyle::Dimmed,
-            style.glyph_style(),
+            style.glyph_style(ui),
         ),
         None => (String::new(), 0, false, Style::new()),
     };
@@ -485,9 +526,7 @@ fn sidebar_line(
         spans.push(Span::styled(" *", Style::new().fg(ui.changed_marker_fg)));
     }
     if selected {
-        for span in &mut spans {
-            span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
-        }
+        highlight_selection(&mut spans, ui);
     }
     Line::from(spans)
 }
@@ -515,39 +554,25 @@ fn draw_tag_list(
         .skip(tags.scroll)
         .take(inner_height)
         .map(|row| {
-            let selected = crate::tags::TagList::row_matches_pub(row, &tags.selected);
+            let selected = crate::tags::TagList::row_matches(row, &tags.selected);
             tag_line(row, inner_width, selected, index, ui)
         })
         .collect();
 
-    let border = if focused {
-        ui.sidebar_border_focused
-    } else {
-        ui.sidebar_border_unfocused
-    };
-    f.render_widget(
-        Block::new()
-            .style(Style::new().bg(ui.sidebar_bg))
-            .borders(Borders::ALL)
-            .border_style(Style::new().fg(border))
-            .title(" tags "),
-        area,
-    );
-    f.render_widget(
-        Paragraph::new(window).style(Style::new().bg(ui.sidebar_bg)),
-        text_area,
-    );
-    if overflow {
-        draw_scrollbar(
-            f,
-            list_scrollbar_area(area),
+    render_list_panel(
+        f,
+        ListPanel {
+            area,
+            text_area,
+            title: " tags ".into(),
+            focused,
+            scroll: tags.scroll,
             rows_total,
-            tags.scroll,
-            inner_height,
-            ui.popup_dimmed_fg,
-            ui.sidebar_bg,
-        );
-    }
+            overflow,
+        },
+        window,
+        ui,
+    );
 }
 
 /// One tag-list row: `#tag (N)` or an indented note (vault-relative path
@@ -568,9 +593,7 @@ fn tag_line(
     };
     let mut line = Line::from(Span::styled(truncate_ellipsis(&text, inner_width), style));
     if selected {
-        for span in &mut line.spans {
-            span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
-        }
+        highlight_selection(&mut line.spans, ui);
     }
     line
 }
@@ -627,46 +650,29 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
                     inner_width,
                 )));
                 if selected {
-                    for span in &mut line.spans {
-                        span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
-                    }
+                    highlight_selection(&mut line.spans, ui);
                 }
                 line
             })
             .collect()
     };
 
-    let border = if focused {
-        ui.sidebar_border_focused
-    } else {
-        ui.sidebar_border_unfocused
-    };
-    let title = format!(" backlinks ({}) ", app.backlinks.len());
     // The backlinks panel is a sidebar-family secondary panel, so it
     // paints `sidebar_bg` (not `content_bg`).
-    f.render_widget(
-        Block::new()
-            .style(Style::new().bg(ui.sidebar_bg))
-            .borders(Borders::ALL)
-            .border_style(Style::new().fg(border))
-            .title(title),
-        area,
-    );
-    f.render_widget(
-        Paragraph::new(window).style(Style::new().bg(ui.sidebar_bg)),
-        text_area,
-    );
-    if bar_shown {
-        draw_scrollbar(
-            f,
-            list_scrollbar_area(area),
+    render_list_panel(
+        f,
+        ListPanel {
+            area,
+            text_area,
+            title: format!(" backlinks ({}) ", app.backlinks.len()),
+            focused,
+            scroll: app.backlink_scroll,
             rows_total,
-            app.backlink_scroll,
-            inner_height,
-            ui.popup_dimmed_fg,
-            ui.sidebar_bg,
-        );
-    }
+            overflow: bar_shown,
+        },
+        window,
+        ui,
+    );
 }
 
 /// Disambiguation popup for a wikilink the folder hint could not narrow.
@@ -705,9 +711,7 @@ fn draw_disambiguation(
                 width.saturating_sub(2) as usize,
             )));
             if selected {
-                for span in &mut line.spans {
-                    span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
-                }
+                highlight_selection(&mut line.spans, ui);
             }
             line
         })
@@ -828,9 +832,7 @@ fn search_hit_line(
         // Extremely narrow popup: just the truncated prefix.
         let mut line = Line::from(Span::raw(truncate_ellipsis(&prefix, inner_width)));
         if selected {
-            for span in &mut line.spans {
-                span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
-            }
+            highlight_selection(&mut line.spans, ui);
         }
         return line;
     }
@@ -905,7 +907,11 @@ fn file_label(app: &App, path: &Path) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
-    match path.extension().and_then(|ext| ext.to_str()) {
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
         Some("md") => format!("{} {name}", app.icons.note()),
         Some("base") => format!("{} {name}", app.icons.base()),
         _ => name,
@@ -1170,9 +1176,9 @@ fn help_key_width() -> usize {
         .unwrap_or(0)
 }
 
-/// Widest label-column width among `groups` (entries' label text only).
-fn help_label_width(groups: &[&(&str, &[HelpEntry])]) -> usize {
-    groups
+/// Widest label text across every help group.
+fn help_label_width() -> usize {
+    HELP_SECTIONS
         .iter()
         .flat_map(|(_, entries)| entries.iter())
         .map(|(_, label)| label.chars().count())
@@ -1180,128 +1186,55 @@ fn help_label_width(groups: &[&(&str, &[HelpEntry])]) -> usize {
         .unwrap_or(0)
 }
 
-/// One laid-out help column: the groups it holds and its row count
-/// (header + entries per group, plus one blank line between groups when
-/// `spaced`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct HelpColumn {
-    groups: Vec<usize>,
-    rows: usize,
-}
-
-/// Rows a single group occupies (header + entries).
-fn help_group_rows(entries: &[HelpEntry]) -> usize {
-    1 + entries.len()
-}
-
-/// Greedy height-balanced packing of the groups (in order) into `columns`
-/// columns: each column is filled until it reaches the balanced target
-/// height (`ceil(total / columns)`), the next group starting a new column.
-/// Groups are never split. `spaced` adds one blank row between the groups
-/// inside a column.
-fn help_pack(sections: &[(&str, &[HelpEntry])], columns: usize, spaced: bool) -> Vec<HelpColumn> {
-    let gap = usize::from(spaced);
-    let total: usize = sections
+/// Body rows of the single help column: per group a header plus its
+/// entries, with one blank row between groups when `spaced`.
+fn help_rows(spaced: bool) -> usize {
+    let rows: usize = HELP_SECTIONS
         .iter()
-        .map(|(_, e)| help_group_rows(e))
-        .sum::<usize>()
-        + gap * sections.len().saturating_sub(1);
-    let target = total.div_ceil(columns.max(1));
-    let mut out: Vec<HelpColumn> = Vec::new();
-    let mut current = HelpColumn {
-        groups: Vec::new(),
-        rows: 0,
-    };
-    for (index, (_, entries)) in sections.iter().enumerate() {
-        let rows = help_group_rows(entries);
-        let sep = if current.groups.is_empty() { 0 } else { gap };
-        let full = current.rows + sep + rows > target;
-        let last_column = out.len() + 1 == columns;
-        if full && !current.groups.is_empty() && !last_column {
-            out.push(std::mem::replace(
-                &mut current,
-                HelpColumn {
-                    groups: Vec::new(),
-                    rows: 0,
-                },
-            ));
-        }
-        let sep = if current.groups.is_empty() { 0 } else { gap };
-        current.rows += sep + rows;
-        current.groups.push(index);
-    }
-    if !current.groups.is_empty() {
-        out.push(current);
-    }
-    out
+        .map(|(_, entries)| 1 + entries.len())
+        .sum();
+    rows + usize::from(spaced) * HELP_SECTIONS.len().saturating_sub(1)
 }
 
-/// The grid chosen for the popup: the packed columns, their label widths,
-/// and the popup width they need.
+/// The layout chosen for the popup.
 struct HelpGrid {
-    columns: Vec<HelpColumn>,
-    /// Label-column width of each column (its longest label).
-    label_widths: Vec<usize>,
     /// Popup width (borders and scrollbar column included).
     width: u16,
-    /// Body rows of the grid (the tallest column).
+    /// Body rows of the column.
     rows: usize,
-    /// Whether the columns carry a blank row between their groups.
+    /// Whether the column carries a blank row between its groups.
     spaced: bool,
 }
 
 /// Lay the help out for a frame height `area_height`. The help is always a
-/// single packed column (all groups in order): the spaced layout (blank row
+/// single column (all groups in order): the spaced layout (blank row
 /// between groups) when it still fits the height, the compact one otherwise
 /// (the body then scrolls behind the right scrollbar).
 fn help_grid(area_height: u16) -> HelpGrid {
-    let all: Vec<&(&str, &[HelpEntry])> = HELP_SECTIONS.iter().collect();
     // Body rows the popup can show: frame minus the 2-row margin, minus the
     // 2 borders and the footer row.
     let body_budget = usize::from(area_height.saturating_sub(2)).saturating_sub(3);
-    for spaced in [true, false] {
-        let packed = help_pack(HELP_SECTIONS, 1, spaced);
-        let rows = packed.iter().map(|c| c.rows).max().unwrap_or(0);
-        if rows <= body_budget || !spaced {
-            return HelpGrid {
-                label_widths: vec![help_label_width(&all)],
-                columns: packed,
-                width: HELP_WIDTH,
-                rows,
-                spaced,
-            };
-        }
-    }
-    // The compact layout is always accepted above; this is belt-and-braces
-    // for the "never crash" convention (and keeps the compiler happy about
-    // the match being exhaustive without a panic path).
-    let packed = help_pack(HELP_SECTIONS, 1, false);
+    let spaced = help_rows(true) <= body_budget;
     HelpGrid {
-        label_widths: vec![help_label_width(&all)],
-        rows: packed.iter().map(|c| c.rows).max().unwrap_or(0),
-        columns: packed,
         width: HELP_WIDTH,
-        spaced: false,
+        rows: help_rows(spaced),
+        spaced,
     }
 }
 
-/// Body rows of one column's cells: header and entries, keys padded to the
-/// shared key width, labels padded to the column's label width, blank rows
-/// between its groups when `spaced`.
-fn help_column_lines(
-    ui: UiTheme,
-    column: &HelpColumn,
-    spaced: bool,
-    label_width: usize,
-) -> Vec<Vec<Span<'static>>> {
+/// Body lines of the help column, each padded to the popup's inner width:
+/// header and entries, keys padded to the shared key width, labels padded to
+/// the widest label, blank rows between groups when `grid.spaced`.
+fn help_body(ui: UiTheme, grid: &HelpGrid) -> Vec<Line<'static>> {
     let key_width = help_key_width();
-    let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
-    for (position, &index) in column.groups.iter().enumerate() {
-        let (section, entries) = &HELP_SECTIONS[index];
-        if spaced && position > 0 {
-            rows.push(Vec::new());
+    let label_width = help_label_width();
+    let inner = grid.width.saturating_sub(HELP_CHROME) as usize;
+    let mut cells: Vec<Vec<Span<'static>>> = Vec::new();
+    for (position, (section, entries)) in HELP_SECTIONS.iter().enumerate() {
+        if grid.spaced && position > 0 {
+            cells.push(Vec::new());
         }
-        rows.push(vec![Span::styled(
+        cells.push(vec![Span::styled(
             section.to_string(),
             Style::new()
                 .fg(ui.sidebar_border_focused)
@@ -1309,13 +1242,13 @@ fn help_column_lines(
         )]);
         for (key, label) in entries.iter() {
             if key.is_empty() {
-                rows.push(vec![Span::raw(format!(
+                cells.push(vec![Span::raw(format!(
                     "{:<key_width$} {:<label_width$}",
                     "", label
                 ))]);
                 continue;
             }
-            rows.push(vec![
+            cells.push(vec![
                 Span::styled(
                     format!("{key:<key_width$}"),
                     Style::new()
@@ -1327,20 +1260,9 @@ fn help_column_lines(
             ]);
         }
     }
-    rows
-}
-
-/// Body lines of the single-column help grid: each row padded to the popup's
-/// inner width.
-fn help_body(ui: UiTheme, grid: &HelpGrid, spaced: bool) -> Vec<Line<'static>> {
-    let column = &grid.columns[0];
-    let label_width = grid.label_widths[0];
-    let cells = help_column_lines(ui, column, spaced, label_width);
-    let inner = grid.width.saturating_sub(HELP_CHROME) as usize;
     cells
         .into_iter()
-        .map(|cell| {
-            let mut spans: Vec<Span<'static>> = cell;
+        .map(|mut spans| {
             let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
             if inner > used {
                 spans.push(Span::raw(" ".repeat(inner - used)));
@@ -1351,10 +1273,7 @@ fn help_body(ui: UiTheme, grid: &HelpGrid, spaced: bool) -> Vec<Line<'static>> {
 }
 
 /// Lines a PageUp/PageDown moves the help by (about a page of body rows).
-pub fn help_page_step() -> usize {
-    HELP_PAGE_STEP
-}
-const HELP_PAGE_STEP: usize = 10;
+pub const HELP_PAGE_STEP: usize = 10;
 
 /// Body rows visible for a popup of `popup_height` rows: borders (2) and
 /// the fixed footer row (1) are not scrollable.
@@ -1374,7 +1293,6 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
     }
 
     let grid = help_grid(area.height);
-    let spaced = grid.spaced;
     let width = grid.width.min(area.width.saturating_sub(2)).max(1);
     let total = grid.rows;
     // Fit to the content (+ borders + footer), clamped to the terminal.
@@ -1432,7 +1350,7 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         height: body_height,
         ..inner
     };
-    let lines = help_body(ui, &grid, spaced);
+    let lines = help_body(ui, &grid);
     f.render_widget(
         Paragraph::new(lines.into_iter().skip(scroll).collect::<Vec<_>>())
             .style(Style::new().bg(ui.content_bg)),
@@ -1477,1663 +1395,4 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use ratatui::backend::TestBackend;
-    use ratatui::Terminal;
-
-    use super::*;
-    use crate::app::App;
-    use crate::testutil::{TempDir, TempFile};
-    use crate::viewer::Viewer;
-
-    fn sample_viewer(path: &Path) -> Viewer {
-        Viewer::open(path, 80).unwrap()
-    }
-
-    fn app_for(file: &TempFile, vault: Option<&Path>) -> App {
-        let viewer = sample_viewer(file.path());
-        App::new(viewer, vault.map(|p| p.to_path_buf()), None).unwrap()
-    }
-
-    fn render(app: &mut App) -> String {
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, app)).unwrap();
-        terminal.backend().to_string()
-    }
-
-    /// Help-popup render at the smoke terminal size (100x30).
-    fn render_help(app: &mut App) -> String {
-        let backend = TestBackend::new(100, 30);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, app)).unwrap();
-        terminal.backend().to_string()
-    }
-
-    /// The note sits inside the configured margin on both sides: the text
-    /// starts `margin` columns in, and the viewport the mouse uses matches.
-    #[test]
-    fn note_text_starts_after_the_configured_margin() {
-        let file = ui_viewer("ui-margin.md", "first line here\n");
-        let mut app = app_for(&file, None);
-        app.note_margin = 3;
-        app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(2, 0)].symbol(), " ", "left margin is blank");
-        assert_eq!(
-            buffer[(0, 0)].bg,
-            Color::Rgb(9, 9, 9),
-            "left margin painted"
-        );
-        assert_eq!(
-            buffer[(99, 0)].bg,
-            Color::Rgb(9, 9, 9),
-            "right margin painted"
-        );
-        assert_eq!(buffer[(3, 0)].symbol(), "f", "text starts at the margin");
-        assert_eq!(app.note_viewport.x, 3);
-        assert_eq!(app.note_viewport.width, 94, "100 less 3 per side");
-    }
-
-    /// Scrolling to the bottom of an overflowing note must land on the
-    /// bottom, even when the scrollbar re-wraps the note one column
-    /// narrower. Each paragraph below is exactly the full text width, so
-    /// the narrower wrap adds a line to every paragraph. The scroll must
-    /// not be clamped against the provisional full-width wrap on the way.
-    #[test]
-    fn bottom_scroll_survives_the_scrollbar_rewrap() {
-        let paragraph = "abcdefghi abcdefghi abcdefghi abcdefghi abcdefghi \
-                         abcdefghi abcdefghi abcdefghi abcdefghi abcdefgh";
-        let mut body = String::new();
-        for _ in 0..120 {
-            body.push_str(paragraph);
-            body.push_str("\n\n");
-        }
-        body.push_str("LAST MARKER LINE\n");
-        let file = ui_viewer("ui-bottom-scroll.md", &body);
-        let mut app = app_for(&file, None);
-        render(&mut app);
-        app.viewer.scroll_bottom();
-        let screen = render(&mut app);
-        assert_eq!(
-            app.viewer.scroll,
-            app.viewer.max_scroll(),
-            "scroll kept at bottom"
-        );
-        let rows: Vec<&str> = screen.lines().collect();
-        let note_rows = &rows[..rows.len() - 1];
-        let marker_row = note_rows.iter().rposition(|r| r.contains("LAST MARKER"));
-        // Only the note's final paragraph break follows the last text line,
-        // so it sits on the row just above the bottom.
-        assert_eq!(
-            marker_row,
-            Some(note_rows.len() - 2),
-            "last line above the paragraph break"
-        );
-    }
-
-    fn ui_viewer(name: &str, content: &str) -> TempFile {
-        TempFile::new(name, content)
-    }
-
-    fn vault() -> TempDir {
-        let dir = TempDir::new("ui-vault");
-        std::fs::write(dir.path().join("alpha.md"), "alpha note\n").unwrap();
-        std::fs::create_dir_all(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("sub").join("deep.md"), "deep\n").unwrap();
-        dir
-    }
-
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::empty())
-    }
-
-    /// Renders at an arbitrary width (status-line tests need 100 and 40).
-    fn render_at(app: &mut App, cols: u16) -> String {
-        let backend = TestBackend::new(cols, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, app)).unwrap();
-        terminal.backend().to_string()
-    }
-
-    /// The bottom screen row (the status bar).
-    fn status_row(screen: &str) -> String {
-        screen.lines().last().unwrap_or("").to_string()
-    }
-
-    /// Mirrors `main`: the vault index is built and shared with the app,
-    /// so the status-bar name logic sees every indexed note.
-    fn status_app(vault_dir: &TempDir, open: &str) -> App {
-        let viewer = Viewer::open(&vault_dir.path().join(open), 80).unwrap();
-        let index = std::rc::Rc::new(std::cell::RefCell::new(
-            VaultIndex::build(vault_dir.path()).unwrap(),
-        ));
-        App::new(viewer, Some(vault_dir.path().to_path_buf()), Some(index)).unwrap()
-    }
-
-    /// `a/index.md` and `b/index.md` share a file name; `solo.md` is unique.
-    fn name_vault() -> TempDir {
-        let dir = TempDir::new("ui-status-name");
-        std::fs::create_dir_all(dir.path().join("a")).unwrap();
-        std::fs::create_dir_all(dir.path().join("b")).unwrap();
-        std::fs::write(dir.path().join("a").join("index.md"), "# A\n").unwrap();
-        std::fs::write(dir.path().join("b").join("index.md"), "# B\n").unwrap();
-        std::fs::write(dir.path().join("solo.md"), "# S\n").unwrap();
-        dir
-    }
-
-    #[test]
-    fn status_bar_shows_file_name_for_unambiguous_note() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        let screen = render_at(&mut app, 100);
-        let row = status_row(&screen);
-        assert!(row.contains("solo.md"), "name shown: {row}");
-        assert!(
-            !row.contains(&dir.path().display().to_string()),
-            "no absolute path on the bar: {row}"
-        );
-    }
-
-    #[test]
-    fn status_bar_shows_only_the_name_when_the_name_is_shared() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "a/index.md");
-        let screen = render_at(&mut app, 100);
-        let row = status_row(&screen);
-        let label = format!("{} index.md", app.icons.note());
-        assert!(row.contains(&label), "bare name with its icon: {row}");
-        assert!(!row.contains("a/index.md"), "no relative path: {row}");
-        assert!(
-            !row.contains(&dir.path().display().to_string()),
-            "vault root not on the bar: {row}"
-        );
-    }
-
-    #[test]
-    fn status_bar_shows_only_the_name_when_sidebar_focused() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        app.handle_key(key(KeyCode::Char('h')));
-        assert_eq!(app.focus, crate::app::Focus::Sidebar);
-        let screen = render_at(&mut app, 100);
-        let row = status_row(&screen);
-        assert!(
-            row.trim_start_matches('"').starts_with("a ") && row.contains(" lines"),
-            "focused folder shows its name, no path: {row}"
-        );
-        assert!(
-            !row.contains(&dir.path().display().to_string()),
-            "no full path on the bar: {row}"
-        );
-    }
-
-    #[test]
-    fn status_bar_icons_follow_the_icon_set() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        let screen = render_at(&mut app, 100);
-        assert!(
-            status_row(&screen)
-                .contains(&format!("{} solo.md", crate::config::IconSet::Nerd.note())),
-            "nerd is the default note icon"
-        );
-        app.icons = crate::config::IconSet::Unicode;
-        let screen = render_at(&mut app, 100);
-        assert!(
-            status_row(&screen).contains("¶ solo.md"),
-            "unicode note icon"
-        );
-    }
-
-    #[test]
-    fn status_bar_name_segment_records_rect_only_in_content_focus() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        render_at(&mut app, 100);
-        let area = app.status_name_area.expect("name segment recorded");
-        assert_eq!(area.y, 23, "status row");
-        assert_eq!(area.x, 0);
-        let label = format!("{} solo.md", app.icons.note());
-        assert_eq!(area.width as usize, UnicodeWidthStr::width(label.as_str()));
-        app.handle_key(key(KeyCode::Char('h')));
-        render_at(&mut app, 100);
-        assert!(app.status_name_area.is_none(), "sidebar focus: no name");
-    }
-
-    #[test]
-    fn status_bar_shows_hints_at_100_cols() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        let screen = render_at(&mut app, 100);
-        assert!(
-            status_row(&screen).contains("Tab sidebar · ⇧T theme · ? help"),
-            "hints shown with room: {}",
-            status_row(&screen)
-        );
-    }
-
-    #[test]
-    fn status_bar_hides_hints_at_40_cols() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        let screen = render_at(&mut app, 40);
-        assert!(
-            !screen.contains("Tab sidebar"),
-            "no room: hint dropped whole: {}",
-            status_row(&screen)
-        );
-    }
-
-    #[test]
-    fn status_bar_hides_hints_while_a_message_is_shown() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        app.set_status("theme: ocean");
-        let screen = render_at(&mut app, 100);
-        let row = status_row(&screen);
-        assert!(row.contains("theme: ocean"), "info shown: {row}");
-        assert!(!row.contains("Tab sidebar"), "hints hidden: {row}");
-    }
-
-    #[test]
-    fn status_message_is_neutral_and_error_wins() {
-        let dir = name_vault();
-        let mut app = status_app(&dir, "solo.md");
-        app.set_status("theme: ocean");
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        let row = status_row(&terminal.backend().to_string());
-        let start = row.find("theme: ocean").expect("info shown");
-        let cell = buf.cell((start as u16, 23)).expect("cell");
-        assert_ne!(
-            cell.fg, app.theme_ui.status_error_fg,
-            "info is not the error color"
-        );
-        // An error present: the info waits, the error shows in red.
-        app.viewer.last_error = Some("boom".to_string());
-        let screen = render_at(&mut app, 100);
-        let row = status_row(&screen);
-        assert!(row.contains("boom"), "error shown: {row}");
-        assert!(!row.contains("theme: ocean"), "info waits behind error");
-    }
-
-    #[test]
-    fn status_bar_shows_path_lines_watch_timestamp() {
-        let file = ui_viewer("ui.md", "# Hi\n\nbody\n");
-        let mut app = app_for(&file, None);
-        let screen = render(&mut app);
-        assert!(screen.contains("lines"), "status bar missing line count");
-        assert!(screen.contains("watch on"), "watch indicator missing");
-        assert!(screen.contains("rendered "), "render timestamp missing");
-        assert!(screen.contains("Hi"), "content missing");
-    }
-
-    #[test]
-    fn watch_off_is_visible() {
-        let file = ui_viewer("ui-off.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.viewer.toggle_watch();
-        let screen = render(&mut app);
-        assert!(screen.contains("watch off"));
-    }
-
-    #[test]
-    fn help_popup_renders_and_covers_content() {
-        let file = ui_viewer("ui-help.md", "# Hi\n\nbody\n");
-        let mut app = app_for(&file, None);
-        app.viewer.help_open = true;
-        let screen = render_help(&mut app);
-        assert!(screen.contains("keybinds"), "popup title missing");
-        assert!(screen.contains("close esc/any key"));
-        assert!(screen.contains("toggle watch mode"));
-        // M2 keys are documented.
-        assert!(screen.contains("Backspace"));
-        assert!(screen.contains("Ctrl+O"));
-        assert!(screen.contains("show / hide sidebar"));
-    }
-
-    /// The viewer's viewport height must be fed from the frame area, not
-    /// kept independently: after draw, it equals area - status bar.
-    #[test]
-    fn draw_feeds_frame_height_into_viewer() {
-        let file = ui_viewer("ui-height.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.viewer.viewport_height = 3;
-        let screen = render(&mut app);
-        // TestBackend 100x24 → viewport = 24 - 1 status line.
-        assert_eq!(app.viewer.viewport_height, 23);
-        assert!(screen.contains("watch on"));
-        app.viewer.scroll_bottom();
-        assert_eq!(app.viewer.scroll, app.viewer.max_scroll());
-    }
-
-    #[test]
-    fn no_sidebar_without_vault() {
-        let file = ui_viewer("ui-solo.md", "x\n");
-        let mut app = app_for(&file, None);
-        let screen = render(&mut app);
-        assert!(
-            !screen.contains("vault"),
-            "no sidebar block without --vault"
-        );
-        assert_eq!(app.viewer.render_width, 96, "full width minus margins");
-    }
-
-    #[test]
-    fn sidebar_visible_by_default_with_vault() {
-        let vault_dir = vault();
-        let file = ui_viewer("ui-tab.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        assert!(app.sidebar_visible, "starts visible with --vault");
-        let screen = render(&mut app);
-        assert!(screen.contains("vault"), "sidebar title missing");
-        assert!(
-            screen.contains("alpha.md"),
-            "sidebar should list vault notes"
-        );
-        // Content re-wrapped to the narrower area: 100 - 30 - 2 margins = 66.
-        assert_eq!(app.viewer.render_width, 66);
-
-        // Focus the sidebar: the status bar shows the selected entry's path
-        // (the first row is the `sub` folder — dirs sort first).
-        app.handle_key(key(KeyCode::Char('h')));
-        let screen = render(&mut app);
-        assert!(
-            status_row(&screen)
-                .trim_start_matches('"')
-                .starts_with("sub ")
-                && status_row(&screen).contains(" lines"),
-            "status bar shows the focused folder's name"
-        );
-    }
-
-    #[test]
-    fn sidebar_truncates_long_names_with_ellipsis() {
-        let dir = TempDir::new("ui-longname");
-        let long = "a-very-long-note-name-that-does-not-fit.md";
-        std::fs::write(dir.path().join(long), "x\n").unwrap();
-        let file = ui_viewer("ui-trunc.md", "x\n");
-        let mut app = app_for(&file, Some(dir.path()));
-        let screen = render(&mut app);
-        assert!(screen.contains("…"), "truncated name should use ellipsis");
-        assert!(
-            !screen.contains(long),
-            "full long name must not appear in the sidebar"
-        );
-    }
-
-    #[test]
-    fn sidebar_hides_on_tab() {
-        let vault_dir = vault();
-        let file = ui_viewer("ui-hide.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        app.handle_key(key(KeyCode::Tab));
-        let screen = render(&mut app);
-        assert!(!screen.contains("vault"), "sidebar hidden after Tab");
-        // Focus snapped back to content; full content width restored.
-        assert_eq!(app.viewer.render_width, 96);
-    }
-
-    // --- M3 rendering --------------------------------------------------
-
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use vault::VaultIndex;
-
-    fn app_with_index(file: &TempFile, vault_dir: &TempDir) -> App {
-        let viewer = sample_viewer(file.path());
-        let index = Rc::new(RefCell::new(VaultIndex::build(vault_dir.path()).unwrap()));
-        App::new(viewer, Some(vault_dir.path().to_path_buf()), Some(index)).unwrap()
-    }
-
-    #[test]
-    fn status_glyph_table_covers_every_real_vault_status() {
-        // Every status string found in the real vault (478 notes, verified
-        // against a /tmp copy: active 213, archived 57, resolved 47,
-        // complete 42, monitoring 41, draft 32, superseded 32, pending 12,
-        // planned 1, blocked 1) plus SPEC's `in-progress`, which the vault
-        // does not use today but the SPEC still names.
-        let cases: &[(&str, &str, StatusStyle)] = &[
-            ("complete", "●", StatusStyle::Normal),
-            ("resolved", "●", StatusStyle::Normal),
-            ("active", "●", StatusStyle::Green),
-            ("pending", "○", StatusStyle::Normal),
-            ("planned", "○", StatusStyle::Normal),
-            ("in-progress", "◐", StatusStyle::Normal),
-            ("in progress", "◐", StatusStyle::Normal),
-            ("monitoring", "◐", StatusStyle::Normal),
-            ("draft", "◌", StatusStyle::Normal),
-            ("blocked", "◉", StatusStyle::Red),
-            ("superseded", "×", StatusStyle::Dimmed),
-            ("archived", "×", StatusStyle::Dimmed),
-        ];
-        for (status, glyph, style) in cases {
-            assert_eq!(
-                status_glyph(Some(status)),
-                Some((*glyph, *style)),
-                "status {status:?}"
-            );
-        }
-        // Case/whitespace tolerance is preserved.
-        assert_eq!(
-            status_glyph(Some("  Active ")),
-            Some(("●", StatusStyle::Green))
-        );
-        // Unknown statuses keep today's no-glyph behavior.
-        assert_eq!(status_glyph(Some("cancelled")), None);
-        assert_eq!(status_glyph(Some("")), None);
-        assert_eq!(status_glyph(None), None);
-    }
-
-    #[test]
-    fn tree_shows_status_glyphs() {
-        let vault_dir = TempDir::new("ui-glyphs");
-        std::fs::write(
-            vault_dir.path().join("done.md"),
-            "---\nstatus: complete\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("wip.md"),
-            "---\nstatus: in-progress\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("old.md"),
-            "---\nstatus: archived\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("live.md"),
-            "---\nstatus: active\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("stuck.md"),
-            "---\nstatus: blocked\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("sketch.md"),
-            "---\nstatus: draft\n---\nbody\n",
-        )
-        .unwrap();
-        let file = ui_viewer("ui-glyph.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        let screen = render(&mut app);
-        assert!(screen.contains('●'), "complete glyph shown");
-        assert!(screen.contains('◐'), "in-progress glyph shown");
-        assert!(screen.contains('×'), "archived glyph shown");
-        assert!(screen.contains('◉'), "blocked glyph shown");
-        assert!(screen.contains('◌'), "draft glyph shown");
-        // Active renders too (same ● as complete, styled green+bold).
-        assert_eq!(screen.matches('●').count(), 2, "active + complete");
-        assert!(!screen.contains('○'), "no pending/planned note in fixture");
-    }
-
-    #[test]
-    fn backlinks_panel_renders_with_empty_state() {
-        let vault_dir = TempDir::new("ui-backlinks");
-        std::fs::write(vault_dir.path().join("linker.md"), "[[target]]\n").unwrap();
-        std::fs::write(vault_dir.path().join("target.md"), "t\n").unwrap();
-        let file = ui_viewer("ui-bl.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.handle_key(key(KeyCode::Char('b')));
-        let screen = render(&mut app);
-        assert!(screen.contains("backlinks"), "panel title shown");
-        assert!(
-            screen.contains("no notes link here"),
-            "empty state (no note open)"
-        );
-
-        // Open the linked-to note: the panel lists the linker.
-        app.open_note(&vault_dir.path().join("target.md")).unwrap();
-        app.refresh_backlinks();
-        let screen = render(&mut app);
-        assert!(screen.contains("linker.md"), "backlink listed");
-        assert!(!screen.contains("no notes link here"));
-    }
-
-    /// A vault where `target.md` has `count` linkers (`link00.md`, …).
-    fn backlinks_vault(name: &str, count: usize) -> TempDir {
-        let dir = TempDir::new(name);
-        std::fs::write(dir.path().join("target.md"), "t\n").unwrap();
-        for i in 0..count {
-            std::fs::write(dir.path().join(format!("link{i:02}.md")), "[[target]]\n").unwrap();
-        }
-        dir
-    }
-
-    /// Opens `target.md` with the backlinks panel shown, on a 100x24 frame
-    /// (panel = 23 rows / 3 clamped to 3..=10 → 7 rows, 5 inner).
-    fn backlinks_app(vault_dir: &TempDir) -> App {
-        let file = ui_viewer("ui-bl-bar.md", "x\n");
-        let mut app = app_with_index(&file, vault_dir);
-        app.sidebar_visible = false;
-        app.open_note(&vault_dir.path().join("target.md")).unwrap();
-        app.backlinks_open = true;
-        app.refresh_backlinks();
-        app
-    }
-
-    /// The panel's full rect (no sidebar, 100 wide): `backlinks_area` is the
-    /// click rect, which excludes the bar column when one is drawn.
-    fn full_panel(app: &App) -> Rect {
-        let hit = app.backlinks_area.expect("panel drawn");
-        Rect::new(0, hit.y, 100, hit.height)
-    }
-
-    #[test]
-    fn backlinks_scrollbar_present_only_when_rows_overflow() {
-        // 2 linkers fit the 5 inner rows: no bar.
-        let fit = backlinks_vault("ui-bl-fit", 2);
-        let mut app = backlinks_app(&fit);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let panel = full_panel(&app);
-        assert!(
-            !column_has_bar(
-                terminal.backend().buffer(),
-                panel.right() - 2,
-                panel.y + 1..panel.bottom() - 1
-            ),
-            "no bar when backlink rows fit"
-        );
-
-        // 12 linkers overflow the 5 inner rows: bar drawn on the inner right edge.
-        let long = backlinks_vault("ui-bl-long", 12);
-        let mut app = backlinks_app(&long);
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let panel = full_panel(&app);
-        let buffer = terminal.backend().buffer();
-        // Bar = last inner column (right-2); the right border stays intact.
-        assert!(
-            column_has_bar(buffer, panel.right() - 2, panel.y + 1..panel.bottom() - 1),
-            "bar drawn when backlink rows overflow"
-        );
-        assert_eq!(
-            buffer[(panel.right() - 1, panel.y + 1)].symbol(),
-            "│",
-            "border intact"
-        );
-    }
-
-    #[test]
-    fn backlinks_text_never_runs_under_the_bar() {
-        let vault_dir = backlinks_vault("ui-bl-under", 12);
-        let mut app = backlinks_app(&vault_dir);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let panel = full_panel(&app);
-        let bar_x = panel.right() - 2;
-        let buffer = terminal.backend().buffer();
-        // The bar sits in the last inner column; no name may occupy it.
-        for y in panel.y + 1..panel.bottom() - 1 {
-            let sym = buffer[(bar_x, y)].symbol();
-            assert!(
-                !sym.chars().any(|c| c.is_ascii_alphanumeric()),
-                "backlink text under the bar at row {y}: {sym:?}"
-            );
-        }
-        // Rows are still drawn in the text columns.
-        let text: String = (panel.x + 1..bar_x)
-            .map(|x| buffer[(x, panel.y + 1)].symbol().to_string())
-            .collect();
-        assert!(text.contains("link00"), "first backlink visible: {text:?}");
-    }
-
-    #[test]
-    fn backlinks_scrollbar_tracks_the_drawn_scroll() {
-        let vault_dir = backlinks_vault("ui-bl-pos", 12);
-        let mut app = backlinks_app(&vault_dir);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let panel = full_panel(&app);
-        let bar_x = panel.right() - 2;
-        let top_thumb = (panel.y + 1..panel.bottom() - 1)
-            .find(|&y| terminal.backend().buffer()[(bar_x, y)].symbol() == "█")
-            .expect("thumb at top");
-        let top_text = row_symbols(terminal.backend().buffer(), panel.y + 1);
-        assert!(top_text.contains("link00"));
-
-        // Select the last backlink: the scroll follows, the thumb moves down.
-        app.backlink_sel = 11;
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let bottom_thumb = (panel.y + 1..panel.bottom() - 1)
-            .find(|&y| terminal.backend().buffer()[(bar_x, y)].symbol() == "█")
-            .expect("thumb at bottom");
-        let bottom_text = row_symbols(terminal.backend().buffer(), panel.y + 1);
-        assert!(!bottom_text.contains("link00"), "rows scrolled");
-        assert!(bottom_thumb > top_thumb, "thumb moved with the scroll");
-    }
-
-    #[test]
-    fn tag_sidebar_renders_and_counts() {
-        let vault_dir = TempDir::new("ui-tags");
-        std::fs::write(
-            vault_dir.path().join("a.md"),
-            "---\nstatus: active\ntags: [mocktag]\n---\na\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("b.md"),
-            "---\nstatus: active\ntags: [mocktag, rust]\n---\nb\n",
-        )
-        .unwrap();
-        let file = ui_viewer("ui-tags.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.handle_key(key(KeyCode::Char('t')));
-        let screen = render(&mut app);
-        assert!(screen.contains("tags"), "sidebar title switches to tags");
-        assert!(screen.contains("#mocktag (2)"), "tag row with count");
-        assert!(screen.contains("#rust (1)"));
-        assert!(
-            !screen.contains("alpha.md"),
-            "tree rows are gone in tag mode"
-        );
-    }
-
-    #[test]
-    fn disambiguation_popup_renders_candidates() {
-        let vault_dir = TempDir::new("ui-disamb");
-        std::fs::create_dir_all(vault_dir.path().join("x")).unwrap();
-        std::fs::create_dir_all(vault_dir.path().join("y")).unwrap();
-        std::fs::write(vault_dir.path().join("x/dup.md"), "x\n").unwrap();
-        std::fs::write(vault_dir.path().join("y/dup.md"), "y\n").unwrap();
-        let file = ui_viewer("ui-disamb.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.disambiguation = Some(crate::app::Disambiguation {
-            candidates: vec![
-                vault_dir.path().join("x/dup.md"),
-                vault_dir.path().join("y/dup.md"),
-            ],
-            selected: 1,
-            heading: None,
-        });
-        let screen = render(&mut app);
-        assert!(screen.contains("ambiguous link"), "popup title");
-        assert!(screen.contains("x/dup.md") && screen.contains("y/dup.md"));
-    }
-
-    /// With more candidates than fit the terminal, the popup list scrolls
-    /// so the selection stays visible (previously it silently truncated).
-    #[test]
-    fn disambiguation_popup_scrolls_on_short_terminals() {
-        let vault_dir = TempDir::new("ui-disamb-scroll");
-        let mut candidates = Vec::new();
-        for i in 1..=8 {
-            let dir = vault_dir.path().join(format!("d{i}"));
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::write(dir.join("dup.md"), "x\n").unwrap();
-            candidates.push(dir.join("dup.md"));
-        }
-        let file = ui_viewer("ui-disamb-s.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.sidebar_visible = false; // keep the tree rows out of the assert
-        app.disambiguation = Some(crate::app::Disambiguation {
-            candidates,
-            selected: 7,
-            heading: None,
-        });
-        // 10 rows → popup height 8 → 5 candidate rows: a scroll window.
-        let backend = TestBackend::new(60, 10);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let screen = terminal.backend().to_string();
-        assert!(screen.contains("ambiguous link"), "popup title");
-        assert!(screen.contains("d8/dup.md"), "selected row is visible");
-        assert!(screen.contains("d4/dup.md"), "window starts mid-list");
-        assert!(
-            !screen.contains("d1/dup.md") && !screen.contains("d3/dup.md"),
-            "candidates above the window are scrolled off"
-        );
-    }
-
-    #[test]
-    fn wikilink_line_renders_link_text() {
-        let vault_dir = TempDir::new("ui-wikilink");
-        std::fs::write(vault_dir.path().join("goal.md"), "goal body\n").unwrap();
-        let file = ui_viewer("ui-wl.md", "See [[goal]] and [[nowhere]].\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        let screen = render(&mut app);
-        assert!(screen.contains("See"), "content renders");
-        assert!(
-            screen.contains("nowhere"),
-            "unresolved link text still shown"
-        );
-        assert!(
-            !screen.contains("[[goal]]"),
-            "raw wikilink syntax is replaced by the link text"
-        );
-    }
-
-    // --- M4: git segment, changed markers, search popup -----------------
-
-    /// Commits everything in `dir` (fixture setup only; the app's own git
-    /// usage stays inside the read-only allowlist).
-    fn git_commit(dir: &Path, message: &str) {
-        use std::process::Command;
-        for args in [
-            vec!["init", "-b", "main", "-q"],
-            vec!["add", "-A"],
-            vec!["commit", "-q", "-m", message],
-        ] {
-            let out = Command::new("git")
-                .args(&args)
-                .current_dir(dir)
-                .env("GIT_AUTHOR_NAME", "t")
-                .env("GIT_AUTHOR_EMAIL", "t@example.com")
-                .env("GIT_COMMITTER_NAME", "t")
-                .env("GIT_COMMITTER_EMAIL", "t@example.com")
-                .output()
-                .unwrap();
-            assert!(out.status.success(), "git {args:?} failed");
-        }
-    }
-
-    #[test]
-    fn status_bar_shows_git_clean_check() {
-        let vault_dir = TempDir::new("ui-git-clean");
-        std::fs::write(vault_dir.path().join("a.md"), "a\n").unwrap();
-        git_commit(vault_dir.path(), "initial");
-        let file = ui_viewer("ui-git.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        // App::new only reads git when an index exists; force a refresh.
-        app.index = Some(std::rc::Rc::new(std::cell::RefCell::new(
-            vault::VaultIndex::build(vault_dir.path()).unwrap(),
-        )));
-        app.refresh_git(true);
-        let git = app.git.as_ref().expect("clean repo readable");
-        assert!(git.clean);
-        let screen = render(&mut app);
-        assert!(screen.contains('✓'), "clean check shown: {screen}");
-    }
-
-    #[test]
-    fn status_bar_shows_dirty_dot_and_arrows() {
-        let file = ui_viewer("ui-git2.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.git = Some(vault::GitStatus {
-            clean: false,
-            ahead: 2,
-            behind: 1,
-            changed_files: vec![Path::new("/x/a.md").to_path_buf()],
-        });
-        let screen = render(&mut app);
-        assert!(screen.contains('●'), "dirty dot shown");
-        assert!(screen.contains("↓1"), "behind arrow shown");
-        assert!(screen.contains("↑2"), "ahead arrow shown");
-        assert!(!screen.contains('✓'));
-
-        // Fully synced + dirty: only the dot.
-        app.git = Some(vault::GitStatus {
-            clean: false,
-            ahead: 0,
-            behind: 0,
-            changed_files: vec![],
-        });
-        let screen = render(&mut app);
-        assert!(screen.contains('●') && !screen.contains('↓') && !screen.contains('↑'));
-
-        // Unavailable (no git / not a repo): no segment at all.
-        app.git = None;
-        let screen = render(&mut app);
-        assert!(!screen.contains('✓') && !screen.contains('●'));
-    }
-
-    #[test]
-    fn sidebar_marks_changed_files_with_asterisk() {
-        let vault_dir = TempDir::new("ui-changed");
-        std::fs::write(vault_dir.path().join("alpha.md"), "alpha note\n").unwrap();
-        std::fs::write(vault_dir.path().join("clean.md"), "clean note\n").unwrap();
-        let file = ui_viewer("ui-mark.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        app.git = Some(vault::GitStatus {
-            clean: false,
-            ahead: 0,
-            behind: 0,
-            changed_files: vec![vault_dir.path().join("alpha.md")],
-        });
-        let screen = render(&mut app);
-        assert!(screen.contains("alpha.md *"), "changed note marked");
-        assert!(!screen.contains("clean.md *"), "unchanged note unmarked");
-    }
-
-    #[test]
-    fn search_popup_renders_prompt_results_and_highlight() {
-        let vault_dir = TempDir::new("ui-search");
-        std::fs::write(vault_dir.path().join("hay.md"), "top\nneedle here\nmore\n").unwrap();
-        let file = ui_viewer("ui-search.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-
-        // Input mode: prompt with cursor.
-        app.handle_key(key(KeyCode::Char('s')));
-        app.handle_key(key(KeyCode::Char('n')));
-        let screen = render(&mut app);
-        assert!(screen.contains("search"), "popup title");
-        assert!(screen.contains("/n▏"), "input prompt with cursor");
-
-        // Results mode: hit row with path:line and the match highlighted.
-        app.handle_key(key(KeyCode::Enter));
-        let screen = render(&mut app);
-        assert!(screen.contains("1 hit"), "hit count in the title");
-        assert!(screen.contains("hay.md:2: "), "relpath:line prefix");
-        assert!(screen.contains("needle here"), "snippet text");
-
-        // Empty result set shows the empty state.
-        app.search.mode = crate::search::SearchMode::Results;
-        app.search.hits.clear();
-        let screen = render(&mut app);
-        assert!(screen.contains("no matches"));
-    }
-
-    #[test]
-    fn search_title_shows_plus_when_results_were_capped() {
-        let vault_dir = TempDir::new("ui-search-cap");
-        std::fs::write(vault_dir.path().join("hay.md"), "needle\n").unwrap();
-        let file = ui_viewer("ui-search-cap.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.search.open = true;
-        app.search.mode = crate::search::SearchMode::Results;
-        app.search.hits = vec![vault::SearchHit {
-            path: vault_dir.path().join("hay.md"),
-            line: 0,
-            text: "needle".into(),
-            start: 0,
-            end: 6,
-        }];
-        app.search.selected = 0;
-
-        let screen = render(&mut app);
-        assert!(screen.contains("1 hit"), "uncapped: plain count");
-        assert!(!screen.contains("1+ hit"), "no plus when uncapped");
-
-        app.search.capped = true;
-        let screen = render(&mut app);
-        assert!(screen.contains("1+ hits"), "capped: N+ in the title");
-    }
-
-    #[test]
-    fn help_documents_m4_keys() {
-        let file = ui_viewer("ui-help4.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.viewer.help_open = true;
-        let screen = render_help_tall(&mut app);
-        assert!(screen.contains("global search"));
-        assert!(screen.contains("refresh git status"));
-        assert!(screen.contains("changed since last sync"));
-        assert!(screen.contains("unresolved (struck out, not activatable)"));
-    }
-
-    // --- post-v1 loop 6: .base table rendering ---------------------------
-
-    #[test]
-    fn base_table_renders_borders_header_rows_and_status_glyphs() {
-        let vault_dir = TempDir::new("ui-base");
-        std::fs::create_dir_all(vault_dir.path().join("tasks")).unwrap();
-        std::fs::write(
-            vault_dir.path().join("tasks/one.md"),
-            "---\ntype: task\nstatus: active\npriority: 2\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("tasks/two.md"),
-            "---\ntype: task\nstatus: blocked\npriority: 1\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("tasks.base"),
-            "views:\n  - type: table\n    name: Open\n    filters:\n      and:\n        - 'type == \"task\"'\n    order:\n      - file.name\n      - status\n    sort:\n      - property: priority\n        direction: ASC\n",
-        )
-        .unwrap();
-        let file = ui_viewer("ui-base.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
-        app.open_base_at(&vault_dir.path().join("tasks.base"), 0)
-            .unwrap();
-        app.sidebar_visible = false;
-        let screen = render(&mut app);
-        // Bordered block with the view title.
-        assert!(screen.contains("base · view 1/1: Open"), "{screen}");
-        // Header row + sorted note rows (priority ASC: two, one).
-        assert!(screen.contains("Name"), "header row rendered");
-        assert!(screen.contains("two"), "first row (priority 1)");
-        assert!(screen.contains("one"), "second row (priority 2)");
-        // Status glyphs from the shared table (active ●, blocked ◉).
-        assert!(screen.contains('●') && screen.contains('◉'), "{screen}");
-        // Status bar: the base path and the row count segment.
-        assert!(
-            screen.contains("2 rows · view 1/1: Open"),
-            "status bar shows the table state: {screen}"
-        );
-        // The table block (border corner) and a blank inner row below the
-        // two data rows carry content_bg, not the terminal default.
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        assert_eq!(
-            buffer[(0, 0)].bg,
-            Color::Rgb(9, 9, 9),
-            "base-table border painted with content_bg"
-        );
-        assert_eq!(
-            buffer[(50, 20)].bg,
-            Color::Rgb(9, 9, 9),
-            "blank base-table inner area painted with content_bg"
-        );
-    }
-
-    #[test]
-    fn base_row_count_pluralizes_correctly() {
-        let vault_dir = TempDir::new("ui-base-one");
-        std::fs::create_dir_all(vault_dir.path().join("tasks")).unwrap();
-        std::fs::write(
-            vault_dir.path().join("tasks/one.md"),
-            "---\ntype: task\n---\nbody\n",
-        )
-        .unwrap();
-        std::fs::write(
-            vault_dir.path().join("tasks.base"),
-            "views:\n  - type: table\n    name: All\n    order:\n      - file.name\n",
-        )
-        .unwrap();
-        let file = ui_viewer("ui-base-one.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.open_base_at(&vault_dir.path().join("tasks.base"), 0)
-            .unwrap();
-        app.sidebar_visible = false;
-        let screen = render(&mut app);
-        assert!(screen.contains("1 row · view 1/1: All"), "{screen}");
-        assert!(!screen.contains("1 rows"), "{screen}");
-    }
-
-    #[test]
-    fn base_view_switch_is_visible_in_the_title() {
-        let vault_dir = TempDir::new("ui-base-views");
-        std::fs::write(vault_dir.path().join("a.md"), "a\n").unwrap();
-        std::fs::write(
-            vault_dir.path().join("v.base"),
-            "views:\n  - type: table\n    name: One\n    order:\n      - file.name\n  - type: table\n    name: Two\n    order:\n      - file.name\n",
-        )
-        .unwrap();
-        let file = ui_viewer("ui-bv.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.open_base_at(&vault_dir.path().join("v.base"), 0)
-            .unwrap();
-        app.sidebar_visible = false;
-        app.handle_key(key(KeyCode::Char('v')));
-        let screen = render(&mut app);
-        assert!(screen.contains("view 2/2: Two"), "{screen}");
-    }
-
-    #[test]
-    fn chrome_uses_the_themed_border_and_content_bg() {
-        let vault_dir = TempDir::new("ui-theme-vault");
-        std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
-        let file = ui_viewer("ui-theme.md", "# Hi\n\nbody\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        app.theme_ui.sidebar_border_focused = Color::Rgb(1, 2, 3);
-        app.theme_ui.sidebar_border_unfocused = Color::Rgb(4, 5, 6);
-        app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
-        app.theme_ui.sidebar_bg = Color::Rgb(7, 7, 7);
-        app.theme_ui.status_bg = Color::Rgb(8, 8, 8);
-
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-
-        // Content background fills the note area (a plain cell, past the
-        // sidebar at the default ~30% width).
-        assert_eq!(
-            buffer[(70, 10)].bg,
-            Color::Rgb(9, 9, 9),
-            "content_bg applied to the content area"
-        );
-        // Sidebar background fills the sidebar (a blank row below the
-        // tree rows — the base style paints the whole area).
-        assert_eq!(
-            buffer[(10, 20)].bg,
-            Color::Rgb(7, 7, 7),
-            "sidebar_bg applied to the sidebar"
-        );
-        // Status bar background fills the bar (a cell past the text).
-        assert_eq!(
-            buffer[(90, 23)].bg,
-            Color::Rgb(8, 8, 8),
-            "status_bg applied to the status bar"
-        );
-        // Sidebar border (unfocused here): themed color on the border cell.
-        assert_eq!(
-            buffer[(0, 5)].fg,
-            Color::Rgb(4, 5, 6),
-            "unfocused sidebar border from the theme"
-        );
-        // Focused sidebar border.
-        app.focus = Focus::Sidebar;
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert_eq!(
-            terminal.backend().buffer()[(0, 5)].fg,
-            Color::Rgb(1, 2, 3),
-            "focused sidebar border from the theme"
-        );
-    }
-
-    #[test]
-    fn sidebar_selection_keeps_selection_bg_over_sidebar_bg() {
-        let vault_dir = TempDir::new("ui-theme-sel");
-        std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
-        std::fs::create_dir_all(vault_dir.path().join("sub")).unwrap();
-        let file = ui_viewer("ui-theme-sel.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        app.theme_ui.sidebar_bg = Color::Rgb(7, 7, 7);
-        app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
-        // Focus the sidebar and move the selection off the first row
-        // (rows: `sub`, then `alpha.md`).
-        app.focus = Focus::Sidebar;
-        app.handle_key(key(KeyCode::Char('j')));
-
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        // Inner row 2 = `alpha.md` (selected): selection_bg wins on top of
-        // the sidebar_bg base.
-        assert_eq!(
-            buffer[(2, 2)].bg,
-            Color::Rgb(5, 5, 5),
-            "selected row keeps selection_bg"
-        );
-        // A blank sidebar row below still carries sidebar_bg.
-        assert_eq!(buffer[(10, 20)].bg, Color::Rgb(7, 7, 7));
-    }
-
-    #[test]
-    fn popups_paint_content_bg_over_the_terminal_default() {
-        let file = ui_viewer("ui-popup-bg.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
-
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-
-        // The centered help popup (100x24 → 63 wide at x=18): an inner
-        // cell must carry content_bg, not the terminal default.
-        app.viewer.help_open = true;
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert_eq!(
-            terminal.backend().buffer()[(30, 5)].bg,
-            Color::Rgb(9, 9, 9),
-            "help popup painted with content_bg"
-        );
-
-        // Disambiguation popup (2 candidates → 60x6 centered at x=20,y=9):
-        // even a *border* cell carries content_bg (the Paragraph base
-        // style fills the whole rect; the Block only patches fg).
-        app.viewer.help_open = false;
-        app.disambiguation = Some(crate::app::Disambiguation {
-            candidates: vec![
-                std::path::PathBuf::from("/tmp/x/dup.md"),
-                std::path::PathBuf::from("/tmp/y/dup.md"),
-            ],
-            selected: 0,
-            heading: None,
-        });
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert_eq!(
-            terminal.backend().buffer()[(20, 9)].bg,
-            Color::Rgb(9, 9, 9),
-            "disambiguation popup (incl. border cells) painted with content_bg"
-        );
-        app.disambiguation = None;
-
-        // Search popup in input mode (70x4 centered at x=15,y=10).
-        app.search.open = true;
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert_eq!(
-            terminal.backend().buffer()[(15, 10)].bg,
-            Color::Rgb(9, 9, 9),
-            "search popup painted with content_bg"
-        );
-    }
-
-    /// Help scroll: at 100x30 the whole body fits, so scrolling is a no-op;
-    /// on a short terminal `j` moves the body up one line and `k` back.
-    #[test]
-    fn help_scroll_j_moves_and_k_returns() {
-        let file = ui_viewer("ui-help-scroll.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.viewer.help_open = true;
-
-        // Short terminal: the body overflows, so scrolling has room.
-        let backend = TestBackend::new(100, 12);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let before = terminal.backend().to_string();
-        assert_eq!(app.viewer.help_scroll, 0);
-
-        // Simulate `j` through the app key path (same state change).
-        app.viewer.help_scroll += 1;
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let after = terminal.backend().to_string();
-        assert_eq!(app.viewer.help_scroll, 1, "j scrolls the help one line");
-        assert_ne!(before, after, "the body content moved");
-        assert!(after.contains("close esc/any key"), "footer fixed");
-        assert!(after.contains("keybinds"), "title fixed");
-
-        // Scroll is clamped to the overflow at draw time.
-        app.viewer.help_scroll = usize::MAX;
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert!(app.viewer.help_scroll < usize::MAX, "clamped at draw");
-    }
-
-    // --- scrollbars (markdown viewer, sidebar tree, tag list) -------------
-
-    /// Buffer symbols of a whole row, left to right.
-    fn row_symbols(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
-        (0..buffer.area.width)
-            .map(|x| buffer[(x, y)].symbol().to_string())
-            .collect()
-    }
-
-    /// Whether a scrollbar glyph (track or thumb) sits in column `x` of rows
-    /// `ys`. The default scrollbar symbols are `░`/`█`/`▲`/`▼`/`↑`/`↓`.
-    fn column_has_bar(buffer: &ratatui::buffer::Buffer, x: u16, ys: std::ops::Range<u16>) -> bool {
-        ys.into_iter().any(|y| {
-            matches!(
-                buffer[(x, y)].symbol(),
-                "█" | "░" | "▲" | "▼" | "↑" | "↓" | "▴" | "▾"
-            )
-        })
-    }
-
-    fn long_note(lines: usize) -> String {
-        (0..lines).map(|i| format!("line-{i:03}\n")).collect()
-    }
-
-    #[test]
-    fn note_scrollbar_absent_when_content_fits() {
-        let file = ui_viewer("ui-bar-fit.md", "short\nnote\n");
-        let mut app = app_for(&file, None);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        // Right edge of the content pane (last column before the bar would be).
-        assert!(
-            !column_has_bar(buffer, 99, 0..23),
-            "no bar when content fits"
-        );
-        assert_eq!(app.note_viewport.width, 96, "text width less the margins");
-    }
-
-    #[test]
-    fn note_scrollbar_present_only_when_overflowing_and_text_stops_before_it() {
-        let file = ui_viewer("ui-bar-long.md", &long_note(200));
-        let mut app = app_for(&file, None);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-
-        // Bar on the right edge column only (the rightmost column of the note
-        // area), spanning the note rows (status line excluded).
-        assert!(column_has_bar(buffer, 99, 0..23), "bar drawn at right edge");
-        // Text is narrowed: the note viewport stops one column short of the edge.
-        assert_eq!(
-            app.note_viewport.x + app.note_viewport.width,
-            99 - app.note_margin
-        );
-        // No text cell is drawn under the bar column.
-        for y in 0..23 {
-            let sym = buffer[(99, y)].symbol();
-            assert!(
-                !sym.chars().any(|c| c.is_ascii_alphanumeric()),
-                "text under the bar at row {y}: {sym:?}"
-            );
-        }
-        // Text is still visible in the narrowed area.
-        assert!(row_symbols(buffer, 0).contains("line-000"));
-    }
-
-    #[test]
-    fn note_scrollbar_position_tracks_the_drawn_scroll() {
-        let file = ui_viewer("ui-bar-pos.md", &long_note(200));
-        let mut app = app_for(&file, None);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let top = terminal.backend().buffer().clone();
-
-        app.viewer.scroll_bottom();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let bottom = terminal.backend().buffer().clone();
-        // The paragraph and the bar both moved: the first row differs and the
-        // bar thumb is no longer in the same place.
-        assert!(row_symbols(&top, 0).contains("line-000"));
-        assert!(!row_symbols(&bottom, 0).contains("line-000"));
-        let thumb_rows = |b: &ratatui::buffer::Buffer| -> Vec<u16> {
-            (0..23).filter(|&y| b[(99, y)].symbol() == "█").collect()
-        };
-        let (t, b) = (thumb_rows(&top), thumb_rows(&bottom));
-        assert!(!t.is_empty() && !b.is_empty(), "thumb drawn");
-        assert!(b[0] > t[0], "thumb moved down with the scroll");
-    }
-
-    #[test]
-    fn note_scrollbar_click_mapping_matches_the_narrowed_viewport() {
-        let file = ui_viewer("ui-bar-click.md", &long_note(200));
-        let mut app = app_for(&file, None);
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        // The viewport recorded for clicks is exactly the drawn text area.
-        let vp = app.note_viewport;
-        assert_eq!(vp.width, 95, "100 columns less the margins and the bar");
-        assert_eq!(vp.x, app.note_margin);
-        // A click on the bar column is outside the note viewport: no-op.
-        let before = app.viewer.scroll;
-        let focus_before = app.focus;
-        app.handle_click(99, 5);
-        assert_eq!(app.viewer.scroll, before);
-        assert_eq!(app.focus, focus_before, "bar click does not change focus");
-    }
-
-    #[test]
-    fn sidebar_scrollbar_present_only_when_rows_overflow() {
-        let vault_dir = TempDir::new("ui-bar-side");
-        for i in 0..40 {
-            std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
-        }
-        let file = ui_viewer("ui-bar-side.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let sidebar_w = sidebar_width(100);
-        // Border at column sidebar_w-1; the bar is the last inner column.
-        let bar_x = sidebar_w - 2;
-        assert!(column_has_bar(buffer, bar_x, 1..23), "sidebar bar drawn");
-        assert_eq!(buffer[(sidebar_w - 1, 5)].symbol(), "│", "border intact");
-        // Names never run under the bar.
-        for y in 1..23 {
-            let sym = buffer[(bar_x, y)].symbol();
-            assert!(!sym.chars().any(|c| c.is_ascii_alphanumeric()), "{sym:?}");
-        }
-    }
-
-    #[test]
-    fn sidebar_scrollbar_absent_when_all_rows_fit() {
-        let vault_dir = vault(); // two rows + folder: fits comfortably
-        let file = ui_viewer("ui-bar-side-fit.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let bar_x = sidebar_width(100) - 2;
-        assert!(
-            !column_has_bar(buffer, bar_x, 1..23),
-            "no bar when rows fit"
-        );
-    }
-
-    #[test]
-    fn tag_list_scrollbar_only_when_rows_overflow() {
-        let vault_dir = TempDir::new("ui-bar-tags");
-        for i in 0..30 {
-            std::fs::write(
-                vault_dir.path().join(format!("t{i:02}.md")),
-                format!("---\ntags: [tag{i:02}]\n---\nx\n"),
-            )
-            .unwrap();
-        }
-        let file = ui_viewer("ui-bar-tags.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.handle_key(key(KeyCode::Char('t')));
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let bar_x = sidebar_width(100) - 2;
-        assert!(column_has_bar(buffer, bar_x, 1..23), "tag list bar drawn");
-        assert_eq!(buffer[(sidebar_width(100) - 1, 5)].symbol(), "│");
-    }
-
-    #[test]
-    fn tag_list_scrollbar_absent_when_rows_fit() {
-        let vault_dir = TempDir::new("ui-bar-tags-fit");
-        std::fs::write(vault_dir.path().join("a.md"), "---\ntags: [solo]\n---\nx\n").unwrap();
-        let file = ui_viewer("ui-bar-tags-fit.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-        app.handle_key(key(KeyCode::Char('t')));
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let bar_x = sidebar_width(100) - 2;
-        assert!(
-            !column_has_bar(buffer, bar_x, 1..23),
-            "no bar when tags fit"
-        );
-    }
-
-    /// `<`/`>` width override: the drawn layout places the sidebar/content
-    /// divider at the override's column instead of the proportional default.
-    #[test]
-    fn sidebar_width_override_moves_the_divider() {
-        let vault_dir = TempDir::new("ui-sbw");
-        std::fs::write(vault_dir.path().join("a.md"), "x\n").unwrap();
-        let file = ui_viewer("ui-sbw.md", "x\n");
-        let mut app = app_with_index(&file, &vault_dir);
-
-        // Default: divider at sidebar_width(100) - 1 = 29.
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert_eq!(
-            terminal.backend().buffer()[(sidebar_width(100) - 1, 5)].symbol(),
-            "│"
-        );
-
-        // Override 40: divider moves to column 39.
-        app.sidebar_width = Some(40);
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert_eq!(
-            terminal.backend().buffer()[(39, 5)].symbol(),
-            "│",
-            "divider follows the width override"
-        );
-        assert_eq!(
-            terminal.backend().buffer()[(sidebar_width(100) - 1, 5)].symbol(),
-            " ",
-            "old divider column no longer a border"
-        );
-    }
-
-    /// Documented behavior (sidebar + tag list): the scrollbar column is inside
-    /// the widget, so a click there is owned by the sidebar and maps by ROW
-    /// only — it selects the row on that screen line, same as a click on the
-    /// text. Pinned here with the bar drawn (overflowing list) and absent
-    /// (fitting list).
-    #[test]
-    fn sidebar_click_on_scrollbar_column_selects_the_row_when_bar_present() {
-        let vault_dir = TempDir::new("ui-bar-click-col");
-        for i in 0..40 {
-            std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
-        }
-        let file = ui_viewer("ui-bar-click-col.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let area = app.sidebar_area.expect("sidebar visible");
-        let bar_col = sidebar_width(100) - 2;
-        // Precondition: the bar really is drawn on this column (removing the
-        // bar would fail here).
-        assert!(
-            column_has_bar(terminal.backend().buffer(), bar_col, 1..23),
-            "bar drawn on the click column"
-        );
-        let (target, second) = {
-            let rows = app.sidebar.as_ref().unwrap().rows();
-            (rows[0].node.path.clone(), rows[1].node.path.clone())
-        };
-        app.handle_click(bar_col, area.y + 1);
-        assert_eq!(
-            app.sidebar.as_ref().unwrap().selected.as_deref(),
-            Some(target.as_path()),
-            "bar-column click on row 0 selects row 0"
-        );
-        app.handle_click(bar_col, area.y + 2);
-        assert_eq!(
-            app.sidebar.as_ref().unwrap().selected.as_deref(),
-            Some(second.as_path()),
-            "bar-column click on row 1 selects row 1"
-        );
-    }
-
-    /// Fitting list: no bar, the same click column is ordinary text and
-    /// maps by row exactly as before.
-    #[test]
-    fn sidebar_click_on_fitting_list_has_no_bar_and_maps_by_row() {
-        let vault_dir = vault(); // a folder + one note: fits
-        let file = ui_viewer("ui-bar-click-fit.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let area = app.sidebar_area.expect("sidebar visible");
-        let bar_col = sidebar_width(100) - 2;
-        assert!(
-            !column_has_bar(terminal.backend().buffer(), bar_col, 1..23),
-            "no bar on a fitting list"
-        );
-        let target = app.sidebar.as_ref().unwrap().rows()[1].node.path.clone();
-        app.handle_click(bar_col, area.y + 2);
-        assert_eq!(
-            app.sidebar.as_ref().unwrap().selected.as_deref(),
-            Some(target.as_path()),
-            "click on the last text column maps to row 1 with no bar"
-        );
-    }
-
-    #[test]
-    fn sidebar_click_on_visible_row_maps_with_bar_present() {
-        let vault_dir = TempDir::new("ui-bar-click-side");
-        for i in 0..40 {
-            std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
-        }
-        let file = ui_viewer("ui-bar-click-side.md", "x\n");
-        let mut app = app_for(&file, Some(vault_dir.path()));
-        let backend = TestBackend::new(100, 24);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let area = app.sidebar_area.expect("sidebar visible");
-        // Row 0 of the list (`n00.md`) is at screen row area.y + 1; the bar
-        // narrowing must not move it: the list mapping is row-only.
-        let (target, second) = {
-            let rows = app.sidebar.as_ref().unwrap().rows();
-            (rows[0].node.path.clone(), rows[1].node.path.clone())
-        };
-        app.handle_click(2, area.y + 1);
-        assert_eq!(
-            app.sidebar.as_ref().unwrap().selected.as_deref(),
-            Some(target.as_path()),
-            "click on the first visible row selects that row"
-        );
-        // The second visible row is the next one, still row-accurate.
-        app.handle_click(2, area.y + 2);
-        assert_eq!(
-            app.sidebar.as_ref().unwrap().selected.as_deref(),
-            Some(second.as_path()),
-        );
-    }
-
-    /// The help popup must never panic on small terminals (it is clamped to
-    /// the frame area; too-small areas just draw nothing or a truncated box).
-    #[test]
-    fn help_popup_does_not_panic_on_small_terminals() {
-        let file = ui_viewer("ui-help-small.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.viewer.help_open = true;
-        for (w, h) in [(1, 1), (2, 2), (10, 4), (30, 8), (60, 12), (80, 10)] {
-            let backend = TestBackend::new(w, h);
-            let mut terminal = Terminal::new(backend).unwrap();
-            terminal.draw(|f| draw(f, &mut app)).unwrap();
-        }
-    }
-
-    /// Full help body (with the blank group separators) on a tall backend,
-    /// so the last group is on screen.
-    fn render_help_tall(app: &mut App) -> String {
-        let backend = TestBackend::new(100, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, app)).unwrap();
-        terminal.backend().to_string()
-    }
-
-    /// Theme cycling is documented; the footer stays fixed on a 30-row
-    /// backend, and the body overflows there (so it scrolls, with a scrollbar).
-    #[test]
-    fn help_documents_theme_cycling_and_fits() {
-        let file = ui_viewer("ui-help5.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.viewer.help_open = true;
-        let screen = render_help_tall(&mut app);
-        assert!(screen.contains("Shift+T"), "theme cycling documented");
-        assert!(screen.contains("cycle theme"));
-        assert!(screen.contains("close esc/any key"), "footer shown");
-        let small = render_help(&mut app);
-        assert!(
-            small.contains("close esc/any key"),
-            "footer fixed at 100x30"
-        );
-    }
-
-    /// Keys are padded to one common column across groups and columns: every
-    /// label of the grid starts at `key width + gap` inside its column, and
-    /// the key width is shared by all columns.
-    fn app_ui_theme() -> UiTheme {
-        crate::theme::ui_by_preset(engine::MarkdownThemePreset::default())
-    }
-
-    #[test]
-    fn help_labels_align_to_one_key_column() {
-        let width = help_key_width();
-        assert_eq!(width, "Backspace / Ctrl+O".chars().count());
-        // Tall frame (spaced) and short frame (compact): the key column is
-        // shared either way.
-        for h in [36u16, 30u16] {
-            let grid = help_grid(h);
-            let lines = help_body(app_ui_theme(), &grid, grid.spaced);
-            assert_eq!(lines.len(), grid.rows, "row count matches the grid");
-            let text: Vec<String> = lines
-                .iter()
-                .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
-                .collect();
-            for key in ["Tab", "h / l", "Shift+T", "dimmed links"] {
-                for row in &text {
-                    if let Some(rest) = row.find(key).map(|at| &row[at..]) {
-                        if rest.starts_with(key) {
-                            let after: String = rest.chars().skip(width + 1).take(1).collect();
-                            assert_ne!(after, " ", "label starts at the key column: {row:?}");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Group separation: a blank row sits between groups in a spaced column,
-    /// and never in the packed layout.
-    #[test]
-    fn help_has_one_blank_line_between_groups() {
-        // One column (pinned by a narrow width) with the spaced layout.
-        let spaced = help_pack(HELP_SECTIONS, 1, true);
-        assert_eq!(spaced.len(), 1, "one column packs all groups");
-        let rows_spaced = spaced[0].rows;
-        let packed = help_pack(HELP_SECTIONS, 1, false);
-        assert_eq!(rows_spaced, packed[0].rows + HELP_SECTIONS.len() - 1);
-        let grid = HelpGrid {
-            columns: spaced,
-            label_widths: vec![help_label_width(&HELP_SECTIONS.iter().collect::<Vec<_>>())],
-            width: HELP_WIDTH,
-            rows: rows_spaced,
-            spaced: true,
-        };
-        let lines = help_body(app_ui_theme(), &grid, true);
-        let blanks = lines
-            .iter()
-            .filter(|l| l.spans.iter().all(|s| s.content.trim().is_empty()))
-            .count();
-        assert_eq!(
-            blanks,
-            HELP_SECTIONS.len() - 1,
-            "one blank row between groups"
-        );
-    }
-
-    /// Layout is always a single column: the spaced layout (blank rows
-    /// between groups) when it fits the frame height, the compact one
-    /// (which scrolls) otherwise.
-    #[test]
-    fn help_grid_is_single_column_spaced_when_it_fits() {
-        let tall = help_grid(40);
-        assert_eq!(tall.columns.len(), 1, "always one column");
-        assert!(tall.spaced, "spaced when the body fits");
-        let mut all: Vec<usize> = tall.columns.iter().flat_map(|c| c.groups.clone()).collect();
-        all.sort_unstable();
-        assert_eq!(
-            all,
-            (0..HELP_SECTIONS.len()).collect::<Vec<_>>(),
-            "every group placed once, in order"
-        );
-        assert!(tall.width <= 140, "sane width on a wide terminal");
-
-        // Short frame: compact layout, the body scrolls.
-        let short = help_grid(30);
-        assert_eq!(short.columns.len(), 1);
-        assert!(!short.spaced, "compact when the spaced body does not fit");
-        assert!(short.rows < tall.rows);
-    }
-
-    /// The whole body is on the first screen at the 100x30 smoke size, so
-    /// every key stays visible without scrolling.
-    #[test]
-    fn help_fits_first_screen_at_smoke_size() {
-        let file = ui_viewer("ui-help-fit.md", "x\n");
-        let mut app = app_for(&file, None);
-        app.viewer.help_open = true;
-        let screen = render_help(&mut app);
-        assert!(screen.contains("refresh git status"), "u entry on screen");
-        assert!(screen.contains("cycle theme"), "Shift+T entry on screen");
-        assert_eq!(app.viewer.help_scroll, 0);
-    }
-
-    /// The popup dims everything outside it and keeps its own cells crisp:
-    /// every cell outside the popup rect carries DIM, every cell inside does not.
-    #[test]
-    fn help_dims_background_and_keeps_popup_crisp() {
-        let file = ui_viewer("ui-help-dim.md", "# Hi\n\nbody\n");
-        let mut app = app_for(&file, None);
-        app.viewer.help_open = true;
-        let backend = TestBackend::new(100, 30);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| draw(f, &mut app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let frame = Rect::new(0, 0, 100, 30);
-        let popup = centered(
-            frame,
-            help_grid(frame.height).width.min(frame.width - 2),
-            (help_grid(frame.height).rows as u16 + 3).min(frame.height - 2),
-        );
-        for y in frame.y..frame.bottom() {
-            for x in frame.x..frame.right() {
-                let inside =
-                    x >= popup.x && x < popup.right() && y >= popup.y && y < popup.bottom();
-                let dim = buffer[(x, y)].modifier.contains(Modifier::DIM);
-                if inside {
-                    assert!(!dim, "popup cell ({x},{y}) must not be dimmed");
-                } else {
-                    assert!(dim, "background cell ({x},{y}) must be dimmed");
-                }
-            }
-        }
-    }
-}
+mod tests;

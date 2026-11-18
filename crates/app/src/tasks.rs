@@ -21,7 +21,7 @@
 use ratatui::text::Line;
 use vault::tasks::{TaskHit, TaskState};
 
-use crate::links::FOCUS_BG;
+use crate::links::{for_spans_in_columns, LinkColors};
 
 /// A task marker with its rendered position.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,11 +74,17 @@ pub fn map_tasks(
     lines: &[Line<'_>],
 ) -> Vec<RenderedTask> {
     let mut rendered = Vec::with_capacity(hits.len());
+    // source line → first rendered line showing it (what `position` found).
+    let mut first_line: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::with_capacity(source_line_map.len());
+    for (line_idx, &src) in source_line_map.iter().enumerate() {
+        first_line.entry(src).or_insert(line_idx);
+    }
     for hit in hits {
         // The engine's map is 1-based and counts frontmatter lines, so
         // the task's 0-based raw line is `hit.line + 1`.
         let want = hit.line + 1;
-        let Some(line_idx) = source_line_map.iter().position(|&src| src == want) else {
+        let Some(&line_idx) = first_line.get(&want) else {
             continue;
         };
         let Some((start, end)) = glyph_range(&lines[line_idx]) else {
@@ -122,31 +128,25 @@ pub fn apply_task_styles(
     lines: &mut [Line<'static>],
     tasks: &[RenderedTask],
     focused: Option<usize>,
+    colors: LinkColors,
 ) {
-    use unicode_width::UnicodeWidthStr;
     for (index, task) in tasks.iter().enumerate() {
         let Some(line) = lines.get_mut(task.line) else {
             continue;
         };
         let focused = focused == Some(index);
-        let mut col = 0usize;
-        for span in &mut line.spans {
-            let width = span.content.width();
-            let span_end = col + width;
-            if span_end > task.start && col < task.end && width > 0 {
-                if task.state == TaskState::InProgress && span.content.starts_with('☐') {
-                    // Same glyph the sidebar uses for in-progress states.
-                    span.content = "◐ ".into();
-                }
-                if focused {
-                    span.style = span
-                        .style
-                        .bg(FOCUS_BG)
-                        .add_modifier(ratatui::style::Modifier::BOLD);
-                }
+        for_spans_in_columns(line, task.start, task.end, |span| {
+            if task.state == TaskState::InProgress && span.content.starts_with('☐') {
+                // Same glyph the sidebar uses for in-progress states.
+                span.content = "◐ ".into();
             }
-            col = span_end;
-        }
+            if focused {
+                span.style = span
+                    .style
+                    .bg(colors.focus_bg)
+                    .add_modifier(ratatui::style::Modifier::BOLD);
+            }
+        });
     }
 }
 
@@ -159,7 +159,7 @@ mod tests {
         let assets = engine::SyntaxAssets::load_defaults();
         let result = engine::parse_markdown_with_width(
             &pre,
-            &assets.syntax_set,
+            assets.syntax_set,
             &assets.theme,
             80,
             &engine::default_markdown_theme(),
@@ -251,7 +251,7 @@ mod tests {
             !line_text(&lines[tasks[0].line]).contains('◐'),
             "before styling"
         );
-        apply_task_styles(&mut lines, &tasks, None);
+        apply_task_styles(&mut lines, &tasks, None, LinkColors::default());
         assert!(
             line_text(&lines[tasks[0].line]).contains("◐ "),
             "in-progress glyph visible: {}",
@@ -267,17 +267,20 @@ mod tests {
     fn focused_task_gets_the_link_focus_highlight() {
         let source = "- [ ] a\n- [ ] b\n";
         let (mut lines, tasks) = rendered(source);
-        apply_task_styles(&mut lines, &tasks, Some(1));
+        apply_task_styles(&mut lines, &tasks, Some(1), LinkColors::default());
         let spans = &lines[tasks[1].line].spans;
         assert!(
             spans
                 .iter()
-                .any(|s| s.style.bg == Some(FOCUS_BG) && s.content.starts_with('☐')),
+                .any(|s| s.style.bg == Some(LinkColors::default().focus_bg)
+                    && s.content.starts_with('☐')),
             "focused checkbox highlighted"
         );
         let spans0 = &lines[tasks[0].line].spans;
         assert!(
-            !spans0.iter().any(|s| s.style.bg == Some(FOCUS_BG)),
+            !spans0
+                .iter()
+                .any(|s| s.style.bg == Some(LinkColors::default().focus_bg)),
             "the other checkbox is not highlighted"
         );
     }

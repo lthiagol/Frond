@@ -3,14 +3,14 @@
 //! emulation (global search prompt → results → open-at-line, git clean/
 //! dirty status segment, sidebar changed-file markers, help, clean exit)
 //! against a fixture vault built (and `git init`ed) under
-//! `/tmp/frond-m4-vault`.
+//! the smoke scratch dir (`scripts/smoke_tmp.py`).
 //!
 //! Ignored by default because it needs:
 //! - `python3` with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`), and
-//! - a debug build of the app (`cargo build -p app`) — the binary is
+//! - a debug build of the app (`cargo build -p frond`) — the binary is
 //!   located via cargo's `CARGO_BIN_EXE_frond` and passed as `FROND_APP_BIN`.
 //!
-//! Run it with: `cargo test -p app --test smoke_m4 -- --ignored`
+//! Run it with: `cargo test -p frond --test smoke_m4 -- --ignored`
 //!
 //! The script never touches `testvault/`; it writes only its /tmp fixture
 //! (which it turns into a git repository for the sync-status checks).

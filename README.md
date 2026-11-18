@@ -107,7 +107,7 @@ make run        # launches frond and prompts for the vault path
 Or directly:
 
 ```sh
-cargo run -p app --bin frond -- --vault testvault
+cargo run -p frond --bin frond -- --vault testvault
 ```
 
 ## Configuration

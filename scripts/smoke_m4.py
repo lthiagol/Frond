@@ -7,7 +7,7 @@ Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
 - `git` on PATH (fixture repository setup only; the app itself only ever
   runs read-only git commands plus the guarded checkbox write).
-- A debug build of the app (`cargo build -p app`); binary path overridable
+- A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
 The script builds a small fixture vault under /tmp/frond-m4-vault, turns it
@@ -21,10 +21,11 @@ import datetime
 import os, pty, select, struct, sys, shutil, time, fcntl, termios
 
 import pyte
+import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = "/tmp/frond-m4-vault"
+VAULT = smoke_tmp.path("frond-m4-vault")
 
 COLS, ROWS = 100, 30
 
@@ -67,7 +68,7 @@ pid, fd = pty.fork()
 if pid == 0:
     os.environ["TERM"] = "xterm-256color"
     # The quit-time session save must not touch the real ~/.local/state.
-    os.environ["FROND_SESSION"] = "/tmp/frond-m4-session"
+    os.environ["FROND_SESSION"] = smoke_tmp.path("frond-m4-session")
     # NO_COLOR would strip every SGR color; the mouse-flow checks compare
     # cell backgrounds, so the child must emit colors.
     os.environ.pop("NO_COLOR", None)

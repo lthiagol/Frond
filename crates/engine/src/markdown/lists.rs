@@ -23,6 +23,7 @@ fn ordered_marker(n: u64) -> String {
     format!("{n}. ")
 }
 
+#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn is_ordered_marker(text: &str) -> bool {
     text.strip_suffix(". ")
         .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))

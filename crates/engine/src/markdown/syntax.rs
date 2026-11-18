@@ -50,7 +50,6 @@ pub(crate) fn resolve_syntax<'a>(
         "docker" | "dockerfile" => &["Dockerfile", "dockerfile", "bash", "sh"],
         "yml" | "yaml" => &["YAML", "yml", "yaml"],
         "rs" | "rust" => &["Rust", "rs", "rust"],
-        _ if normalized.is_empty() => &[],
         _ => &[],
     };
 

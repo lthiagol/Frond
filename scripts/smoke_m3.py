@@ -3,7 +3,7 @@
 
 Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
-- A debug build of the app (`cargo build -p app`); binary path overridable
+- A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
 The script builds a small fixture vault with cross-links under
@@ -17,10 +17,11 @@ and backlinks panel selection.
 import os, pty, select, struct, sys, shutil, time, fcntl, termios
 
 import pyte
+import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = "/tmp/frond-m3-vault"
+VAULT = smoke_tmp.path("frond-m3-vault")
 
 COLS, ROWS = 100, 30
 
@@ -45,7 +46,7 @@ pid, fd = pty.fork()
 if pid == 0:
     os.environ["TERM"] = "xterm-256color"
     # The quit-time session save must not touch the real ~/.local/state.
-    os.environ["FROND_SESSION"] = "/tmp/frond-m3-session"
+    os.environ["FROND_SESSION"] = smoke_tmp.path("frond-m3-session")
     fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     os.execv(APP, [APP, "--vault", VAULT, f"{VAULT}/index.md"])
 

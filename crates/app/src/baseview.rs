@@ -1,4 +1,4 @@
-//! `.base` table view state and rendering (post-v1 loop 6).
+//! `.base` table view state and rendering.
 //!
 //! The app keeps at most one open base file (`App::base`). The parse and
 //! the table model come from `vault::base`; this module owns the state
@@ -60,12 +60,14 @@ pub struct BaseState {
     /// first frame). Stored on the state so the click handler (which
     /// runs between frames) sees the same geometry the renderer used.
     pub regions: Vec<BaseLinkRegion>,
+    /// Content-capped natural width of each column, computed once per
+    /// [`Self::rebuild`] (it scans every row) instead of on every frame.
+    natural_widths: Vec<usize>,
 }
 
 /// True when `path` is a `.base` file (the app's second content kind).
 pub fn is_base_file(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("base"))
+    vault::walk::is_base_path(path)
 }
 
 /// Today as `YYYY-MM-DD` (the caller's clock for date filters).
@@ -92,6 +94,7 @@ impl BaseState {
             stamp: FileStamp::of(path).ok(),
             warnings,
             regions: Vec::new(),
+            natural_widths: Vec::new(),
         };
         state.rebuild(index, today);
         Ok(state)
@@ -143,16 +146,19 @@ impl BaseState {
                 rows: Vec::new(),
             },
         };
+        self.natural_widths = natural_column_widths(&self.table);
         self.clamp_scroll();
     }
 
     /// The number of views (always ≥ 1: parsing falls back to a default
     /// view when the file has no table views).
     pub fn view_count(&self) -> usize {
+        debug_assert!(!self.base.views.is_empty(), "parse_base synthesises a view");
         self.base.views.len()
     }
 
     pub fn view_name(&self) -> &str {
+        debug_assert!(self.view < self.view_count());
         &self.base.views[self.view].name
     }
 
@@ -220,7 +226,7 @@ impl BaseState {
         let inner_width = width.max(1);
         let inner_height = height.max(1);
         self.viewport_height(inner_height);
-        let widths = column_widths(&self.table, inner_width);
+        let widths = fit_column_widths(&self.natural_widths, inner_width);
 
         // Header + rule.
         let mut lines = vec![
@@ -253,10 +259,10 @@ impl BaseState {
     }
 }
 
-/// Column widths: natural (content-capped at [`MAX_COL_WIDTH`]), then
-/// shrunk to fit `inner_width` by repeatedly trimming the widest column.
-fn column_widths(table: &BaseTable, inner_width: usize) -> Vec<usize> {
-    let mut widths: Vec<usize> = table
+/// Natural column widths: header or widest cell, capped at
+/// [`MAX_COL_WIDTH`]. Scans every row, so callers cache the result.
+fn natural_column_widths(table: &BaseTable) -> Vec<usize> {
+    table
         .columns
         .iter()
         .enumerate()
@@ -271,7 +277,13 @@ fn column_widths(table: &BaseTable, inner_width: usize) -> Vec<usize> {
             }
             natural.clamp(1, MAX_COL_WIDTH)
         })
-        .collect();
+        .collect()
+}
+
+/// Shrinks `natural` widths to fit `inner_width` by repeatedly trimming
+/// the widest column.
+fn fit_column_widths(natural: &[usize], inner_width: usize) -> Vec<usize> {
+    let mut widths = natural.to_vec();
     let total = |ws: &[usize]| ws.iter().sum::<usize>() + ws.len().saturating_sub(1) * COL_SPACING;
     while total(&widths) > inner_width {
         let Some((widest, _)) = widths
@@ -331,7 +343,7 @@ fn note_line(
     columns: &[vault::base::Column],
     widths: &[usize],
     absolute_line: usize,
-    _ui: UiTheme,
+    ui: UiTheme,
 ) -> (Line<'static>, Vec<BaseLinkRegion>) {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut regions = Vec::new();
@@ -350,7 +362,7 @@ fn note_line(
         if column.key == "status" {
             if let Some((glyph, style)) = crate::ui::status_glyph(Some(raw_text)) {
                 let room = width.saturating_sub(2);
-                spans.push(Span::styled(format!("{glyph} "), style.glyph_style()));
+                spans.push(Span::styled(format!("{glyph} "), style.glyph_style(ui)));
                 spans.push(Span::styled(
                     pad(truncate_ellipsis(raw_text, room), room),
                     Style::new(),

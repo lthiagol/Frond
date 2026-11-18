@@ -39,20 +39,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "app"
-version = "0.6.0"
-dependencies = [
- "chrono",
- "crossterm",
- "engine",
- "ratatui",
- "serde",
- "toml",
- "unicode-width",
- "vault",
-]
-
-[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -488,6 +474,20 @@ name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
+name = "frond"
+version = "0.6.0"
+dependencies = [
+ "chrono",
+ "crossterm",
+ "engine",
+ "ratatui",
+ "serde",
+ "toml",
+ "unicode-width",
+ "vault",
+]
 
 [[package]]
 name = "futures-core"

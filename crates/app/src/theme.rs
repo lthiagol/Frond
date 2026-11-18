@@ -651,7 +651,10 @@ pub fn discover_custom_themes(dirs: &[PathBuf]) -> BTreeMap<String, PathBuf> {
         let mut files: Vec<PathBuf> = entries
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
+            })
             .collect();
         files.sort();
         for path in files {
@@ -721,7 +724,10 @@ pub fn resolve_theme(
 fn reserved_name_kind(name: &str) -> Option<&'static str> {
     if parse_preset_name(name).is_some() {
         Some("preset")
-    } else if builtin_theme(name).is_some() {
+    } else if crate::builtin_themes::BUILTIN_THEMES
+        .iter()
+        .any(|spec| spec.name == name)
+    {
         Some("built-in")
     } else {
         None
@@ -813,6 +819,9 @@ impl ThemeChoices {
     }
 
     pub fn current(&self) -> &ThemeChoice {
+        // Invariant: the cycle always holds the presets, and `index` is
+        // kept in range by `select` / `next_*`.
+        debug_assert!(self.index < self.entries.len());
         &self.entries[self.index]
     }
 
@@ -1229,7 +1238,8 @@ mod tests {
         // real HOME): shape only — the one frond dir; the leaf compat
         // directory is no longer read.
         // (The FROND_THEMES branch is covered by the smoke suite.)
-        std::env::remove_var("FROND_THEMES");
+        let mut env = crate::testutil::EnvGuard::lock();
+        env.remove("FROND_THEMES");
         let dirs = default_theme_dirs();
         assert_eq!(dirs.len(), 1);
         assert!(dirs[0].ends_with(".config/frond/themes"), "{:?}", dirs[0]);

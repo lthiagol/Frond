@@ -7,7 +7,7 @@ CARGO ?= cargo
 
 help:
 	@echo "make build          - debug build"
-	@echo "make release        - release build (binary: target/release/app)"
+	@echo "make release        - release build (binary: target/release/frond)"
 	@echo "make test           - unit + integration tests (smoke suites excluded)"
 	@echo "make smoke          - pty smoke suites (slow, uses uv + pyte)"
 	@echo "make fmt / clippy   - formatting / lints"
@@ -28,11 +28,11 @@ test:
 # Smokes drive the app via python3 + pyte; `uv run --with pyte` provides pyte
 # on the PATH without a manual install.
 smoke:
-	uv run --with pyte $(CARGO) test -p app --test smoke -- --ignored
-	uv run --with pyte $(CARGO) test -p app --test smoke_m2 -- --ignored
-	uv run --with pyte $(CARGO) test -p app --test smoke_m3 -- --ignored
-	uv run --with pyte $(CARGO) test -p app --test smoke_m4 -- --ignored
-	uv run --with pyte $(CARGO) test -p app --test smoke_m5 -- --ignored
+	uv run --with pyte $(CARGO) test -p frond --test smoke -- --ignored
+	uv run --with pyte $(CARGO) test -p frond --test smoke_m2 -- --ignored
+	uv run --with pyte $(CARGO) test -p frond --test smoke_m3 -- --ignored
+	uv run --with pyte $(CARGO) test -p frond --test smoke_m4 -- --ignored
+	uv run --with pyte $(CARGO) test -p frond --test smoke_m5 -- --ignored
 
 fmt:
 	$(CARGO) fmt
@@ -43,15 +43,17 @@ clippy:
 check: fmt clippy test smoke
 
 run:
-	$(CARGO) run --release -p app --
+	$(CARGO) run --release -p frond --
 
 # Removes ALL build artifacts. snapshots/ and docs/ are never touched.
 clean:
 	$(CARGO) clean
 	rm -rf target
 
-# Removes smoke-test leftovers from /tmp (fixtures are recreated by each run).
+# Removes smoke-test leftovers: the private per-user scratch root the smoke
+# scripts use (scripts/smoke_tmp.py), plus the old fixed /tmp paths.
 clean-fixtures:
+	rm -rf "$${FROND_SMOKE_TMP:-$${TMPDIR:-/tmp}/frond-smoke-$$(id -u)}"
 	rm -rf /tmp/frond-m2-vault /tmp/frond-m3-vault /tmp/frond-m4-vault \
 	       /tmp/watchtest.md /tmp/vault-copy* /tmp/gitprobe* /tmp/probe-* \
 	       /tmp/frond-ui*.md

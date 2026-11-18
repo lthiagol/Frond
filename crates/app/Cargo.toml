@@ -1,10 +1,10 @@
 [package]
-name = "app"
+name = "frond"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 # The crate also had a temporary `render` acceptance bin until post-v1
-# loop 2; with it gone, plain `cargo run -p app` targets the TUI binary.
+# loop 2; with it gone, plain `cargo run -p frond` targets the TUI binary.
 default-run = "frond"
 
 [[bin]]
