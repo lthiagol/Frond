@@ -18,6 +18,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   row, so a scroll is no longer missed when the sampled row happens to be a
   blank gap.
 
+### Changed
+- `SPEC.md` reconciled with the code: the status bar's segments (the status
+  badge and the tags are *not* on it), the path label rules (the file name,
+  never the full path), the vault watcher (poll-based, not notify-based),
+  the wikilink resolution and ambiguity rules, the sidebar width clamps, the
+  focus rules of `h`/`l`/`b`, the help popup's layout, the `watch` config
+  key and the milestone list. The README's "no vault" wording was corrected
+  too (without `--vault` there is no sidebar, but the current directory is
+  still indexed).
+
 ## [0.6.1] — 2026-11-17
 
 ### Added

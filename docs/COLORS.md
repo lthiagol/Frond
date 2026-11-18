@@ -34,7 +34,7 @@ checks every preset and built-in, so a mislabelled theme fails the suite.
 | Key | Role in this app | Source role (leaf) |
 |---|---|---|
 | `sidebar_bg` | Sidebar (tree/tags) + backlinks panel background | `toc_bg` |
-| `sidebar_border_focused` | Focused sidebar/tag/backlinks border; status path when sidebar focused | `toc_accent` |
+| `sidebar_border_focused` | Focused sidebar/tag/backlinks border; the status-bar name when the sidebar is focused | `toc_accent` |
 | `sidebar_border_unfocused` | Unfocused sidebar/tag/backlinks border; `.base` table border | `toc_border` |
 | `selection_bg` | Selected row highlight (full-opacity accent) | `toc_accent` |
 | `changed_marker_fg` | Sidebar ` *` changed-file marker | `status_warning_fg` |
@@ -48,7 +48,7 @@ checks every preset and built-in, so a mislabelled theme fails the suite.
 | `status_error_fg` | Reload/write/base-warnings in the status bar | `status_error_fg` |
 | `popup_border_fg` | Popup borders; `.base` header/group accents | `toc_border` |
 | `popup_dimmed_fg` | Popup footers, "no matches" | `status_shortcut_fg` |
-| `popup_match_fg` / `popup_match_bg` | Search-match highlight; help-pane key labels (`popup_match_fg`) | `status_search_fg` / `status_search_bg` |
+| `popup_match_fg` / `popup_match_bg` | Search-match and quick-switcher match highlight; help-pane key labels (`popup_match_fg`) | `status_search_fg` / `status_search_bg` |
 
 Note: `status_ahead_fg`, `status_watch_off_fg`, and `popup_dimmed_fg` have
 their own app roles (ahead arrow, `watch off` indicator, popup footers/empty
