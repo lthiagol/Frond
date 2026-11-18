@@ -3,7 +3,7 @@
 
 Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
-- A debug build of the app (`cargo build -p app`); binary path overridable
+- A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
 The script builds a small fixture vault under /tmp/frond-m2-vault (writes
@@ -16,10 +16,11 @@ cycling, config hot-reload) — the real ~/.config is never touched.
 import os, pty, select, struct, sys, shutil, time, fcntl, termios
 
 import pyte
+import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = "/tmp/frond-m2-vault"
+VAULT = smoke_tmp.path("frond-m2-vault")
 
 COLS, ROWS = 100, 30
 
@@ -31,9 +32,9 @@ LONG = "a-note-with-a-really-long-name-that-must-truncate.md"
 # heading_1 is a distinctive #ff00ff, plus a config.toml selecting it. The app under
 # test is started with FROND_CONFIG/FROND_THEMES pointing here — the real
 # ~/.config is never touched.
-THEME_DIR = "/tmp/frond-m2-themes/themes"
-CONFIG_FILE = "/tmp/frond-m2-themes/config.toml"
-shutil.rmtree("/tmp/frond-m2-themes", ignore_errors=True)
+THEME_DIR = smoke_tmp.path("frond-m2-themes", "themes")
+CONFIG_FILE = smoke_tmp.path("frond-m2-themes", "config.toml")
+shutil.rmtree(smoke_tmp.path("frond-m2-themes"), ignore_errors=True)
 os.makedirs(THEME_DIR, exist_ok=True)
 with open(os.path.join(THEME_DIR, "nightshade.toml"), "w") as f:
     f.write(
@@ -70,7 +71,7 @@ if pid == 0:
     # redirected into /tmp. The quit-time session save is redirected too.
     os.environ["FROND_CONFIG"] = CONFIG_FILE
     os.environ["FROND_THEMES"] = THEME_DIR
-    os.environ["FROND_SESSION"] = "/tmp/frond-m2-session"
+    os.environ["FROND_SESSION"] = smoke_tmp.path("frond-m2-session")
     fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     os.execv(APP, [APP, "--vault", VAULT, f"{VAULT}/index.md"])
 

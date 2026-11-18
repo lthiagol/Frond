@@ -22,6 +22,7 @@
 //! the porcelain path), so callers can compare them against note paths
 //! directly.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -45,7 +46,7 @@ pub struct GitStatus {
     /// Every path `git status --porcelain -uall` reports (modified, staged,
     /// untracked — untracked directories expanded per file — and renamed —
     /// both rename sides), as absolute paths.
-    pub changed_files: Vec<PathBuf>,
+    pub changed_files: BTreeSet<PathBuf>,
 }
 
 /// Reads the sync status of the repository containing `vault_root`.
@@ -105,9 +106,9 @@ pub fn repo_toplevel(dir: &Path) -> Option<PathBuf> {
 /// paths. `-uall` expands untracked directories: without it a wholly
 /// untracked folder reports as one `?? dir/` line and none of the notes
 /// inside it would get a changed-file marker.
-fn changed_files(toplevel: &Path) -> Option<Vec<PathBuf>> {
+fn changed_files(toplevel: &Path) -> Option<BTreeSet<PathBuf>> {
     let out = run_git(toplevel, "status", &["--porcelain", "-uall"])?;
-    let mut files = Vec::new();
+    let mut files = BTreeSet::new();
     for line in out.lines() {
         // Format: two status letters, one space, then the path (renames:
         // `R  old -> new`). Blank lines cannot occur in porcelain output.
@@ -117,7 +118,7 @@ fn changed_files(toplevel: &Path) -> Option<Vec<PathBuf>> {
         let rest = &line[3..];
         for part in split_rename(rest) {
             if let Some(path) = absolutize_path(toplevel, &part) {
-                files.push(path);
+                files.insert(path);
             }
         }
     }
@@ -447,7 +448,7 @@ mod tests {
         assert!(!status.clean);
         assert_eq!(
             status.changed_files,
-            vec![vault.join("a.md")],
+            BTreeSet::from([vault.join("a.md")]),
             "porcelain paths (repo-relative) resolved against the toplevel"
         );
     }
@@ -513,7 +514,7 @@ mod tests {
         let status = read_status(dir.path()).expect("repo readable");
         assert_eq!(
             status.changed_files,
-            vec![weird],
+            BTreeSet::from([weird]),
             "quoted separator is not a rename: {:?}",
             status.changed_files
         );

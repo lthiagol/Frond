@@ -280,6 +280,11 @@ pub fn write_toggle(
 /// rename, data flushed with `sync_all` before the rename (a crash
 /// between rename and flush must not leave a zero-length note), then
 /// rename over the target. Cleans up the temp file on failure.
+///
+/// The temp name carries the pid and a counter, so two frond processes (or
+/// two toggles) writing the same note never share a temp file. The parent
+/// directory is not fsynced after the rename: for a notes viewer, losing the
+/// rename itself in a crash (old content survives intact) is acceptable.
 fn atomic_replace(path: &Path, bytes: &[u8], perms: fs::Permissions) -> io::Result<()> {
     use std::io::Write;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -287,7 +292,12 @@ fn atomic_replace(path: &Path, bytes: &[u8], perms: fs::Permissions) -> io::Resu
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "note.md".to_string());
-    let tmp = parent.join(format!(".{name}.frond-tmp"));
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let tmp = parent.join(format!(
+        ".{name}.{}-{}.frond-tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let result = (|| -> io::Result<()> {
         let mut file = fs::File::create(&tmp)?;
         file.write_all(bytes)?;
@@ -625,7 +635,7 @@ mod tests {
         assert!(text.contains("- [~] task\n"));
         assert!(text.contains("updated: 2026-11-11\n"));
         // The temp file is gone after the rename.
-        assert!(!dir.path().join(".note.md.frond-tmp").exists());
+        assert_no_temp_files(dir.path());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -648,6 +658,50 @@ mod tests {
             })
         ));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "- [x] task\n");
-        assert!(!dir.path().join(".note.md.frond-tmp").exists());
+        assert_no_temp_files(dir.path());
+    }
+
+    #[test]
+    fn atomic_replace_failure_cleans_up_its_temp_file() {
+        let dir = TempDir::new("tasks-atomic-fail");
+        // A non-empty directory at the target: the final rename must fail.
+        let target = dir.path().join("note.md");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("child"), "x").unwrap();
+        let perms = std::fs::metadata(dir.path()).unwrap().permissions();
+        assert!(atomic_replace(&target, b"new", perms).is_err());
+        assert_no_temp_files(dir.path());
+        assert!(target.join("child").exists(), "target left untouched");
+    }
+
+    #[test]
+    fn concurrent_writers_never_share_a_temp_file() {
+        let dir = TempDir::new("tasks-atomic-race");
+        let path = dir.path().join("note.md");
+        std::fs::write(&path, "seed").unwrap();
+        let perms = std::fs::metadata(&path).unwrap().permissions();
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let (path, perms) = (path.clone(), perms.clone());
+                std::thread::spawn(move || {
+                    atomic_replace(&path, format!("writer-{i}").as_bytes(), perms)
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap().expect("every writer succeeds");
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("writer-"), "a whole write won: {text:?}");
+        assert_no_temp_files(dir.path());
+    }
+
+    fn assert_no_temp_files(dir: &Path) {
+        let leftovers: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".frond-tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
     }
 }

@@ -46,8 +46,22 @@ pub struct SearchResults {
 /// Case-insensitive `ends_with` (ASCII folding, matching the
 /// `eq_ignore_ascii_case` semantics used elsewhere here).
 fn ends_with_ci(haystack: &str, needle: &str) -> bool {
+    // Compare as bytes: slicing the `str` at `len - needle.len()` panics when
+    // that offset lands inside a multi-byte character.
     haystack.len() >= needle.len()
-        && haystack[haystack.len() - needle.len()..].eq_ignore_ascii_case(needle)
+        && haystack.as_bytes()[haystack.len() - needle.len()..]
+            .eq_ignore_ascii_case(needle.as_bytes())
+}
+
+/// Byte offset of the first ASCII-case-insensitive occurrence of
+/// `needle_lower` (already lowercase) in `haystack`.
+fn find_ascii_ci(haystack: &[u8], needle_lower: &[u8]) -> Option<usize> {
+    if needle_lower.len() > haystack.len() {
+        return None;
+    }
+    haystack
+        .windows(needle_lower.len())
+        .position(|w| w.eq_ignore_ascii_case(needle_lower))
 }
 
 /// A note as indexed: its path, frontmatter fields, and outgoing links.
@@ -116,6 +130,10 @@ pub struct VaultIndex {
     /// Lowercased note stem -> paths sharing it (len > 1 means
     /// ambiguous; resolution is case-insensitive).
     by_stem: BTreeMap<String, Vec<PathBuf>>,
+    /// Lowercased root-relative note path without `.md` -> paths (several
+    /// only when the vault has paths differing by case alone). Makes
+    /// path-style links an O(1) lookup instead of a scan of every note.
+    by_rel: BTreeMap<String, Vec<PathBuf>>,
     /// Lowercased `.base` stem (name without the suffix) -> paths sharing
     /// it, same ambiguity semantics as `by_stem`.
     by_base_stem: BTreeMap<String, Vec<PathBuf>>,
@@ -125,10 +143,11 @@ pub struct VaultIndex {
     /// Tag -> notes carrying it in frontmatter (frontmatter tags only —
     /// the vault has no inline tags).
     tags: BTreeMap<String, Vec<PathBuf>>,
-    /// Cached raw text of every indexed note (one `Vec` of lines per
-    /// path), kept in sync by `insert_note`/`remove_note` — the global
-    /// search runs against this cache, never against the disk.
-    raw_lines: BTreeMap<PathBuf, Vec<String>>,
+    /// Cached raw text of every indexed note (one `String` per path,
+    /// split into lines lazily by the search), kept in sync by
+    /// `insert_note`/`remove_note_entry` — the global search runs against
+    /// this cache, never against the disk.
+    raw_lines: BTreeMap<PathBuf, String>,
 }
 
 impl VaultIndex {
@@ -142,6 +161,7 @@ impl VaultIndex {
             bases: BTreeSet::new(),
             warnings: Vec::new(),
             by_stem: BTreeMap::new(),
+            by_rel: BTreeMap::new(),
             by_base_stem: BTreeMap::new(),
             backlinks: BTreeMap::new(),
             tags: BTreeMap::new(),
@@ -199,6 +219,7 @@ impl VaultIndex {
         &self.warnings
     }
 
+    /// Diagnostic API (used by `examples/index_vault.rs`, not by the app).
     /// Basenames shared by more than one note: `(stem, candidate paths)`.
     /// Resolution is case-insensitive, so the reported stem is the
     /// (original-case) stem of the first candidate path.
@@ -226,6 +247,7 @@ impl VaultIndex {
     }
 
     /// Outgoing links of one note.
+    #[cfg(test)]
     pub fn links_from(&self, path: &Path) -> &[LinkRef] {
         static EMPTY: [LinkRef; 0] = [];
         self.notes
@@ -272,21 +294,35 @@ impl VaultIndex {
             return SearchResults::default();
         }
         let mut hits: Vec<SearchHit> = Vec::new();
-        for (path, lines) in &self.raw_lines {
-            for (index, line) in lines.iter().enumerate() {
-                // Offsets come from the folded string; case folding can
-                // change byte lengths (e.g. `İ`), so the range is snapped
-                // to char boundaries of the original line afterwards.
-                let folded = line.to_lowercase();
-                let Some(pos) = folded.find(&needle) else {
-                    continue;
+        let ascii_needle = needle.is_ascii();
+        for (path, text) in &self.raw_lines {
+            for (index, line) in text.lines().enumerate() {
+                // Fast path: an all-ASCII line and needle fold bytewise,
+                // so positions carry over and nothing is allocated. Any
+                // non-ASCII line takes the Unicode path (it can match an
+                // ASCII needle through folding, e.g. the Kelvin sign).
+                let (start, end) = if ascii_needle && line.is_ascii() {
+                    let Some(pos) = find_ascii_ci(line.as_bytes(), needle.as_bytes()) else {
+                        continue;
+                    };
+                    (pos, pos + needle.len())
+                } else {
+                    // Offsets come from the folded string; case folding
+                    // can change byte lengths (e.g. `İ`), so the range is
+                    // snapped to char boundaries of the original line.
+                    let folded = line.to_lowercase();
+                    let Some(pos) = folded.find(&needle) else {
+                        continue;
+                    };
+                    (
+                        floor_char_boundary(line, pos),
+                        ceil_char_boundary(line, pos + needle.len()),
+                    )
                 };
-                let start = floor_char_boundary(line, pos);
-                let end = ceil_char_boundary(line, pos + needle.len());
                 hits.push(SearchHit {
                     path: path.clone(),
                     line: index,
-                    text: line.clone(),
+                    text: line.to_string(),
                     start,
                     end,
                 });
@@ -332,16 +368,10 @@ impl VaultIndex {
             // Path-style: match against relative note paths, tolerating a
             // missing `.md` on either side and case differences.
             let matches: Vec<PathBuf> = self
-                .notes
-                .values()
-                .filter(|n| {
-                    n.rel_path
-                        .strip_suffix(".md")
-                        .unwrap_or(&n.rel_path)
-                        .eq_ignore_ascii_case(&target)
-                })
-                .map(|n| n.path.clone())
-                .collect();
+                .by_rel
+                .get(&target.to_ascii_lowercase())
+                .cloned()
+                .unwrap_or_default();
             return match matches.len() {
                 0 => self.resolve_by_suffix(&target),
                 1 => Resolution::Found(matches[0].clone()),
@@ -451,6 +481,27 @@ impl VaultIndex {
     /// are rebuilt afterwards, so the index is never observed
     /// half-updated.
     pub fn reindex_one(&mut self, path: &Path) {
+        if self.apply_one(path) {
+            self.rebuild_derived();
+        }
+    }
+
+    /// [`Self::reindex_one`] for a batch: every path is applied, then the
+    /// derived maps are rebuilt once (not once per path), so a `git pull`
+    /// touching hundreds of notes costs one rebuild.
+    pub fn reindex_many<P: AsRef<Path>>(&mut self, paths: &[P]) {
+        let mut dirty = false;
+        for path in paths {
+            dirty |= self.apply_one(path.as_ref());
+        }
+        if dirty {
+            self.rebuild_derived();
+        }
+    }
+
+    /// Applies one path's change to `bases` / `notes` / `warnings` without
+    /// rebuilding derived maps. Returns `true` when they are now stale.
+    fn apply_one(&mut self, path: &Path) -> bool {
         if is_base_path(path) {
             let listed = path.exists() && path.strip_prefix(&self.root).is_ok();
             let was_listed = self.bases.contains(path);
@@ -459,22 +510,18 @@ impl VaultIndex {
             } else {
                 self.bases.remove(path);
             }
-            if listed != was_listed {
-                self.rebuild_derived();
-            }
-            return;
+            return listed != was_listed;
         }
         if !is_indexable(&self.root, path) {
-            self.remove_note(path);
-            return;
+            return self.remove_note_entry(path);
         }
         match fs::read_to_string(path) {
             Ok(source) => {
                 self.insert_note(path, &source);
-                self.rebuild_derived();
+                true
             }
             Err(err) => {
-                self.remove_note(path);
+                let dirty = self.remove_note_entry(path);
                 // Unreadable-but-present is a warning, not a silent drop.
                 if path.exists() {
                     self.warnings.retain(|w| w.path != path);
@@ -483,6 +530,7 @@ impl VaultIndex {
                         message: format!("unreadable: {err}"),
                     });
                 }
+                dirty
             }
         }
     }
@@ -523,10 +571,8 @@ impl VaultIndex {
         // Document order: frontmatter links come first (they appear
         // first in the file), then body links.
         fm_links.extend(extract_wikilinks(body));
-        self.raw_lines.insert(
-            path.to_path_buf(),
-            source.lines().map(|l| l.to_string()).collect(),
-        );
+        self.raw_lines
+            .insert(path.to_path_buf(), source.to_string());
         self.notes.insert(
             path.to_path_buf(),
             NoteMeta {
@@ -546,20 +592,32 @@ impl VaultIndex {
     }
 
     /// Removes a note and its warnings (used by `reindex_one` on delete).
-    fn remove_note(&mut self, path: &Path) {
+    /// Drops one note's entries; `true` when anything was removed (derived
+    /// maps are then stale).
+    fn remove_note_entry(&mut self, path: &Path) -> bool {
         let had_lines = self.raw_lines.remove(path).is_some();
         if self.notes.remove(path).is_some()
             || had_lines
             || self.warnings.iter().any(|w| w.path == path)
         {
             self.warnings.retain(|w| w.path != path);
-            self.rebuild_derived();
+            return true;
         }
+        false
     }
 
     /// Rebuilds the basename map, backlink map, and tag map from `notes`
     /// (plus the base-stem map from `bases`).
     fn rebuild_derived(&mut self) {
+        self.by_rel.clear();
+        for note in self.notes.values() {
+            let rel = note.rel_path.strip_suffix(".md").unwrap_or(&note.rel_path);
+            self.by_rel
+                .entry(rel.to_ascii_lowercase())
+                .or_default()
+                .push(note.path.clone());
+        }
+
         self.by_stem.clear();
         for note in self.notes.values() {
             self.by_stem
@@ -859,6 +917,37 @@ mod tests {
         assert_eq!(mocktag.len(), 1);
         assert_eq!(mocktag[0].rel_path, "projects/analysis.md");
         assert!(index.notes_with_tag("missing").is_empty());
+    }
+
+    #[test]
+    fn search_ascii_fast_path_agrees_with_unicode_folding() {
+        let vault = TempDir::new("vk-search-fold");
+        // Plain ASCII line (fast path) and a line where only Unicode
+        // folding finds the ASCII needle (U+212A KELVIN SIGN lowercases
+        // to `k`).
+        write(&vault.path().join("a.md"), "has a Kite here\n");
+        write(&vault.path().join("b.md"), "\u{212A}ite too\n");
+        let index = VaultIndex::build(vault.path()).unwrap();
+        let hits = index.search("kite").hits;
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "Kite");
+    }
+
+    #[test]
+    fn non_ascii_link_targets_do_not_panic() {
+        let vault = TempDir::new("vk-nonascii");
+        write(
+            &vault.path().join("a.md"),
+            "see [[ééé]] and [[sub/ééé]] and [[café]]",
+        );
+        write(&vault.path().join("café.md"), "x");
+        let index = VaultIndex::build(vault.path()).expect("build must not panic");
+        assert_eq!(
+            index.resolve("café"),
+            Resolution::Found(vault.path().join("café.md"))
+        );
+        assert_eq!(index.resolve("ééé"), Resolution::NotFound);
+        assert_eq!(index.resolve("sub/ééé"), Resolution::NotFound);
     }
 
     #[test]

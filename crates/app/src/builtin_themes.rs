@@ -1215,3 +1215,61 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
         ],
     },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_are_unique_and_in_cycle_order() {
+        let names: Vec<&str> = BUILTIN_THEMES.iter().map(|t| t.name).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        assert_eq!(names, sorted, "alphabetical — also the Shift+T order");
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len(), "no duplicate names");
+    }
+
+    #[test]
+    fn every_theme_resolves_by_name_to_itself() {
+        for spec in BUILTIN_THEMES {
+            let resolved = crate::theme::resolve_theme(spec.name, &Default::default())
+                .unwrap_or_else(|err| panic!("{} did not resolve: {err}", spec.name));
+            assert_eq!(resolved.theme.name, spec.name);
+            assert_eq!(resolved.theme.appearance, spec.appearance, "{}", spec.name);
+            assert_eq!(resolved.theme.ui, spec.ui, "{}", spec.name);
+            assert!(
+                resolved.warnings.is_empty(),
+                "{}: {:?}",
+                spec.name,
+                resolved.warnings
+            );
+        }
+    }
+
+    #[test]
+    fn markdown_overrides_are_applied_over_the_base_preset() {
+        for spec in BUILTIN_THEMES {
+            let mut expected = engine::markdown_theme_by_preset(spec.base);
+            for (key, color) in spec.md {
+                key.apply(&mut expected, *color);
+            }
+            let resolved = crate::theme::resolve_theme(spec.name, &Default::default()).unwrap();
+            assert_eq!(resolved.theme.markdown, expected, "{}", spec.name);
+        }
+    }
+
+    #[test]
+    fn no_markdown_key_is_overridden_twice() {
+        for spec in BUILTIN_THEMES {
+            let mut seen = std::collections::HashSet::new();
+            for (key, _) in spec.md {
+                assert!(
+                    seen.insert(std::mem::discriminant(key)),
+                    "{}: a markdown key appears twice",
+                    spec.name
+                );
+            }
+        }
+    }
+}

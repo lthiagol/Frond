@@ -14,11 +14,13 @@
 //! Embeds (`![[…]]`) are left as raw text: rendering them is a v1 non-goal
 //! (SPEC), and turning them into links would be wrong.
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 
+use crate::theme::UiTheme;
 use engine::LinkSpan;
 use vault::wikilink::{extract_wikilink_matches, LinkRef};
 
@@ -138,7 +140,9 @@ pub fn percent_encode(value: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
                 out.push(*byte as char)
             }
-            _ => out.push_str(&format!("%{byte:02X}")),
+            _ => {
+                let _ = write!(out, "%{byte:02X}");
+            }
         }
     }
     out
@@ -181,7 +185,6 @@ pub struct LinkRegion {
 /// it resolved.
 #[derive(Clone, Debug)]
 pub struct RenderedLink {
-    pub link_id: usize,
     pub url: String,
     pub regions: Vec<LinkRegion>,
     /// `None` for links that were not produced by the preprocessing hook
@@ -202,6 +205,8 @@ pub fn build_rendered_links(
     wikilinks: &[WikilinkTarget],
 ) -> Vec<RenderedLink> {
     let mut links: Vec<RenderedLink> = Vec::new();
+    // link id → position in `links`, so grouping stays linear in the spans.
+    let mut by_id: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     for span in link_spans {
         let Some(url) = link_urls.get(span.link_id.0) else {
             continue;
@@ -211,8 +216,8 @@ pub fn build_rendered_links(
             start: span.start_col,
             end: span.end_col,
         };
-        if let Some(link) = links.iter_mut().find(|l| l.link_id == span.link_id.0) {
-            link.regions.push(region);
+        if let Some(&at) = by_id.get(&span.link_id.0) {
+            links[at].regions.push(region);
             continue;
         }
         let wikilink = parse_vault_url(url).and_then(|(index, _target, _heading)| {
@@ -231,8 +236,8 @@ pub fn build_rendered_links(
                 state: wikilink.state.clone(),
             })
         });
+        by_id.insert(span.link_id.0, links.len());
         links.push(RenderedLink {
-            link_id: span.link_id.0,
             url: url.clone(),
             regions: vec![region],
             wikilink,
@@ -241,19 +246,48 @@ pub fn build_rendered_links(
     links
 }
 
-/// The base style for a link region given its resolution state.
-fn state_style(state: &LinkState, base: Style) -> Style {
-    match state {
-        // Resolved: keep the engine's link styling.
-        LinkState::Resolved(_) => base,
-        LinkState::NotFound => base.fg(Color::DarkGray).add_modifier(Modifier::CROSSED_OUT),
-        // Ambiguous after the hint: warning color.
-        LinkState::Ambiguous(_) => base.fg(Color::Yellow),
+/// Link/checkbox state colors, derived from the active [`UiTheme`] roles so
+/// they stay legible on every theme (including light ones): unresolved
+/// links reuse the dimmed role, ambiguous ones the warning role, and the
+/// focus highlight (links and checkboxes, tasks.rs) the selection
+/// background.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkColors {
+    pub unresolved_fg: Color,
+    pub ambiguous_fg: Color,
+    pub focus_bg: Color,
+}
+
+impl LinkColors {
+    pub fn from_ui(ui: UiTheme) -> Self {
+        Self {
+            unresolved_fg: ui.dimmed_fg,
+            ambiguous_fg: ui.status_dirty_fg,
+            focus_bg: ui.selection_bg,
+        }
     }
 }
 
-/// The focus highlight color, shared with the checkbox focus (tasks.rs).
-pub(crate) const FOCUS_BG: Color = Color::Blue;
+impl Default for LinkColors {
+    fn default() -> Self {
+        Self::from_ui(crate::theme::ui_by_preset(
+            engine::MarkdownThemePreset::default(),
+        ))
+    }
+}
+
+/// The base style for a link region given its resolution state.
+fn state_style(state: &LinkState, base: Style, colors: LinkColors) -> Style {
+    match state {
+        // Resolved: keep the engine's link styling.
+        LinkState::Resolved(_) => base,
+        LinkState::NotFound => base
+            .fg(colors.unresolved_fg)
+            .add_modifier(Modifier::CROSSED_OUT),
+        // Ambiguous after the hint: warning color.
+        LinkState::Ambiguous(_) => base.fg(colors.ambiguous_fg),
+    }
+}
 
 /// Restyles the parsed lines for every link: per-state base styling, plus
 /// the focus highlight on `focused` (an index into `links`).
@@ -261,6 +295,7 @@ pub fn apply_link_styles(
     lines: &mut [Line<'static>],
     links: &[RenderedLink],
     focused: Option<usize>,
+    colors: LinkColors,
 ) {
     for (index, link) in links.iter().enumerate() {
         let focused = focused == Some(index);
@@ -270,11 +305,11 @@ pub fn apply_link_styles(
             };
             restyle_region(line, region.start, region.end, |style| {
                 let mut style = match &link.wikilink {
-                    Some(w) => state_style(&w.state, style),
+                    Some(w) => state_style(&w.state, style, colors),
                     None => style,
                 };
                 if focused {
-                    style = style.bg(FOCUS_BG).add_modifier(Modifier::BOLD);
+                    style = style.bg(colors.focus_bg).add_modifier(Modifier::BOLD);
                 }
                 style
             });
@@ -287,13 +322,25 @@ pub fn apply_link_styles(
 /// full (the engine's wrapping keeps link spans contiguous, so the
 /// overreach is at most one adjacent unlinked span on a boundary).
 fn restyle_region(line: &mut Line<'static>, start: usize, end: usize, f: impl Fn(Style) -> Style) {
+    for_spans_in_columns(line, start, end, |span| span.style = f(span.style));
+}
+
+/// Calls `f` on every non-empty span of `line` overlapping the display
+/// column range `[start, end)` (columns accumulate over span widths). The
+/// shared column walk behind link and checkbox restyling (tasks.rs).
+pub(crate) fn for_spans_in_columns(
+    line: &mut Line<'static>,
+    start: usize,
+    end: usize,
+    mut f: impl FnMut(&mut ratatui::text::Span<'static>),
+) {
     use unicode_width::UnicodeWidthStr;
     let mut col = 0usize;
     for span in &mut line.spans {
         let width = span.content.width();
         let span_end = col + width;
         if span_end > start && col < end && width > 0 {
-            span.style = f(span.style);
+            f(span);
         }
         col = span_end;
     }
@@ -357,7 +404,7 @@ mod tests {
         let assets = engine::SyntaxAssets::load_defaults();
         let result = engine::parse_markdown_with_width(
             &out,
-            &assets.syntax_set,
+            assets.syntax_set,
             &assets.theme,
             80,
             &engine::default_markdown_theme(),
@@ -457,9 +504,9 @@ mod tests {
 
     #[test]
     fn styles_applied_per_state() {
+        let colors = LinkColors::default();
         let mut line = line_of("link");
         let links = vec![RenderedLink {
-            link_id: 0,
             url: "vault://0/x".into(),
             regions: vec![LinkRegion {
                 line: 0,
@@ -472,17 +519,17 @@ mod tests {
                 state: LinkState::NotFound,
             }),
         }];
-        apply_link_styles(std::slice::from_mut(&mut line), &links, None);
+        apply_link_styles(std::slice::from_mut(&mut line), &links, None, colors);
         let style = span_style(&line, 1);
-        assert_eq!(style.fg, Some(Color::DarkGray));
+        assert_eq!(style.fg, Some(colors.unresolved_fg));
         assert!(style.add_modifier.contains(Modifier::CROSSED_OUT));
     }
 
     #[test]
     fn focus_highlight_and_unfocus() {
+        let colors = LinkColors::default();
         let pristine = line_of("link");
         let links = vec![RenderedLink {
-            link_id: 0,
             url: "vault://0/x".into(),
             regions: vec![LinkRegion {
                 line: 0,
@@ -499,11 +546,11 @@ mod tests {
         // engine output in the viewer; here we assert each application
         // against a fresh copy.)
         let mut line = pristine.clone();
-        apply_link_styles(std::slice::from_mut(&mut line), &links, Some(0));
-        assert_eq!(span_style(&line, 1).bg, Some(FOCUS_BG));
+        apply_link_styles(std::slice::from_mut(&mut line), &links, Some(0), colors);
+        assert_eq!(span_style(&line, 1).bg, Some(colors.focus_bg));
         // Unfocused: plain engine style.
         let mut line = pristine.clone();
-        apply_link_styles(std::slice::from_mut(&mut line), &links, None);
+        apply_link_styles(std::slice::from_mut(&mut line), &links, None, colors);
         assert_eq!(span_style(&line, 1).bg, None);
         // The untouched neighbor spans stay raw.
         assert_eq!(span_style(&line, 0).bg, None);

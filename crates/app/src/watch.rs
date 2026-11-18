@@ -84,9 +84,7 @@ impl VaultWatcher {
             self.stamps.remove(&path);
             changed.push(path);
         }
-        for path in &changed {
-            index.reindex_one(path);
-        }
+        index.reindex_many(&changed);
         changed
     }
 }

@@ -5,10 +5,10 @@
 //!
 //! Ignored by default because it needs:
 //! - `python3` with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`), and
-//! - a debug build of the app (`cargo build -p app`) — the binary is located
+//! - a debug build of the app (`cargo build -p frond`) — the binary is located
 //!   via cargo's `CARGO_BIN_EXE_frond` and passed to the script as `FROND_APP_BIN`.
 //!
-//! Run it with: `cargo test -p app --test smoke -- --ignored`
+//! Run it with: `cargo test -p frond --test smoke -- --ignored`
 //!
 //! The script never writes to the vault: it copies its source note
 //! (`testvault/index.md` by default, override with `FROND_SMOKE_SRC`) to

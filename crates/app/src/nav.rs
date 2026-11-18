@@ -12,6 +12,9 @@ use std::path::PathBuf;
 /// One history entry: which note was open and where the viewport was.
 pub type Entry = (PathBuf, u32);
 
+/// Longest back/forward history kept; the oldest entries are dropped first.
+const MAX_HISTORY: usize = 500;
+
 #[derive(Default)]
 pub struct Nav {
     back: Vec<Entry>,
@@ -21,8 +24,15 @@ pub struct Nav {
 impl Nav {
     /// Called *before* opening the new file: records the outgoing note.
     pub fn push(&mut self, entry: Entry) {
-        self.back.push(entry);
+        self.push_back(entry);
         self.forward.clear();
+    }
+
+    fn push_back(&mut self, entry: Entry) {
+        self.back.push(entry);
+        if self.back.len() > MAX_HISTORY {
+            self.back.remove(0);
+        }
     }
 
     /// True if `Backspace` has somewhere to go.
@@ -58,7 +68,7 @@ impl Nav {
     /// Mirror of `pop_back` for `Ctrl+O`.
     pub fn pop_forward(&mut self, current: Entry) -> Option<Entry> {
         let entry = self.forward.pop()?;
-        self.back.push(current);
+        self.push_back(current);
         Some(entry)
     }
 }
@@ -105,5 +115,15 @@ mod tests {
         assert!(nav.pop_back((p("x"), 0)).is_none());
         assert!(nav.pop_forward((p("x"), 0)).is_none());
         assert!(!nav.can_go_back() && !nav.can_go_forward());
+    }
+
+    #[test]
+    fn history_is_capped_dropping_the_oldest() {
+        let mut nav = Nav::default();
+        for i in 0..MAX_HISTORY + 10 {
+            nav.push((p(&i.to_string()), 0));
+        }
+        assert_eq!(nav.back.len(), MAX_HISTORY);
+        assert_eq!(nav.back[0].0, p("10"), "oldest entries were trimmed");
     }
 }

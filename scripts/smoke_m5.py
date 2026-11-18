@@ -3,7 +3,7 @@
 
 Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
-- A debug build of the app (`cargo build -p app`); binary path overridable
+- A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
 The script builds a small fixture vault under /tmp/frond-m5-vault (writes
@@ -24,11 +24,12 @@ always with FROND_SESSION pointed at /tmp/frond-m5-session so the real
 import os, pty, select, struct, sys, shutil, time, fcntl, termios
 
 import pyte
+import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = "/tmp/frond-m5-vault"
-SESSION_DIR = "/tmp/frond-m5-session"
+VAULT = smoke_tmp.path("frond-m5-vault")
+SESSION_DIR = smoke_tmp.path("frond-m5-session")
 
 COLS, ROWS = 100, 30
 

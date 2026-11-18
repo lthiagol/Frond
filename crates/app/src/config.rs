@@ -3,8 +3,7 @@
 //! Keys: `theme` (string), `vault` (path), `watch` (bool), `mouse` (bool),
 //! `sidebar_width` (columns), `metadata` (bool). Missing file = defaults;
 //! malformed file = warning + defaults (never a crash). Unknown keys are
-//! warning + defaults (never a crash). Unknown keys are ignored but
-//! reported (never silently). The `FROND_CONFIG` env var overrides the path
+//! ignored but reported (never silently). The `FROND_CONFIG` env var overrides the path
 //! (tests and smokes only — they must never write to the real `~/.config`).
 //!
 //! Precedence with the CLI: `--vault`/`--theme`/`--watch`/`--mouse` flags
@@ -488,10 +487,10 @@ mod tests {
         // `~/.config` is never touched by tests.
         let dir = TempDir::new("cfg-override");
         std::fs::write(dir.path().join("mine.toml"), "theme = \"nord\"\n").unwrap();
-        // SAFETY of the env dance: single-threaded unit test process.
-        std::env::set_var("FROND_CONFIG", dir.path().join("mine.toml"));
+        let mut env = crate::testutil::EnvGuard::lock();
+        env.set("FROND_CONFIG", dir.path().join("mine.toml"));
         let path = config_path();
-        std::env::remove_var("FROND_CONFIG");
+        env.remove("FROND_CONFIG");
         assert_eq!(path, Some(dir.path().join("mine.toml")));
         let (config, _) = load(&path.unwrap());
         assert_eq!(config.theme.as_deref(), Some("nord"));

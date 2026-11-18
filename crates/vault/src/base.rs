@@ -28,6 +28,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use crate::frontmatter::strip_quote_pair;
 use crate::index::{NoteMeta, VaultIndex};
 
 /// A parsed base file. `warnings` carries everything that was dropped or
@@ -137,8 +138,6 @@ pub struct BaseNoteRow {
     pub path: PathBuf,
     /// One cell per column of [`BaseTable::columns`].
     pub cells: Vec<Cell>,
-    /// Group label when the view groups (empty when it does not).
-    pub group: String,
 }
 
 /// A rendered table row: a group header or a note row.
@@ -512,16 +511,7 @@ fn parse_today_rhs(rhs: &str) -> Option<i64> {
 
 /// Strips one pair of matching quotes and returns the inner text.
 fn quoted_arg(value: &str) -> Option<String> {
-    let value = value.trim();
-    let bytes = value.as_bytes();
-    if value.len() >= 2
-        && (bytes[0] == b'"' || bytes[0] == b'\'')
-        && bytes[value.len() - 1] == bytes[0]
-    {
-        Some(value[1..value.len() - 1].to_string())
-    } else {
-        None
-    }
+    strip_quote_pair(value.trim()).map(str::to_string)
 }
 
 /// Strips surrounding quotes when present; otherwise the value verbatim.
@@ -590,7 +580,7 @@ pub fn build_table(
             rows.extend(
                 matches
                     .into_iter()
-                    .map(|note| TableRow::Note(note_row(note, &columns, base, ""))),
+                    .map(|note| TableRow::Note(note_row(note, &columns, base))),
             );
         }
         Some((prop, desc)) => {
@@ -598,6 +588,8 @@ pub fn build_table(
             // then emit groups in label order; the missing-property
             // group sorts last in both directions.
             let mut groups: Vec<(String, bool, Vec<BaseNoteRow>)> = Vec::new();
+            let mut group_index: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
             for note in matches {
                 let missing = !note.raw.contains_key(prop);
                 let label = note
@@ -605,13 +597,13 @@ pub fn build_table(
                     .get(prop)
                     .cloned()
                     .unwrap_or_else(|| "(none)".to_string());
-                match groups.iter_mut().find(|(g, _, _)| *g == label) {
-                    Some((_, _, rows)) => rows.push(note_row(note, &columns, base, &label)),
-                    None => groups.push((
-                        label.clone(),
-                        missing,
-                        vec![note_row(note, &columns, base, "")],
-                    )),
+                let row = note_row(note, &columns, base);
+                match group_index.get(&label) {
+                    Some(&i) => groups[i].2.push(row),
+                    None => {
+                        group_index.insert(label.clone(), groups.len());
+                        groups.push((label, missing, vec![row]));
+                    }
                 }
             }
             groups.sort_by(|(a, a_missing, _), (b, b_missing, _)| {
@@ -655,7 +647,7 @@ fn display_name(base: &BaseFile, key: &str) -> String {
 }
 
 /// Builds one note row's cells for `columns`.
-fn note_row(note: &NoteMeta, columns: &[Column], base: &BaseFile, group: &str) -> BaseNoteRow {
+fn note_row(note: &NoteMeta, columns: &[Column], base: &BaseFile) -> BaseNoteRow {
     let cells = columns
         .iter()
         .map(|column| cell_for(note, &column.key, base))
@@ -663,7 +655,6 @@ fn note_row(note: &NoteMeta, columns: &[Column], base: &BaseFile, group: &str) -
     BaseNoteRow {
         path: note.path.clone(),
         cells,
-        group: group.to_string(),
     }
 }
 
@@ -726,7 +717,7 @@ fn sort_notes(notes: &mut [&NoteMeta], sort: &[(String, bool)]) {
                 .iter()
                 .map(|(prop, _)| {
                     let value = sort_value(note, prop);
-                    (value.clone(), value.is_some())
+                    (value.as_deref().map(str::to_lowercase), value.is_some())
                 })
                 .collect();
             (keys, *note)
@@ -740,11 +731,8 @@ fn sort_notes(notes: &mut [&NoteMeta], sort: &[(String, bool)]) {
                 (false, true) => return std::cmp::Ordering::Greater,
                 _ => {}
             }
-            let ord = a
-                .as_deref()
-                .unwrap_or("")
-                .to_lowercase()
-                .cmp(&b.as_deref().unwrap_or("").to_lowercase());
+            // Keys were lowercased once when built, not per comparison.
+            let ord = a.as_deref().unwrap_or("").cmp(b.as_deref().unwrap_or(""));
             if ord != std::cmp::Ordering::Equal {
                 return if directions[i] { ord.reverse() } else { ord };
             }
@@ -1078,10 +1066,12 @@ fn split_key_value(text: &str) -> (String, Option<String>) {
     (text.trim().to_string(), None)
 }
 
-/// Drops a trailing ` # ...` comment outside quotes (same rule as the
-/// frontmatter parser). A value that *starts* with `#` is also a comment
-/// (in YAML a comment needs whitespace before the `#`, which the `key: `
-/// split guarantees).
+/// Drops a trailing ` # ...` comment outside quotes. Deliberately *not*
+/// the frontmatter parser's rule (`frontmatter::strip_comment`): quote
+/// state is tracked across the whole value, and a value that *starts*
+/// with `#` is a comment too (in YAML a comment needs whitespace before
+/// the `#`, which the `key: ` split guarantees). Frontmatter keeps such
+/// values (`#tag`) and leaves unterminated quotes untouched.
 fn strip_comment(value: &str) -> &str {
     let bytes = value.as_bytes();
     let mut quote: Option<u8> = None;

@@ -4,6 +4,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 
 ## [Unreleased]
 
+### Fixed
+- A wikilink with a non-ASCII target (`[[ééé]]`) no longer panics the index
+  build (and with it the whole app at startup).
+- Unresolved/ambiguous link colours, the focus highlight and the status-glyph
+  colours now follow the active theme instead of fixed ANSI colours.
+- Atomic-write temp files (task toggle, session save) are pid/counter-named so
+  concurrent instances cannot clobber each other.
+
+### Changed
+- Performance: only the visible slice of a note is cloned per frame; a watch
+  tick reindexes all changed notes with one derived-state rebuild; syntect
+  assets load once per process (theme cycling is instant); search avoids
+  per-line allocation; path-style link resolution is a map lookup; base column
+  widths are cached; sidebar scroll bookkeeping walks the tree once.
+- Package renamed `app` → `frond` (`cargo run -p frond`); navigation history is
+  capped at 500 entries; one shared vault listing implementation for the
+  sidebar and the indexer; CI workflow added (`.github/workflows/ci.yml`);
+  smoke fixtures live in a private per-user scratch dir.
+
 ### Added
 - **Theme groups**: `Ctrl+T` cycles the `Shift+T` rotation through all themes,
   light themes and dark themes (session only). The status line shows the

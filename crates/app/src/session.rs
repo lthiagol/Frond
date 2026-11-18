@@ -46,9 +46,13 @@ impl SessionState {
         }
         let text = toml::to_string(self)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-        let tmp = path.with_extension("toml.tmp");
+        // pid-suffixed: two instances quitting on the same vault must not
+        // truncate each other's temp file.
+        let tmp = path.with_extension(format!("toml.{}.tmp", std::process::id()));
         fs::write(&tmp, text)?;
-        fs::rename(&tmp, path)
+        fs::rename(&tmp, path).inspect_err(|_| {
+            let _ = fs::remove_file(&tmp);
+        })
     }
 
     /// Reads a snapshot: `None` when the file is missing or malformed —
@@ -122,7 +126,12 @@ mod tests {
         };
         state.save(&path).unwrap();
         // Atomic write leaves no temp file behind.
-        assert!(!path.with_extension("toml.tmp").exists());
+        let leftovers: Vec<_> = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
         assert_eq!(SessionState::load(&path).as_ref(), Some(&state));
     }
 
@@ -149,14 +158,14 @@ mod tests {
 
     #[test]
     fn session_file_keys_per_vault_and_honors_the_override() {
-        // SAFETY of the env dance: single-threaded unit test process.
         let dir = TempDir::new("sess-dir");
-        std::env::set_var("FROND_SESSION", dir.path());
+        let mut env = crate::testutil::EnvGuard::lock();
+        env.set("FROND_SESSION", dir.path());
         let a = session_file(Path::new("/tmp/vault-a")).unwrap();
         let b = session_file(Path::new("/tmp/vault-b")).unwrap();
         // Spelling noise does not change the key (canonicalized input).
         let a_again = session_file(Path::new("/tmp/vault-a")).unwrap();
-        std::env::remove_var("FROND_SESSION");
+        env.remove("FROND_SESSION");
         assert_ne!(a, b, "distinct vaults get distinct files");
         assert!(a.starts_with(dir.path()), "override directory respected");
         assert_eq!(a, a_again);
@@ -164,32 +173,21 @@ mod tests {
 
     #[test]
     fn state_dir_follows_the_xdg_precedence() {
-        // SAFETY of the env dance: single-threaded unit test process; the
-        // original values are restored.
         let xdg = TempDir::new("sess-xdg");
         let home = TempDir::new("sess-home");
-        let saved_home = std::env::var("HOME").ok();
-        let saved_xdg = std::env::var("XDG_STATE_HOME").ok();
-        std::env::set_var("XDG_STATE_HOME", xdg.path());
-        std::env::set_var("HOME", home.path());
+        let mut env = crate::testutil::EnvGuard::lock();
+        env.set("XDG_STATE_HOME", xdg.path());
+        env.set("HOME", home.path());
         let with_xdg = session_file(Path::new("/tmp/vault-a")).unwrap();
         assert!(
             with_xdg.starts_with(xdg.path()),
             "XDG_STATE_HOME wins over HOME: {with_xdg:?}"
         );
-        std::env::remove_var("XDG_STATE_HOME");
+        env.remove("XDG_STATE_HOME");
         let with_home = session_file(Path::new("/tmp/vault-a")).unwrap();
         assert!(
             with_home.starts_with(home.path().join(".local/state/frond")),
             "falls back to HOME/.local/state: {with_home:?}"
         );
-        match saved_xdg {
-            Some(v) => std::env::set_var("XDG_STATE_HOME", v),
-            None => std::env::remove_var("XDG_STATE_HOME"),
-        }
-        match saved_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
     }
 }

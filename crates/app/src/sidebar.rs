@@ -4,7 +4,6 @@
 //! The model is terminal-independent; rendering lives in `ui.rs`.
 
 use std::collections::HashSet;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -12,6 +11,7 @@ use unicode_width::UnicodeWidthChar;
 use unicode_width::UnicodeWidthStr;
 
 use ratatui::layout::Rect;
+use vault::walk::EntryKind;
 
 /// One entry in the tree. Directory nodes own their subtree.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,7 +91,7 @@ impl Sidebar {
             self.selected = self.rows().first().map(|r| r.node.path.clone());
             self.scroll = 0;
         }
-        self.clamp_scroll();
+        self.clamp_scroll(self.row_count());
     }
 
     /// Flattened display order: depth-first, folders before files,
@@ -113,9 +113,34 @@ impl Sidebar {
     }
 
     /// Index of the selected row in `rows()`, if it is still present.
+    #[cfg(test)]
     pub fn selection_index(&self) -> Option<usize> {
-        let sel = self.selected.as_ref()?;
-        self.rows().iter().position(|r| &r.node.path == sel)
+        self.selection_and_len().0
+    }
+
+    /// Number of visible rows (`rows().len()` without building the list).
+    pub fn row_count(&self) -> usize {
+        self.selection_and_len().1
+    }
+
+    /// Selected row index and total row count from a single tree walk that
+    /// allocates nothing — scroll bookkeeping needs both on every key press
+    /// and every frame.
+    fn selection_and_len(&self) -> (Option<usize>, usize) {
+        fn walk(sidebar: &Sidebar, nodes: &[Node], count: &mut usize, found: &mut Option<usize>) {
+            for node in nodes {
+                if found.is_none() && sidebar.selected.as_deref() == Some(node.path.as_path()) {
+                    *found = Some(*count);
+                }
+                *count += 1;
+                if node.kind == NodeKind::Dir && sidebar.expanded.contains(&node.path) {
+                    walk(sidebar, &node.children, count, found);
+                }
+            }
+        }
+        let (mut count, mut found) = (0, None);
+        walk(self, &self.nodes, &mut count, &mut found);
+        (found, count)
     }
 
     /// The selected node's full path, for the status bar.
@@ -138,13 +163,13 @@ impl Sidebar {
     }
 
     fn move_selection(&mut self, delta: isize) {
-        let rows = self.rows();
-        if rows.is_empty() {
+        let (cur, len) = self.selection_and_len();
+        if len == 0 {
             return;
         }
-        let cur = self.selection_index().unwrap_or(0);
-        let next = (cur as isize + delta).clamp(0, rows.len() as isize - 1) as usize;
-        self.selected = Some(rows[next].node.path.clone());
+        let next = (cur.unwrap_or(0) as isize + delta).clamp(0, len as isize - 1) as usize;
+        let path = self.rows()[next].node.path.clone();
+        self.selected = Some(path);
         self.scroll_selection_into_view();
     }
 
@@ -246,23 +271,23 @@ impl Sidebar {
     /// Called from `ui::draw` with the sidebar's inner height.
     pub fn on_viewport_height(&mut self, height: usize) {
         self.viewport = height.max(1);
-        self.clamp_scroll();
+        self.clamp_scroll(self.row_count());
     }
 
     /// Scroll so the selection is visible, then clamp.
     pub fn scroll_selection_into_view(&mut self) {
-        if let Some(idx) = self.selection_index() {
+        let (selection, len) = self.selection_and_len();
+        if let Some(idx) = selection {
             if idx >= self.scroll + self.viewport {
                 self.scroll = idx + 1 - self.viewport;
             } else if idx < self.scroll {
                 self.scroll = idx;
             }
         }
-        self.clamp_scroll();
+        self.clamp_scroll(len);
     }
 
-    fn clamp_scroll(&mut self) {
-        let len = self.rows().len();
+    fn clamp_scroll(&mut self, len: usize) {
         self.scroll = self.scroll.min(len.saturating_sub(self.viewport.min(len)));
     }
 
@@ -292,7 +317,7 @@ impl Sidebar {
     /// row and the scroll offset. `None` when the click is on a border row
     /// or below the last visible row.
     pub fn row_index_at_screen_row(&self, area: Rect, screen_row: u16) -> Option<usize> {
-        list_row_at(screen_row, area, self.scroll, self.rows().len())
+        list_row_at(screen_row, area, self.scroll, self.row_count())
     }
 }
 
@@ -315,93 +340,30 @@ pub fn list_row_at(screen_row: u16, area: Rect, scroll: usize, rows_len: usize) 
 }
 
 /// Lists `dir`'s immediate entries as nodes; directories carry their
-/// subtree recursively. Folders first, then files (`.md` notes and
-/// `.base` tables together), each group in case-insensitive name order.
-/// Hidden entries (`.obsidian`, `.git`, `.trash`, …) and other
-/// non-indexable files are skipped.
-///
-/// Symlinks: file symlinks are followed (kept as notes if `.md`/`.base`),
-/// but *directory* symlinks are skipped — a symlinked dir could loop back
-/// into the tree (stack overflow) or pull in a huge external subtree. As
-/// belt-and-braces the recursion is also depth-capped.
-const MAX_DEPTH: usize = 32;
-
+/// subtree recursively. The listing rules (folders first then files,
+/// case-insensitive order, hidden entries and non-indexable files skipped,
+/// directory symlinks refused, depth cap) are the vault's own, see
+/// [`vault::walk::read_dir_entries`].
 fn read_children(dir: &Path, depth: usize) -> io::Result<Vec<Node>> {
-    let mut dirs: Vec<Node> = Vec::new();
-    let mut files: Vec<Node> = Vec::new();
-    for entry in fs::read_dir(dir)? {
-        let Ok(entry) = entry else { continue };
-        let path = entry.path();
-        let Ok(name) = entry.file_name().into_string() else {
-            continue; // non-UTF8 name: skip
-        };
-        if name.starts_with('.') {
-            continue;
-        }
-        // `symlink_metadata` does not follow the link, so we can tell a
-        // symlink apart from a real directory before recursing.
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            continue; // vanished between read_dir and stat
-        };
-        if meta.file_type().is_symlink() {
-            // Follow the link one level: a file target stays in the tree,
-            // a directory target is skipped (cycle / outside-vault safety).
-            if !fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(true)
-            // broken link: skip
-            {
-                let lower = name.to_ascii_lowercase();
-                let kind = if lower.ends_with(".md") {
-                    NodeKind::Note
-                } else if lower.ends_with(".base") {
-                    NodeKind::Base
-                } else {
-                    continue;
-                };
-                files.push(Node {
-                    name,
-                    path,
-                    kind,
-                    children: Vec::new(),
-                });
-            }
-            continue;
-        }
-        if meta.is_dir() {
-            if depth >= MAX_DEPTH {
-                continue; // pathological nesting: refuse to recurse further
-            }
-            let children = read_children(&path, depth + 1).unwrap_or_default();
-            dirs.push(Node {
-                name,
-                path,
-                kind: NodeKind::Dir,
-                children,
-            });
-        } else {
-            let lower = name.to_ascii_lowercase();
-            let kind = if lower.ends_with(".md") {
-                NodeKind::Note
-            } else if lower.ends_with(".base") {
-                NodeKind::Base
-            } else {
-                continue; // not an indexable file
+    Ok(vault::walk::read_dir_entries(dir, depth)?
+        .into_iter()
+        .map(|entry| {
+            let (kind, children) = match entry.kind {
+                EntryKind::Dir => (
+                    NodeKind::Dir,
+                    read_children(&entry.path, depth + 1).unwrap_or_default(),
+                ),
+                EntryKind::Note => (NodeKind::Note, Vec::new()),
+                EntryKind::Base => (NodeKind::Base, Vec::new()),
             };
-            files.push(Node {
-                name,
-                path,
+            Node {
+                name: entry.name,
+                path: entry.path,
                 kind,
-                children: Vec::new(),
-            });
-        }
-    }
-    sort_by_name(&mut dirs);
-    sort_by_name(&mut files);
-    dirs.extend(files);
-    Ok(dirs)
-}
-
-fn sort_by_name(nodes: &mut [Node]) {
-    nodes.sort_by_key(|a| a.name.to_lowercase());
+                children,
+            }
+        })
+        .collect())
 }
 
 /// Truncates `text` to at most `max_width` display columns, replacing the
@@ -431,6 +393,7 @@ pub fn truncate_ellipsis(text: &str, max_width: usize) -> String {
 mod tests {
     use super::*;
     use crate::testutil::TempDir;
+    use std::fs;
 
     /// vault/
     ///   alpha.md

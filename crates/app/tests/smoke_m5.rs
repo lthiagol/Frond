@@ -1,7 +1,7 @@
 //! End-to-end smoke test for M5 (cross-run session memory): shells out to
 //! `scripts/smoke_m5.py`, which drives the real TUI binary through a pty
 //! with `pyte` terminal emulation across FOUR separate runs against the
-//! same fixture vault under `/tmp/frond-m5-vault`:
+//! same fixture vault under the smoke scratch dir (`scripts/smoke_tmp.py`):
 //! run 1 shapes a session (expanded folder, opened note, scrolled) and
 //! quits; run 2 restarts with no note argument and must come back exactly
 //! there; run 3 restarts with an explicit note argument (which wins over
@@ -10,10 +10,10 @@
 //!
 //! Ignored by default because it needs:
 //! - `python3` with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`), and
-//! - a debug build of the app (`cargo build -p app`) — the binary is
+//! - a debug build of the app (`cargo build -p frond`) — the binary is
 //!   located via cargo's `CARGO_BIN_EXE_frond` and passed as `FROND_APP_BIN`.
 //!
-//! Run it with: `cargo test -p app --test smoke_m5 -- --ignored`
+//! Run it with: `cargo test -p frond --test smoke_m5 -- --ignored`
 //!
 //! The script never touches `testvault/` and never the real
 //! `~/.local/state` — `FROND_SESSION` redirects the session dir into /tmp.

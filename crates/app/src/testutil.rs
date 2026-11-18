@@ -1,7 +1,57 @@
 //! Test-only helpers shared by the unit tests in this crate.
 
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
+
+/// Serialises tests that touch process environment variables. Unit tests
+/// share one process and run on a thread pool, so an unguarded `set_var`
+/// is visible to every other test in flight. Holding the guard keeps other
+/// *guarded* tests out; the original values are restored on drop, even
+/// when an assert fails.
+pub struct EnvGuard {
+    saved: Vec<(OsString, Option<OsString>)>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+impl EnvGuard {
+    pub fn lock() -> Self {
+        static ENV_LOCK: Mutex<()> = Mutex::new(());
+        Self {
+            saved: Vec::new(),
+            // A panicking test poisons the lock; the data is `()`, so ignore.
+            _lock: ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner()),
+        }
+    }
+
+    fn remember(&mut self, key: &OsStr) {
+        if !self.saved.iter().any(|(k, _)| k == key) {
+            self.saved.push((key.to_os_string(), std::env::var_os(key)));
+        }
+    }
+
+    pub fn set(&mut self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) {
+        self.remember(key.as_ref());
+        std::env::set_var(key, value);
+    }
+
+    pub fn remove(&mut self, key: impl AsRef<OsStr>) {
+        self.remember(key.as_ref());
+        std::env::remove_var(key);
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..).rev() {
+            match value {
+                Some(v) => std::env::set_var(&key, v),
+                None => std::env::remove_var(&key),
+            }
+        }
+    }
+}
 
 /// Drop-guarded uniquely named temp file (no tempfile dependency), so a
 /// failing assert never leaves `frond-test-*` files behind in `/tmp`. A

@@ -3,23 +3,24 @@
 
 Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
-- A debug build of the app (`cargo build -p app`); the binary defaults to
+- A debug build of the app (`cargo build -p frond`); the binary defaults to
   <workspace>/target/debug/frond and can be overridden with $FROND_APP_BIN.
 - A source note to render: defaults to testvault/index.md (READ-ONLY), can
   be overridden with $FROND_SMOKE_SRC. The script copies it to /tmp/watchtest.md
   and only ever writes to that copy — never to the vault.
 
 Run directly (`python3 scripts/smoke_tui.py`) or via the ignored Rust
-integration test: `cargo test -p app --test smoke -- --ignored`.
+integration test: `cargo test -p frond --test smoke -- --ignored`.
 """
 import os, pty, select, shutil, struct, sys, fcntl, termios, time
 
 import pyte
+import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
 SRC = os.environ.get("FROND_SMOKE_SRC", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testvault", "index.md"))
-TMP = "/tmp/watchtest.md"
+TMP = smoke_tmp.path("watchtest.md")
 
 COLS, ROWS = 100, 30
 shutil.copyfile(SRC, TMP)
@@ -35,7 +36,7 @@ pid, fd = pty.fork()
 if pid == 0:
     os.environ["TERM"] = "xterm-256color"
     # The quit-time session save must not touch the real ~/.local/state.
-    os.environ["FROND_SESSION"] = "/tmp/frond-smoke-session"
+    os.environ["FROND_SESSION"] = smoke_tmp.path("frond-smoke-session")
     fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     os.execv(APP, [APP, TMP])
 

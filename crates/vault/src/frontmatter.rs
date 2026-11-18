@@ -61,6 +61,7 @@ pub fn split_frontmatter(source: &str) -> (Option<&str>, &str) {
 /// instead of failing the whole block. Returns the fields, every
 /// wikilink found in frontmatter values / block-style list items (each
 /// tagged `from_frontmatter: true`, in source order), and warnings.
+#[cfg(test)]
 pub fn parse_frontmatter(source: &str) -> (NoteFrontmatter, Vec<LinkRef>, Vec<String>) {
     let (fm, _, links, warnings) = parse_frontmatter_with_raw(source);
     (fm, links, warnings)
@@ -209,19 +210,22 @@ fn plain_comment_strip(value: &str) -> &str {
     }
 }
 
-/// Strips one pair of matching surrounding quotes from a scalar value,
-/// so a quoted known-key value (`type: "rca # draft"`) reads the same as
-/// its unquoted form. Unquoted values pass through unchanged.
-fn unquote(value: &str) -> &str {
+/// Inner text of a value wrapped in one pair of matching quotes, `None`
+/// when it is not so wrapped. The single quote-pair rule shared by the
+/// frontmatter parser and the `.base` parser.
+pub(crate) fn strip_quote_pair(value: &str) -> Option<&str> {
     let bytes = value.as_bytes();
     let quoted = value.len() >= 2
         && (bytes[0] == b'"' || bytes[0] == b'\'')
         && bytes[value.len() - 1] == bytes[0];
-    if quoted {
-        &value[1..value.len() - 1]
-    } else {
-        value
-    }
+    quoted.then(|| &value[1..value.len() - 1])
+}
+
+/// Strips one pair of matching surrounding quotes from a scalar value,
+/// so a quoted known-key value (`type: "rca # draft"`) reads the same as
+/// its unquoted form. Unquoted values pass through unchanged.
+fn unquote(value: &str) -> &str {
+    strip_quote_pair(value).unwrap_or(value)
 }
 
 /// Parses a tags value: an inline `[a, b, c]` list (the vault convention).

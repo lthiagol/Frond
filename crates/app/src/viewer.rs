@@ -12,8 +12,8 @@ use ratatui::text::Line;
 use vault::{Resolution, VaultIndex};
 
 use crate::links::{
-    apply_link_styles, build_rendered_links, preprocess_with_links, LinkState, RenderedLink,
-    WikilinkTarget,
+    apply_link_styles, build_rendered_links, preprocess_with_links, LinkColors, LinkState,
+    RenderedLink, WikilinkTarget,
 };
 use crate::tasks::{apply_task_styles, map_tasks, preprocess_tasks, RenderedTask};
 
@@ -107,12 +107,17 @@ pub struct Viewer {
     index: Option<SharedIndex>,
     /// Rendered line counts per wrap width, see [`Viewer::line_count_at`].
     line_counts: Option<LineCounts>,
+    /// Bumped whenever `source` is replaced; lets caches check freshness
+    /// with an integer compare instead of comparing/cloning the text.
+    source_generation: u64,
+    /// Unresolved/ambiguous/focus colors, from the active UI theme.
+    link_colors: LinkColors,
 }
 
 /// Line counts of one source under one theme and metadata setting, per
 /// wrap width. Valid only while all three inputs are unchanged.
 struct LineCounts {
-    source: String,
+    source_generation: u64,
     show_metadata: bool,
     theme: MarkdownTheme,
     by_width: Vec<(usize, usize)>,
@@ -147,6 +152,8 @@ impl Viewer {
             stamp: None,
             index: None,
             line_counts: None,
+            source_generation: 0,
+            link_colors: LinkColors::default(),
         };
         viewer.open_file(path)?;
         Ok(viewer)
@@ -157,7 +164,13 @@ impl Viewer {
     /// existed).
     pub fn set_index(&mut self, index: Option<SharedIndex>) {
         self.index = index;
-        self.reparse();
+        self.parse_source();
+    }
+
+    /// Sets the link/checkbox state colors (applied on the next restyle —
+    /// the theme swap that follows re-parses).
+    pub fn set_link_colors(&mut self, colors: LinkColors) {
+        self.link_colors = colors;
     }
 
     /// Swaps the markdown palette and re-parses with it (theme cycling /
@@ -185,6 +198,7 @@ impl Viewer {
         let source = fs::read_to_string(path)?;
         self.path = path.to_path_buf();
         self.source = source;
+        self.source_generation += 1;
         self.focus_link = None; // a new note starts with no focused link
         self.focus_task = None;
         self.parse_source();
@@ -196,7 +210,11 @@ impl Viewer {
         Ok(())
     }
 
-    fn parse_source(&mut self) {
+    /// Re-runs the parse (and wikilink classification) without touching
+    /// the scroll position — also used after the index changed so link
+    /// styling and resolution stay current. The `x`/`X` focus is preserved
+    /// across reparses (clamped to the new link list).
+    pub fn parse_source(&mut self) {
         // Task preprocessing runs first: `- [~]` markers are rewritten to
         // `- [ ]` on the preprocessed text (same length, line-preserving)
         // so the engine renders a clickable checkbox glyph for them; the
@@ -237,14 +255,17 @@ impl Viewer {
 
     /// The engine render of already-preprocessed source at `width`.
     fn render_preprocessed(&self, preprocessed: &str, width: usize) -> ParseResult {
+        // The engine takes these as positional bools; name them here.
+        let file_mode = false; // the viewer renders notes, not a leaf file view
+        let code_line_numbers = true;
         parse_markdown_with_width_opts(
             preprocessed,
-            &self.assets.syntax_set,
+            self.assets.syntax_set,
             &self.assets.theme,
             width,
             &self.theme,
-            false,
-            true,
+            file_mode,
+            code_line_numbers,
             self.show_metadata,
         )
     }
@@ -258,11 +279,11 @@ impl Viewer {
         let fresh = self.line_counts.as_ref().is_some_and(|cache| {
             cache.show_metadata == self.show_metadata
                 && cache.theme == self.theme
-                && cache.source == self.source
+                && cache.source_generation == self.source_generation
         });
         if !fresh {
             self.line_counts = Some(LineCounts {
-                source: self.source.clone(),
+                source_generation: self.source_generation,
                 show_metadata: self.show_metadata,
                 theme: self.theme,
                 by_width: Vec::new(),
@@ -308,14 +329,6 @@ impl Viewer {
                 }
             })
             .collect()
-    }
-
-    /// Re-runs the parse (and wikilink classification) without touching
-    /// the scroll position — used after the index changed so link styling
-    /// and resolution stay current. The `x`/`X` focus is preserved across
-    /// these reparses (clamped to the new link list, see `parse_source`).
-    pub fn reparse(&mut self) {
-        self.parse_source();
     }
 
     /// `x`: focus the next focusable (links and checkboxes, in rendered
@@ -467,8 +480,18 @@ impl Viewer {
     /// carry the styles in place.
     fn restyle_links(&mut self) {
         self.lines = self.base_lines.clone();
-        apply_link_styles(&mut self.lines, &self.links, self.focus_link);
-        apply_task_styles(&mut self.lines, &self.tasks, self.focus_task);
+        apply_link_styles(
+            &mut self.lines,
+            &self.links,
+            self.focus_link,
+            self.link_colors,
+        );
+        apply_task_styles(
+            &mut self.lines,
+            &self.tasks,
+            self.focus_task,
+            self.link_colors,
+        );
     }
 
     fn scroll_link_into_view(&mut self, index: usize) {
@@ -543,6 +566,7 @@ impl Viewer {
         match fs::read_to_string(&self.path) {
             Ok(source) => {
                 self.source = source;
+                self.source_generation += 1;
                 self.parse_source();
                 self.last_reload = Some(SystemTime::now());
                 self.last_error = None;
@@ -649,7 +673,7 @@ impl Viewer {
     /// status, backlinks and frontmatter wikilinks are unaffected.
     pub fn toggle_metadata(&mut self) {
         self.show_metadata = !self.show_metadata;
-        self.reparse();
+        self.parse_source();
     }
 }
 
@@ -912,7 +936,7 @@ mod tests {
         let styled: Vec<_> = line
             .spans
             .iter()
-            .filter(|s| s.style.fg == Some(ratatui::style::Color::DarkGray))
+            .filter(|s| s.style.fg == Some(v.link_colors.unresolved_fg))
             .collect();
         assert!(
             !styled.is_empty(),
@@ -951,7 +975,7 @@ mod tests {
         let new_note = index.borrow().root().join("brand-new.md");
         std::fs::write(&new_note, "x\n").unwrap();
         index.borrow_mut().reindex_one(&new_note);
-        v.reparse();
+        v.parse_source();
         assert!(matches!(
             v.links[0].wikilink.as_ref().unwrap().state,
             LinkState::Resolved(_)
@@ -1053,7 +1077,7 @@ mod tests {
         assert_eq!(v.focus_link, Some(1));
 
         // A vault-wide index change triggers a reparse: focus preserved.
-        v.reparse();
+        v.parse_source();
         assert_eq!(v.focus_link, Some(1), "reparse keeps the focused link");
 
         // The note itself loses links (reload path): focus clamps.
