@@ -936,11 +936,15 @@ mod tests {
         let styled: Vec<_> = line
             .spans
             .iter()
-            .filter(|s| s.style.fg == Some(v.link_colors.unresolved_fg))
+            .filter(|s| {
+                s.style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::DIM | ratatui::style::Modifier::CROSSED_OUT)
+            })
             .collect();
         assert!(
             !styled.is_empty(),
-            "unresolved link text is dimmed (strikethrough style applied)"
+            "unresolved link text is dimmed and struck through"
         );
     }
 

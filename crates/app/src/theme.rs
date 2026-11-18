@@ -907,6 +907,65 @@ pub fn effective_theme_name(flag: Option<&str>, env: Option<&str>, config: Optio
 mod tests {
     use super::*;
 
+    /// WCAG contrast of the colours the link/checkbox/glyph states draw
+    /// with, on every built-in theme. The floor is deliberately low: it
+    /// catches a role that becomes invisible (a selection-coloured focus
+    /// background measured ~1.1 against the link colour), not taste.
+    #[test]
+    fn link_state_colours_stay_legible_on_every_theme() {
+        use ratatui::style::Color;
+        fn lum(c: Color) -> f64 {
+            let Color::Rgb(r, g, b) = c else {
+                panic!("built-in themes are all Rgb, got {c:?}")
+            };
+            let f = |v: u8| {
+                let v = f64::from(v) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b)
+        }
+        fn contrast(a: Color, b: Color) -> f64 {
+            let (x, y) = (lum(a), lum(b));
+            (x.max(y) + 0.05) / (x.min(y) + 0.05)
+        }
+        const FLOOR: f64 = 2.0;
+        for spec in crate::builtin_themes::BUILTIN_THEMES {
+            let t = resolve_theme(spec.name, &Default::default()).unwrap().theme;
+            let ui = t.ui;
+            let colors = crate::links::LinkColors::from_ui(ui);
+            // Focus is inverse video of the span's own colour: as legible as
+            // the link text is on the content background.
+            let focused = colors.focus(ratatui::style::Style::new().fg(t.markdown.link_text));
+            let (fg, bg) = (focused.fg.unwrap(), focused.bg.unwrap());
+            assert!(
+                contrast(fg, bg) >= FLOOR,
+                "{}: focused link {:.2}",
+                spec.name,
+                contrast(fg, bg)
+            );
+            assert!(
+                contrast(colors.ambiguous_fg, ui.content_bg) >= FLOOR,
+                "{}: ambiguous link {:.2}",
+                spec.name,
+                contrast(colors.ambiguous_fg, ui.content_bg)
+            );
+            assert!(
+                contrast(ui.status_success_fg, ui.sidebar_bg) >= FLOOR,
+                "{}: success glyph",
+                spec.name
+            );
+            assert!(
+                contrast(ui.status_error_fg, ui.sidebar_bg) >= FLOOR,
+                "{}: error glyph",
+                spec.name
+            );
+        }
+    }
+
     /// Every `MarkdownTheme` field must be in `with_markdown_fields!`: set
     /// each listed field to a unique sentinel colour and check that no
     /// other colour remains (a field the engine added but the list missed
