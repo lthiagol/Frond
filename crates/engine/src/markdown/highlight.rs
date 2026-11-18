@@ -9,7 +9,6 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::width;
 use super::with_link_marker;
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(super) fn find_match_char_ranges(
     text_chars: &[char],
     query_lower: &[Vec<char>],
@@ -35,7 +34,6 @@ pub(super) fn find_match_char_ranges(
     ranges
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(super) fn content_span_start(spans: &[Span<'_>]) -> usize {
     let has_pipe = spans.iter().take(4).any(|s| s.content.contains('│'));
     if !has_pipe {
@@ -49,19 +47,16 @@ pub(super) fn content_span_start(spans: &[Span<'_>]) -> usize {
     0
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 fn skip_ranges_ending_by(ranges: &[Range<usize>], index: &mut usize, pos: usize) {
     while ranges.get(*index).is_some_and(|range| range.end <= pos) {
         *index += 1;
     }
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn highlight_line<'a>(line: &Line<'a>, theme: &MarkdownTheme, query: &str) -> Line<'a> {
     with_link_marker(|marker| highlight_line_with_marker(line, theme, query, marker, false))
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 pub(crate) fn highlight_matches_only<'a>(
     line: &Line<'a>,
     theme: &MarkdownTheme,
@@ -70,7 +65,6 @@ pub(crate) fn highlight_matches_only<'a>(
     with_link_marker(|marker| highlight_line_with_marker(line, theme, query, marker, true))
 }
 
-#[allow(dead_code)] // vendored leaf surface, see VENDORED.md
 fn highlight_line_with_marker<'a>(
     line: &Line<'a>,
     theme: &MarkdownTheme,

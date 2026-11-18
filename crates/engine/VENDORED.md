@@ -54,8 +54,7 @@ improvements can be merged. Every intentional change is listed here.
    crate-internal, but `TocEntry` is re-exported from `markdown/mod.rs` and
    `lib.rs` so dependents can name the type (it appears in the public
    `ParseResult.toc` field).
-6. **Item-level `#[allow(dead_code)]` on unused leaf items** (no module-wide
-   allow, so dead code from our own edits is still reported). leaf's app
+6. **`#![allow(dead_code)]` module-wide in `markdown/mod.rs`.** leaf's app
    consumes some functions the engine doesn't call yet (search highlight:
    `highlight_line`, `build_searchable_lines`, …; `set_link_marker`; bullet
    glyphs `BULLET_*`; `is_ordered_marker`; `toc_levels`). Kept upstream-intact
