@@ -57,8 +57,8 @@ fn note_text_starts_after_the_configured_margin() {
         "right margin painted"
     );
     assert_eq!(buffer[(3, 0)].symbol(), "f", "text starts at the margin");
-    assert_eq!(app.note_viewport.x, 3);
-    assert_eq!(app.note_viewport.width, 94, "100 less 3 per side");
+    assert_eq!(app.layout.note_viewport.x, 3);
+    assert_eq!(app.layout.note_viewport.width, 94, "100 less 3 per side");
 }
 
 /// Scrolling to the bottom of an overflowing note must land on the
@@ -216,14 +216,17 @@ fn status_bar_name_segment_records_rect_only_in_content_focus() {
     let dir = name_vault();
     let mut app = status_app(&dir, "solo.md");
     render_at(&mut app, 100);
-    let area = app.status_name_area.expect("name segment recorded");
+    let area = app.layout.status_name_area.expect("name segment recorded");
     assert_eq!(area.y, 23, "status row");
     assert_eq!(area.x, 0);
     let label = format!("{} solo.md", app.icons.note());
     assert_eq!(area.width as usize, UnicodeWidthStr::width(label.as_str()));
     app.handle_key(key(KeyCode::Char('h')));
     render_at(&mut app, 100);
-    assert!(app.status_name_area.is_none(), "sidebar focus: no name");
+    assert!(
+        app.layout.status_name_area.is_none(),
+        "sidebar focus: no name"
+    );
 }
 
 #[test]
@@ -548,7 +551,7 @@ fn backlinks_app(vault_dir: &TempDir) -> App {
 /// The panel's full rect (no sidebar, 100 wide): `backlinks_area` is the
 /// click rect, which excludes the bar column when one is drawn.
 fn full_panel(app: &App) -> Rect {
-    let hit = app.backlinks_area.expect("panel drawn");
+    let hit = app.layout.backlinks_area.expect("panel drawn");
     Rect::new(0, hit.y, 100, hit.height)
 }
 
@@ -775,6 +778,7 @@ fn status_bar_shows_git_clean_check() {
         vault::VaultIndex::build(vault_dir.path()).unwrap(),
     )));
     app.refresh_git(true);
+    app.wait_git();
     let git = app.git.as_ref().expect("clean repo readable");
     assert!(git.clean);
     let screen = render(&mut app);
@@ -1197,7 +1201,10 @@ fn note_scrollbar_absent_when_content_fits() {
         !column_has_bar(buffer, 99, 0..23),
         "no bar when content fits"
     );
-    assert_eq!(app.note_viewport.width, 96, "text width less the margins");
+    assert_eq!(
+        app.layout.note_viewport.width, 96,
+        "text width less the margins"
+    );
 }
 
 #[test]
@@ -1214,7 +1221,7 @@ fn note_scrollbar_present_only_when_overflowing_and_text_stops_before_it() {
     assert!(column_has_bar(buffer, 99, 0..23), "bar drawn at right edge");
     // Text is narrowed: the note viewport stops one column short of the edge.
     assert_eq!(
-        app.note_viewport.x + app.note_viewport.width,
+        app.layout.note_viewport.x + app.layout.note_viewport.width,
         99 - app.note_margin
     );
     // No text cell is drawn under the bar column.
@@ -1261,7 +1268,7 @@ fn note_scrollbar_click_mapping_matches_the_narrowed_viewport() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     // The viewport recorded for clicks is exactly the drawn text area.
-    let vp = app.note_viewport;
+    let vp = app.layout.note_viewport;
     assert_eq!(vp.width, 95, "100 columns less the margins and the bar");
     assert_eq!(vp.x, app.note_margin);
     // A click on the bar column is outside the note viewport: no-op.
@@ -1401,7 +1408,7 @@ fn sidebar_click_on_scrollbar_column_selects_the_row_when_bar_present() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
-    let area = app.sidebar_area.expect("sidebar visible");
+    let area = app.layout.sidebar_area.expect("sidebar visible");
     let bar_col = sidebar_width(100) - 2;
     // Precondition: the bar really is drawn on this column (removing the
     // bar would fail here).
@@ -1437,7 +1444,7 @@ fn sidebar_click_on_fitting_list_has_no_bar_and_maps_by_row() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
-    let area = app.sidebar_area.expect("sidebar visible");
+    let area = app.layout.sidebar_area.expect("sidebar visible");
     let bar_col = sidebar_width(100) - 2;
     assert!(
         !column_has_bar(terminal.backend().buffer(), bar_col, 1..23),
@@ -1463,7 +1470,7 @@ fn sidebar_click_on_visible_row_maps_with_bar_present() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
-    let area = app.sidebar_area.expect("sidebar visible");
+    let area = app.layout.sidebar_area.expect("sidebar visible");
     // Row 0 of the list (`n00.md`) is at screen row area.y + 1; the bar
     // narrowing must not move it: the list mapping is row-only.
     let (target, second) = {

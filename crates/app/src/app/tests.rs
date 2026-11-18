@@ -130,7 +130,7 @@ fn sidebar_width_keys_step_clamp_and_survive_hide() {
 
     // Draw once so the drawn area feeds the proportional default (30
     // at 100 cols), then step from the real current width.
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     app.sidebar_width = None;
     app.handle_key(key(KeyCode::Char('>')));
     assert_eq!(app.sidebar_width, Some(32), "steps up from the default");
@@ -145,7 +145,7 @@ fn sidebar_width_keys_step_clamp_and_survive_hide() {
 
     // Clamped at both ends (and no u16 underflow from a degenerate
     // drawn width).
-    app.sidebar_area = Some(Rect::new(0, 0, 1, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 1, 20));
     app.sidebar_width = None;
     app.handle_key(key(KeyCode::Char('<')));
     assert_eq!(app.sidebar_width, Some(SIDEBAR_MIN_WIDTH), "no underflow");
@@ -768,7 +768,7 @@ fn clicks_are_ignored_while_popup_open() {
     let vault_dir = link_vault();
     let (_f, mut app) = link_app(&vault_dir);
     app.open_note(&vault_dir.path().join("start.md")).unwrap();
-    app.note_viewport = Rect::new(0, 0, 40, 20);
+    app.layout.note_viewport = Rect::new(0, 0, 40, 20);
     let link = app
         .viewer
         .links
@@ -802,7 +802,7 @@ fn click_on_link_region_activates_it() {
     let (_f, mut app) = link_app(&vault_dir);
     app.open_note(&vault_dir.path().join("start.md")).unwrap();
     // Fake the geometry ui::draw would set: viewport at (0,0), 40 cols.
-    app.note_viewport = Rect::new(0, 0, 40, 20);
+    app.layout.note_viewport = Rect::new(0, 0, 40, 20);
     let link = app
         .viewer
         .links
@@ -825,7 +825,7 @@ fn click_on_scrollbar_column_never_reaches_link_hit_test() {
     let (_f, mut app) = link_app(&vault_dir);
     app.open_note(&vault_dir.path().join("start.md")).unwrap();
     // Text rect is 0..40; the bar column is x == 40.
-    app.note_viewport = Rect::new(0, 0, 40, 20);
+    app.layout.note_viewport = Rect::new(0, 0, 40, 20);
     let link = app
         .viewer
         .links
@@ -864,7 +864,7 @@ fn click_on_scrollbar_column_never_reaches_link_hit_test() {
 fn sidebar_click_expands_collapses_and_opens_notes() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     // Collapsed rows: 0 = `sub` folder, 1 = a.md; inner rows start at
     // screen row 1 (below the top border).
     let sub_row = 1;
@@ -913,8 +913,8 @@ fn sidebar_click_expands_collapses_and_opens_notes() {
 fn click_sidebar_note_opens_and_moves_focus_to_content() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    app.note_viewport = Rect::new(30, 0, 70, 20);
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.note_viewport = Rect::new(30, 0, 70, 20);
     // Start on the sidebar so the click must move the focus.
     app.focus = Focus::Sidebar;
 
@@ -970,8 +970,8 @@ fn enter_on_sidebar_note_moves_focus_to_content() {
 fn click_content_line_moves_focus_to_content_then_j_scrolls() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    app.note_viewport = Rect::new(30, 0, 70, 20);
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.note_viewport = Rect::new(30, 0, 70, 20);
     // Start with focus on the sidebar so the click must change it.
     app.focus = Focus::Sidebar;
 
@@ -988,8 +988,8 @@ fn click_content_line_moves_focus_to_content_then_j_scrolls() {
 fn click_base_table_moves_focus_to_content() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    app.note_viewport = Rect::new(30, 0, 70, 20);
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.note_viewport = Rect::new(30, 0, 70, 20);
     std::fs::write(
         vault_dir.path().join("t.base"),
         "views:\n  - type: table\n    name: all\n",
@@ -1009,10 +1009,10 @@ fn click_base_table_moves_focus_to_content() {
 fn click_backlinks_panel_moves_focus_to_backlinks() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    app.note_viewport = Rect::new(30, 0, 70, 15);
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.note_viewport = Rect::new(30, 0, 70, 15);
     app.backlinks_open = true;
-    app.backlinks_area = Some(Rect::new(30, 15, 70, 5));
+    app.layout.backlinks_area = Some(Rect::new(30, 15, 70, 5));
     assert_eq!(app.focus, Focus::Content);
 
     app.handle_click(40, 17);
@@ -1029,6 +1029,7 @@ fn click_backlinks_panel_moves_focus_after_real_draw() {
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
     let panel = app
+        .layout
         .backlinks_area
         .expect("draw records the backlinks panel");
     assert_eq!(app.focus, Focus::Content);
@@ -1044,7 +1045,7 @@ fn click_backlinks_panel_moves_focus_after_real_draw() {
     app.focus = Focus::Content;
     app.backlinks_open = false;
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
-    assert!(app.backlinks_area.is_none());
+    assert!(app.layout.backlinks_area.is_none());
 }
 
 /// Render-driven: a 12-linker backlinks panel overflows its 5 inner rows,
@@ -1067,7 +1068,7 @@ fn click_on_backlinks_scrollbar_column_is_bounded_out() {
     let mut app = overflowing_backlinks_app(&vault_dir);
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
-    let hit = app.backlinks_area.expect("panel drawn");
+    let hit = app.layout.backlinks_area.expect("panel drawn");
     // The bar is the panel's last inner column (one left of the border);
     // the hit rect stops right before it.
     let bar_col = hit.right();
@@ -1102,7 +1103,7 @@ fn click_on_visible_backlink_row_opens_it_with_bar_present() {
     let mut app = overflowing_backlinks_app(&vault_dir);
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
-    let hit = app.backlinks_area.expect("panel drawn");
+    let hit = app.layout.backlinks_area.expect("panel drawn");
     // First visible row (inner row 1 = bl00): click opens it.
     app.handle_click(hit.x + 1, hit.y + 1);
     assert_eq!(app.viewer.path, vault_dir.path().join("bl00.md"));
@@ -1115,14 +1116,14 @@ fn click_on_visible_backlink_row_opens_it_with_bar_present() {
     // Fresh panel: the last visible row (viewport 5 → bl04) opens too.
     let mut app = overflowing_backlinks_app(&vault_dir);
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
-    let hit = app.backlinks_area.expect("panel drawn");
+    let hit = app.layout.backlinks_area.expect("panel drawn");
     app.handle_click(hit.x + 1, hit.bottom() - 2);
     assert_eq!(app.viewer.path, vault_dir.path().join("bl04.md"));
 
     // The panel's own border rows keep the focus-only behavior.
     let mut app = overflowing_backlinks_app(&vault_dir);
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
-    let hit = app.backlinks_area.expect("panel drawn");
+    let hit = app.layout.backlinks_area.expect("panel drawn");
     app.focus = Focus::Content;
     app.handle_click(hit.x + 1, hit.y);
     assert_eq!(app.focus, Focus::Backlinks, "title border still routes");
@@ -1144,7 +1145,7 @@ fn click_on_backlinks_empty_space_is_focus_only() {
     app.backlinks_open = true;
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
-    let hit = app.backlinks_area.expect("panel drawn");
+    let hit = app.layout.backlinks_area.expect("panel drawn");
     // Inner rows 3..5 are below the two listed rows.
     app.handle_click(hit.x + 1, hit.y + 4);
     assert_eq!(app.focus, Focus::Backlinks, "empty space focuses the panel");
@@ -1164,7 +1165,7 @@ fn click_on_backlinks_row_maps_through_scroll() {
     app.backlink_scroll = 2;
     let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
     term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
-    let hit = app.backlinks_area.expect("panel drawn");
+    let hit = app.layout.backlinks_area.expect("panel drawn");
     app.handle_click(hit.x + 1, hit.y + 1);
     assert_eq!(
         app.viewer.path,
@@ -1177,7 +1178,7 @@ fn click_on_backlinks_row_maps_through_scroll() {
 fn click_while_popup_open_does_not_move_focus() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     app.focus = Focus::Content;
     app.viewer.help_open = true;
     app.handle_click(3, 2);
@@ -1188,7 +1189,7 @@ fn click_while_popup_open_does_not_move_focus() {
 fn sidebar_click_maps_screen_row_through_scroll() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     // Collapsed rows [sub, a.md]; scroll 1 hides `sub`, so the first
     // inner screen row is a.md.
     let sidebar = app.sidebar.as_mut().unwrap();
@@ -1202,7 +1203,7 @@ fn sidebar_click_maps_screen_row_through_scroll() {
 fn sidebar_border_and_past_end_clicks_are_noops() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     // Top border row and a row past the short list: neither selects
     // nor opens anything.
     app.handle_click(3, 0);
@@ -1217,8 +1218,8 @@ fn sidebar_click_does_not_fall_through_to_content_links() {
     let vault_dir = link_vault();
     let (_file, mut app) = link_app(&vault_dir);
     app.open_note(&vault_dir.path().join("start.md")).unwrap();
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    app.note_viewport = Rect::new(30, 0, 70, 20);
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.note_viewport = Rect::new(30, 0, 70, 20);
     // Scroll 1 puts the `[[a]]` link (rendered line 2) at screen row
     // 1 — the same row as the sidebar's first inner row (`sub`).
     let link = app
@@ -1250,7 +1251,7 @@ fn sidebar_click_does_not_fall_through_to_content_links() {
 fn sidebar_clicks_are_gated_by_popups() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     let sub = vault_dir.path().join("sub");
 
     // Help popup: modal, clicks ignored entirely.
@@ -1289,7 +1290,7 @@ fn sidebar_click_works_in_tags_mode() {
     .unwrap();
     let (file, mut app) = app(&vault_dir);
     app.handle_key(key(KeyCode::Char('t'))); // sidebar → tags mode
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     // Rows: 0 = the mocktag tag (collapsed), then its note when expanded.
     app.handle_click(3, 1); // tag row: expand
     assert!(app.tags.expanded.contains("mocktag"));
@@ -1303,7 +1304,7 @@ fn sidebar_click_works_in_tags_mode() {
 fn wheel_over_sidebar_scrolls_sidebar_even_when_content_has_focus() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     assert_eq!(app.focus, Focus::Content);
     // Wheel down over the sidebar column: the sidebar list scrolls
     // (selection moves, clamped at the last row), content untouched.
@@ -1326,7 +1327,7 @@ fn wheel_over_sidebar_scrolls_sidebar_even_when_content_has_focus() {
 fn wheel_outside_sidebar_keeps_focus_routing() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     app.handle_wheel_at(50, 10, true);
     assert_eq!(app.viewer.scroll, 3, "content (focused) scrolled");
     assert_eq!(
@@ -1342,7 +1343,7 @@ fn wheel_outside_sidebar_keeps_focus_routing() {
 fn wheel_is_gated_by_the_search_popup() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     app.search.open = true;
     app.handle_wheel_at(5, 10, true);
     app.handle_wheel_at(50, 10, true);
@@ -1402,7 +1403,7 @@ fn backlinks_open_from_sidebar_focus_takes_focus() {
     std::fs::write(vault_dir.path().join("sub").join("c.md"), "[[a]]\n").unwrap();
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
     app.poll();
-    app.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
 
     // Click the sidebar row for `sub` (row 1, collapsed) → focus Sidebar.
     app.handle_click(3, 1);
@@ -1660,7 +1661,8 @@ fn git_vault(name: &str) -> TempDir {
 #[test]
 fn startup_reads_git_status_clean() {
     let vault_dir = git_vault("app-git-clean");
-    let (_file, app) = app(&vault_dir);
+    let (_file, mut app) = app(&vault_dir);
+    app.wait_git();
     let git = app.git.as_ref().expect("git status read at startup");
     assert!(git.clean);
     assert!(git.changed_files.is_empty());
@@ -1671,6 +1673,7 @@ fn startup_reads_git_status_clean() {
 fn u_key_refreshes_and_marks_dirty() {
     let vault_dir = git_vault("app-git-dirty");
     let (_f, mut app) = app(&vault_dir);
+    app.wait_git();
     assert!(app.git.as_ref().unwrap().clean);
 
     std::fs::write(vault_dir.path().join("a.md"), "changed\n").unwrap();
@@ -1678,6 +1681,7 @@ fn u_key_refreshes_and_marks_dirty() {
     // startup refresh); the explicit `u` key must not.
     app.poll();
     app.handle_key(key(KeyCode::Char('u')));
+    app.wait_git();
     let git = app.git.as_ref().unwrap();
     assert!(!git.clean);
     assert_eq!(
@@ -1693,6 +1697,7 @@ fn opening_a_note_refreshes_git_status() {
     // markers/badge stay stale until `u`.
     let vault_dir = git_vault("app-git-onopen");
     let (_f, mut app) = app(&vault_dir);
+    app.wait_git();
     assert!(app.git.as_ref().unwrap().clean);
 
     // External commit: a brand-new note appears committed; no vault
@@ -1717,6 +1722,7 @@ fn opening_a_note_refreshes_git_status() {
     // Age the debounce clock so the open-triggered refresh spawns.
     app.last_git_refresh = Some(Instant::now() - GIT_DEBOUNCE);
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.wait_git();
     assert!(
         app.git.as_ref().unwrap().clean,
         "external commit picked up when a note is opened"
@@ -1729,6 +1735,7 @@ fn opening_a_note_refreshes_git_status() {
     app.last_git_refresh = Some(Instant::now() - GIT_DEBOUNCE / 2);
     app.open_note(&vault_dir.path().join("b.md")).unwrap();
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.wait_git();
     assert!(
         app.git.as_ref().unwrap().clean,
         "open-refresh is debounce-gated like the watch path"
@@ -1739,15 +1746,42 @@ fn opening_a_note_refreshes_git_status() {
 fn watch_reindex_refresh_is_debounced() {
     let vault_dir = git_vault("app-git-debounce");
     let (file, mut app) = app(&vault_dir);
+    // Let the (background) startup query finish on the clean tree before
+    // the repo is dirtied below.
+    app.wait_git();
     // Fake a very recent refresh: watch-triggered refreshes within
     // GIT_DEBOUNCE must be skipped entirely.
     app.last_git_refresh = Some(Instant::now());
     file.rewrite("dirty now\n");
     std::fs::write(vault_dir.path().join("fresh.md"), "new\n").unwrap();
     app.poll();
+    app.wait_git();
     assert!(
         app.git.as_ref().unwrap().clean,
         "debounced refresh must not respawn within 5s"
+    );
+}
+
+#[test]
+fn git_refresh_requested_in_flight_reruns_and_lands_the_latest_state() {
+    let vault_dir = git_vault("app-git-rerun");
+    let (_file, mut app) = app(&vault_dir);
+    app.wait_git();
+    assert!(app.git.as_ref().unwrap().clean);
+
+    // First request starts the worker; dirty the tree, then ask again while
+    // it may still be running: the second must not be dropped.
+    app.refresh_git(true);
+    std::fs::write(vault_dir.path().join("late.md"), "late\n").unwrap();
+    app.refresh_git(true);
+    app.wait_git();
+    assert!(
+        !app.git.as_ref().unwrap().clean,
+        "the queued re-run saw the dirty tree"
+    );
+    assert!(
+        app.git_job.is_none() && !app.git_rerun,
+        "nothing left queued"
     );
 }
 
@@ -1783,7 +1817,7 @@ fn task_vault() -> (TempDir, App) {
 /// Click coordinates of a task's glyph with the faked viewport
 /// geometry (mirrors what ui::draw would record).
 fn task_click(app: &mut App, index: usize) -> (u16, u16) {
-    app.note_viewport = Rect::new(0, 0, 40, 24);
+    app.layout.note_viewport = Rect::new(0, 0, 40, 24);
     let task = app.viewer.tasks[index];
     let row = task.line as u32 - app.viewer.scroll;
     (task.start as u16, row as u16)
@@ -2315,7 +2349,7 @@ fn clicking_a_link_region_still_opens_even_on_a_task_line() {
         link.regions[0].start >= task.end,
         "link starts past the glyph"
     );
-    app.note_viewport = Rect::new(0, 0, 40, 24);
+    app.layout.note_viewport = Rect::new(0, 0, 40, 24);
     let r = link.regions[0];
     app.handle_click(r.start as u16, r.line as u16);
     assert_eq!(app.viewer.path, dir.path().join("target.md"), "link opened");
@@ -2366,7 +2400,7 @@ fn search_popup() -> Rect {
 fn click_selects_a_result_row_and_clicking_it_again_opens() {
     let (_dir, file, mut app) = search_state_app();
     let popup = search_popup();
-    app.search_area = Some(popup);
+    app.layout.search_area = Some(popup);
     // Click row 1 (the second hit): selects it, popup stays open.
     app.handle_click(40, popup.y + 2);
     assert_eq!(app.search.selected, 1, "click selected the row");
@@ -2383,7 +2417,7 @@ fn click_selects_a_result_row_and_clicking_it_again_opens() {
 fn search_popup_border_footer_and_outside_clicks_do_nothing() {
     let (_dir, file, mut app) = search_state_app();
     let popup = search_popup();
-    app.search_area = Some(popup);
+    app.layout.search_area = Some(popup);
     // Top border, footer row, and a point outside the popup: no
     // selection change, no open.
     app.handle_click(40, popup.y); // top border
@@ -2403,7 +2437,7 @@ fn search_popup_border_footer_and_outside_clicks_do_nothing() {
 fn wheel_over_search_results_scrolls_the_selection_not_the_content() {
     let (_dir, file, mut app) = search_state_app();
     let popup = search_popup();
-    app.search_area = Some(popup);
+    app.layout.search_area = Some(popup);
     app.viewer.viewport_height = 10;
     // Wheel down over the popup: the result selection moves; the
     // note behind the popup does not scroll.
@@ -2607,7 +2641,7 @@ fn clicking_a_name_cell_opens_the_note_and_back_returns_to_the_table() {
     // Draw once so the click regions exist (sidebar hidden: clicks
     // must reach the full-width content area).
     app.sidebar_visible = false;
-    app.note_viewport = Rect::new(0, 0, 80, 24);
+    app.layout.note_viewport = Rect::new(0, 0, 80, 24);
     {
         let backend = ratatui::backend::TestBackend::new(80, 24);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -3197,7 +3231,7 @@ fn click_on_status_name_copies_relative_path() {
     app.open_note(&vault_dir.path().join("sub").join("b.md"))
         .unwrap();
     // The name segment rect, as the renderer would record it.
-    app.status_name_area = Some(Rect::new(0, 23, 20, 1));
+    app.layout.status_name_area = Some(Rect::new(0, 23, 20, 1));
     app.handle_click(3, 23);
     assert!(app.pending_clipboard.is_some(), "copy staged");
     let status = app.last_status.clone().expect("copy status set");
@@ -3219,7 +3253,7 @@ fn click_elsewhere_on_status_bar_does_nothing() {
     let (_f, mut app) = app(&vault_dir);
     app.open_note(&vault_dir.path().join("sub").join("b.md"))
         .unwrap();
-    app.status_name_area = Some(Rect::new(0, 23, 10, 1));
+    app.layout.status_name_area = Some(Rect::new(0, 23, 10, 1));
     app.handle_click(60, 23);
     assert!(app.pending_clipboard.is_none());
     assert!(app.last_status.is_none());

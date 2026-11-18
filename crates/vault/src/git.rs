@@ -74,7 +74,11 @@ fn run_git(dir: &Path, subcommand: &str, args: &[&str]) -> Option<String> {
         // future refactor) trying to spawn something else gets nothing.
         return None;
     }
+    // `--no-optional-locks`: a read-only viewer must never take
+    // `.git/index.lock` (plain `git status` does, to refresh the index) —
+    // it could make the user's own concurrent `git commit` fail.
     let output = Command::new("git")
+        .arg("--no-optional-locks")
         .arg(subcommand)
         .args(args)
         .current_dir(dir)

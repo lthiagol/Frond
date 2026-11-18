@@ -303,55 +303,73 @@ theme_overrides!(UiOverrides for UiTheme {
     popup_match_bg,
 });
 
-theme_overrides!(MarkdownOverrides for MarkdownTheme {
-    search_highlight_bg,
-    search_match_bg,
-    code_gutter,
-    blockquote_marker,
-    list_level_1,
-    list_level_2,
-    list_level_3,
-    ordered_list,
-    table_border,
-    table_separator,
-    table_header,
-    table_cell,
-    heading_1,
-    heading_2,
-    heading_3,
-    heading_4,
-    heading_other,
-    heading_underline,
-    code_frame,
-    code_label,
-    inline_code_fg,
-    inline_code_bg,
-    rule,
-    link_icon,
-    link_text,
-    link_hover,
-    blockquote_text,
-    text,
-    strong_text,
-    latex_inline_fg,
-    latex_inline_bg,
-    latex_block_fg,
-    mermaid_keyword,
-    mermaid_arrow,
-    mermaid_label,
-    mermaid_block_fg,
-    mark_fg,
-    mark_bg,
-    task_checked,
-    task_unchecked,
-    alert_note,
-    alert_tip,
-    alert_important,
-    alert_warning,
-    alert_caution,
-    footnote_ref,
-    footnote_text,
-});
+/// The single list of `MarkdownTheme` fields a theme can set. Invoked with
+/// a callback macro that receives the comma-separated field names; the
+/// config-file overrides below and the built-in themes' keys
+/// (`builtin_themes::md`) are both generated from it. A field named here that
+/// the engine struct lacks fails to compile; one the engine adds but this list
+/// misses is caught by `markdown_field_list_covers_the_engine_struct`.
+macro_rules! with_markdown_fields {
+    ($callback:ident) => {
+        $callback! {
+            search_highlight_bg,
+            search_match_bg,
+            code_gutter,
+            blockquote_marker,
+            list_level_1,
+            list_level_2,
+            list_level_3,
+            ordered_list,
+            table_border,
+            table_separator,
+            table_header,
+            table_cell,
+            heading_1,
+            heading_2,
+            heading_3,
+            heading_4,
+            heading_other,
+            heading_underline,
+            code_frame,
+            code_label,
+            inline_code_fg,
+            inline_code_bg,
+            rule,
+            link_icon,
+            link_text,
+            link_hover,
+            blockquote_text,
+            text,
+            strong_text,
+            latex_inline_fg,
+            latex_inline_bg,
+            latex_block_fg,
+            mermaid_keyword,
+            mermaid_arrow,
+            mermaid_label,
+            mermaid_block_fg,
+            mark_fg,
+            mark_bg,
+            task_checked,
+            task_unchecked,
+            alert_note,
+            alert_tip,
+            alert_important,
+            alert_warning,
+            alert_caution,
+            footnote_ref,
+            footnote_text,
+        }
+    };
+}
+pub(crate) use with_markdown_fields;
+
+macro_rules! markdown_overrides {
+    ($($field:ident),+ $(,)?) => {
+        theme_overrides!(MarkdownOverrides for MarkdownTheme { $($field),+ });
+    };
+}
+with_markdown_fields!(markdown_overrides);
 
 /// `[diff]` exists in leaf theme files but this app has no diff view:
 /// every key is captured here only so it can be listed in the warning.
@@ -888,6 +906,31 @@ pub fn effective_theme_name(flag: Option<&str>, env: Option<&str>, config: Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every `MarkdownTheme` field must be in `with_markdown_fields!`: set
+    /// each listed field to a unique sentinel colour and check that no
+    /// other colour remains (a field the engine added but the list missed
+    /// would keep its preset colour).
+    #[test]
+    fn markdown_field_list_covers_the_engine_struct() {
+        use ratatui::style::Color;
+        let mut theme = engine::markdown_theme_by_preset(engine::MarkdownThemePreset::OceanDark);
+        let mut count = 0u8;
+        macro_rules! set_all {
+            ($($field:ident),+ $(,)?) => {
+                $( count += 1; theme.$field = Color::Rgb(250, 251, count); )+
+            };
+        }
+        with_markdown_fields!(set_all);
+        let debug = format!("{theme:?}");
+        let colours = debug.matches("Rgb(").count() + debug.matches("Indexed(").count();
+        let sentinels = debug.matches("Rgb(250, 251, ").count();
+        assert_eq!(
+            sentinels, colours,
+            "MarkdownTheme has fields missing from with_markdown_fields!: {debug}"
+        );
+        assert_eq!(sentinels, usize::from(count));
+    }
     use crate::testutil::TempDir;
 
     fn rgb(r: u8, g: u8, b: u8) -> Color {
