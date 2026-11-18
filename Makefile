@@ -33,6 +33,7 @@ smoke:
 	uv run --with pyte $(CARGO) test -p frond --test smoke_m3 -- --ignored
 	uv run --with pyte $(CARGO) test -p frond --test smoke_m4 -- --ignored
 	uv run --with pyte $(CARGO) test -p frond --test smoke_m5 -- --ignored
+	uv run --with pyte $(CARGO) test -p frond --test smoke_m6 -- --ignored
 
 fmt:
 	$(CARGO) fmt

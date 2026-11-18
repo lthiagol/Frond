@@ -7,6 +7,9 @@
 # Local runtime state
 *.log
 
+# Local planning file (kept out of git on purpose)
+TODO.md
+
 # Editor/OS noise
 .idea/
 .vscode/
