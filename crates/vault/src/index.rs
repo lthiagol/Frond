@@ -53,15 +53,23 @@ fn ends_with_ci(haystack: &str, needle: &str) -> bool {
             .eq_ignore_ascii_case(needle.as_bytes())
 }
 
-/// Byte offset of the first ASCII-case-insensitive occurrence of
-/// `needle_lower` (already lowercase) in `haystack`.
-fn find_ascii_ci(haystack: &[u8], needle_lower: &[u8]) -> Option<usize> {
-    if needle_lower.len() > haystack.len() {
-        return None;
+/// A note's cached source for the global search.
+#[derive(Clone, Debug)]
+struct RawText {
+    text: String,
+    /// ASCII-lowercased copy of `text`, kept only for all-ASCII notes (then
+    /// byte offsets agree with `text`), so one substring search covers the
+    /// whole note instead of one per line.
+    folded: Option<String>,
+}
+
+impl RawText {
+    fn new(source: &str) -> Self {
+        Self {
+            folded: source.is_ascii().then(|| source.to_ascii_lowercase()),
+            text: source.to_string(),
+        }
     }
-    haystack
-        .windows(needle_lower.len())
-        .position(|w| w.eq_ignore_ascii_case(needle_lower))
 }
 
 /// A note as indexed: its path, frontmatter fields, and outgoing links.
@@ -147,7 +155,7 @@ pub struct VaultIndex {
     /// split into lines lazily by the search), kept in sync by
     /// `insert_note`/`remove_note_entry` — the global search runs against
     /// this cache, never against the disk.
-    raw_lines: BTreeMap<PathBuf, String>,
+    raw_lines: BTreeMap<PathBuf, RawText>,
 }
 
 impl VaultIndex {
@@ -295,14 +303,61 @@ impl VaultIndex {
         }
         let mut hits: Vec<SearchHit> = Vec::new();
         let ascii_needle = needle.is_ascii();
-        for (path, text) in &self.raw_lines {
-            for (index, line) in text.lines().enumerate() {
-                // Fast path: an all-ASCII line and needle fold bytewise,
-                // so positions carry over and nothing is allocated. Any
+        // A needle with a line break could match across lines in a whole-note
+        // scan, which the per-line search never does: keep those per-line.
+        let whole_note = ascii_needle && !needle.contains(['\n', '\r']);
+        let mut ascii_buf = String::new();
+        for (path, raw) in &self.raw_lines {
+            if let (true, Some(folded)) = (whole_note, &raw.folded) {
+                // One substring search over the whole (all-ASCII) note; each
+                // match is mapped back to its line, resuming on the next
+                // line so there is one hit per matching line.
+                let mut from = 0;
+                let (mut counted, mut line_idx) = (0, 0);
+                while let Some(rel) = folded[from..].find(&needle) {
+                    let pos = from + rel;
+                    let line_start = folded[..pos].rfind('\n').map_or(0, |i| i + 1);
+                    let line_end = folded[pos..].find('\n').map_or(folded.len(), |i| pos + i);
+                    line_idx += folded[counted..line_start]
+                        .bytes()
+                        .filter(|&b| b == b'\n')
+                        .count();
+                    counted = line_start;
+                    // `str::lines` drops the `\r` of a `\r\n` terminator.
+                    let content_end =
+                        if line_end < folded.len() && raw.text[..line_end].ends_with('\r') {
+                            line_end - 1
+                        } else {
+                            line_end
+                        };
+                    hits.push(SearchHit {
+                        path: path.clone(),
+                        line: line_idx,
+                        text: raw.text[line_start..content_end].to_string(),
+                        start: pos - line_start,
+                        end: pos - line_start + needle.len(),
+                    });
+                    if hits.len() > SEARCH_RESULT_CAP {
+                        hits.truncate(SEARCH_RESULT_CAP);
+                        return SearchResults { hits, capped: true };
+                    }
+                    from = line_end + 1;
+                    if from > folded.len() {
+                        break;
+                    }
+                }
+                continue;
+            }
+            for (index, line) in raw.text.lines().enumerate() {
+                // Per-line path. An all-ASCII line and needle fold bytewise
+                // into one reused buffer (no allocation per line); any
                 // non-ASCII line takes the Unicode path (it can match an
                 // ASCII needle through folding, e.g. the Kelvin sign).
                 let (start, end) = if ascii_needle && line.is_ascii() {
-                    let Some(pos) = find_ascii_ci(line.as_bytes(), needle.as_bytes()) else {
+                    ascii_buf.clear();
+                    ascii_buf.push_str(line);
+                    ascii_buf.make_ascii_lowercase();
+                    let Some(pos) = ascii_buf.find(&needle) else {
                         continue;
                     };
                     (pos, pos + needle.len())
@@ -572,7 +627,7 @@ impl VaultIndex {
         // first in the file), then body links.
         fm_links.extend(extract_wikilinks(body));
         self.raw_lines
-            .insert(path.to_path_buf(), source.to_string());
+            .insert(path.to_path_buf(), RawText::new(source));
         self.notes.insert(
             path.to_path_buf(),
             NoteMeta {
@@ -931,6 +986,38 @@ mod tests {
         let hits = index.search("kite").hits;
         assert_eq!(hits.len(), 2, "{hits:?}");
         assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "Kite");
+    }
+
+    /// The whole-note fast path (all-ASCII notes) must return exactly what
+    /// the per-line path does: same lines, texts and ranges — CRLF files,
+    /// repeated matches in one line, first/last lines, no trailing newline.
+    #[test]
+    fn whole_note_search_matches_the_per_line_search() {
+        let body = "Needle first\r\nnothing\r\n\r\nneedle needle twice\nlast NEEDLE no newline";
+        let vault = TempDir::new("vk-search-equiv");
+        write(&vault.path().join("ascii.md"), body);
+        // Same text plus one non-ASCII char forces the per-line path.
+        write(&vault.path().join("uni.md"), &format!("é\n{body}"));
+        let index = VaultIndex::build(vault.path()).unwrap();
+        let hits = index.search("needle").hits;
+        let pick = |name: &str| -> Vec<(usize, String, usize, usize)> {
+            hits.iter()
+                .filter(|h| h.path.ends_with(name))
+                .map(|h| (h.line, h.text.clone(), h.start, h.end))
+                .collect()
+        };
+        let ascii = pick("ascii.md");
+        let uni: Vec<_> = pick("uni.md")
+            .into_iter()
+            .map(|(line, text, s, e)| (line - 1, text, s, e)) // the extra first line
+            .collect();
+        assert_eq!(ascii.len(), 3, "{ascii:?}");
+        assert_eq!(ascii, uni);
+        assert_eq!(ascii[0], (0, "Needle first".to_string(), 0, 6));
+        assert_eq!(ascii[1].0, 3);
+        assert_eq!(ascii[2], (4, "last NEEDLE no newline".to_string(), 5, 11));
+        // A needle spanning a line break never matches across lines.
+        assert!(index.search("first\nnothing").hits.is_empty());
     }
 
     #[test]

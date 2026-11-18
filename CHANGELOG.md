@@ -22,8 +22,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   engine field missing from the list.
 - Performance: only the visible slice of a note is cloned per frame; a watch
   tick reindexes all changed notes with one derived-state rebuild; syntect
-  assets load once per process (theme cycling is instant); search avoids
-  per-line allocation; path-style link resolution is a map lookup; base column
+  assets load once per process (theme cycling is instant); global search
+  scans all-ASCII notes with one substring search (~5x faster on a 3,000-note
+  vault, for ~10% more memory); path-style link resolution is a map lookup; base column
   widths are cached; sidebar scroll bookkeeping walks the tree once.
 - Package renamed `app` → `frond` (`cargo run -p frond`); navigation history is
   capped at 500 entries; one shared vault listing implementation for the
