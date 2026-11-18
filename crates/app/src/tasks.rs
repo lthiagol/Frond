@@ -141,10 +141,7 @@ pub fn apply_task_styles(
                 span.content = "◐ ".into();
             }
             if focused {
-                span.style = span
-                    .style
-                    .bg(colors.focus_bg)
-                    .add_modifier(ratatui::style::Modifier::BOLD);
+                span.style = colors.focus(span.style);
             }
         });
     }
@@ -272,7 +269,7 @@ mod tests {
         assert!(
             spans
                 .iter()
-                .any(|s| s.style.bg == Some(LinkColors::default().focus_bg)
+                .any(|s| s.style.fg == Some(LinkColors::default().focus_fg)
                     && s.content.starts_with('☐')),
             "focused checkbox highlighted"
         );
@@ -280,7 +277,7 @@ mod tests {
         assert!(
             !spans0
                 .iter()
-                .any(|s| s.style.bg == Some(LinkColors::default().focus_bg)),
+                .any(|s| s.style.fg == Some(LinkColors::default().focus_fg)),
             "the other checkbox is not highlighted"
         );
     }

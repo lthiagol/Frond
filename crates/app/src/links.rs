@@ -246,25 +246,41 @@ pub fn build_rendered_links(
     links
 }
 
-/// Link/checkbox state colors, derived from the active [`UiTheme`] roles so
-/// they stay legible on every theme (including light ones): unresolved
-/// links reuse the dimmed role, ambiguous ones the warning role, and the
-/// focus highlight (links and checkboxes, tasks.rs) the selection
-/// background.
+/// Link/checkbox state colors, derived from the active [`UiTheme`] so they
+/// stay legible on every theme (checked per theme with a WCAG contrast
+/// table — see the history of this file):
+/// - ambiguous links use the warning role (`status_dirty_fg`);
+/// - unresolved links keep the link's own colour, struck through and dimmed
+///   (no separate colour: the dimmed UI role is too faint on light themes);
+/// - the focus highlight (links and checkboxes, tasks.rs) is inverse video:
+///   the span's own colour becomes the background and the content
+///   background the text, so it is exactly as legible as the text itself.
+///   A selection-style background was tried and rejected: the selection
+///   colour is usually the same accent as the link colour (contrast ~1.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LinkColors {
-    pub unresolved_fg: Color,
     pub ambiguous_fg: Color,
-    pub focus_bg: Color,
+    /// Text colour of a focused span (the content background).
+    pub focus_fg: Color,
+    /// Focus background for a span that has no colour of its own.
+    pub focus_fallback_bg: Color,
 }
 
 impl LinkColors {
     pub fn from_ui(ui: UiTheme) -> Self {
         Self {
-            unresolved_fg: ui.dimmed_fg,
             ambiguous_fg: ui.status_dirty_fg,
-            focus_bg: ui.selection_bg,
+            focus_fg: ui.content_bg,
+            focus_fallback_bg: ui.sidebar_border_focused,
         }
+    }
+
+    /// The focused version of `style`: inverse of the span's own colours.
+    pub fn focus(self, style: Style) -> Style {
+        style
+            .bg(style.fg.unwrap_or(self.focus_fallback_bg))
+            .fg(self.focus_fg)
+            .add_modifier(Modifier::BOLD)
     }
 }
 
@@ -281,9 +297,7 @@ fn state_style(state: &LinkState, base: Style, colors: LinkColors) -> Style {
     match state {
         // Resolved: keep the engine's link styling.
         LinkState::Resolved(_) => base,
-        LinkState::NotFound => base
-            .fg(colors.unresolved_fg)
-            .add_modifier(Modifier::CROSSED_OUT),
+        LinkState::NotFound => base.add_modifier(Modifier::CROSSED_OUT | Modifier::DIM),
         // Ambiguous after the hint: warning color.
         LinkState::Ambiguous(_) => base.fg(colors.ambiguous_fg),
     }
@@ -309,7 +323,7 @@ pub fn apply_link_styles(
                     None => style,
                 };
                 if focused {
-                    style = style.bg(colors.focus_bg).add_modifier(Modifier::BOLD);
+                    style = colors.focus(style);
                 }
                 style
             });
@@ -521,8 +535,8 @@ mod tests {
         }];
         apply_link_styles(std::slice::from_mut(&mut line), &links, None, colors);
         let style = span_style(&line, 1);
-        assert_eq!(style.fg, Some(colors.unresolved_fg));
         assert!(style.add_modifier.contains(Modifier::CROSSED_OUT));
+        assert!(style.add_modifier.contains(Modifier::DIM));
     }
 
     #[test]
@@ -547,7 +561,9 @@ mod tests {
         // against a fresh copy.)
         let mut line = pristine.clone();
         apply_link_styles(std::slice::from_mut(&mut line), &links, Some(0), colors);
-        assert_eq!(span_style(&line, 1).bg, Some(colors.focus_bg));
+        let focused = span_style(&line, 1);
+        assert_eq!(focused.fg, Some(colors.focus_fg), "inverse video text");
+        assert!(focused.bg.is_some(), "own colour becomes the background");
         // Unfocused: plain engine style.
         let mut line = pristine.clone();
         apply_link_styles(std::slice::from_mut(&mut line), &links, None, colors);

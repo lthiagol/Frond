@@ -7,8 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Fixed
 - A wikilink with a non-ASCII target (`[[ééé]]`) no longer panics the index
   build (and with it the whole app at startup).
-- Unresolved/ambiguous link colours, the focus highlight and the status-glyph
-  colours now follow the active theme instead of fixed ANSI colours.
+- Link, checkbox and status-glyph states no longer use fixed ANSI colours:
+  ambiguous links and status glyphs follow the active theme's roles, unresolved
+  links are struck through and dimmed in their own colour, and the focused
+  link/checkbox is inverse video (legible on every theme, light ones included;
+  a contrast test covers all built-in themes).
 - Atomic-write temp files (task toggle, session save) are pid/counter-named so
   concurrent instances cannot clobber each other.
 
