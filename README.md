@@ -164,6 +164,11 @@ make smoke      # pty smoke suites (runs with `uv run --with pyte`)
 make clean      # remove build artifacts
 ```
 
+The targets use the `cargo` on your `PATH`, falling back to
+`~/.cargo/bin/cargo` (rustup's default) when `PATH` does not have it.
+Override it with `make CARGO=/path/to/cargo <target>` or an exported
+`CARGO`.
+
 `SPEC.md` is the design reference; `CHANGELOG.md` lists releases.
 
 ## Acknowledgments

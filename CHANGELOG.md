@@ -19,6 +19,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   blank gap.
 
 ### Changed
+- The Makefile finds `cargo` on the `PATH` and falls back to
+  `~/.cargo/bin/cargo` (rustup's default), so every target — `make run`
+  included — works in a shell whose `PATH` lacks it. Override with
+  `make CARGO=... <target>`.
 - `SPEC.md` reconciled with the code: the status bar's segments (the status
   badge and the tags are *not* on it), the path label rules (the file name,
   never the full path), the vault watcher (poll-based, not notify-based),
