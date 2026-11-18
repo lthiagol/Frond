@@ -1652,3 +1652,69 @@ fn help_dims_background_and_keeps_popup_crisp() {
         }
     }
 }
+
+// --- the quick note switcher (Ctrl+P) --------------------------------------
+
+#[test]
+fn quick_switcher_renders_the_prompt_the_matches_and_the_footer() {
+    let vault_dir = TempDir::new("ui-quick");
+    std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
+    std::fs::create_dir_all(vault_dir.path().join("sub")).unwrap();
+    std::fs::write(vault_dir.path().join("sub").join("beta.md"), "beta\n").unwrap();
+    let file = ui_viewer("ui-quick.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_quick();
+    assert!(app.quick.open);
+    app.quick.push_char('b');
+    let screen = render(&mut app);
+    assert!(
+        screen.contains(">b▏"),
+        "the prompt shows the query: {screen}"
+    );
+    assert!(screen.contains("beta.md"), "the matching note is listed");
+    assert!(screen.contains("jump:"), "the popup title shows the count");
+    assert!(
+        screen.contains("↑/↓ move · Enter open · Esc close"),
+        "the footer documents the keys: {screen}"
+    );
+}
+
+#[test]
+fn quick_switcher_reports_no_matches() {
+    let vault_dir = TempDir::new("ui-quick-none");
+    std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
+    let file = ui_viewer("ui-quick-none.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_quick();
+    app.quick.push_char('z');
+    app.quick.push_char('z');
+    app.quick.push_char('z');
+    let screen = render(&mut app);
+    assert!(screen.contains("no matches"), "{screen}");
+}
+
+#[test]
+fn quick_switcher_highlights_the_matched_characters() {
+    let vault_dir = TempDir::new("ui-quick-hl");
+    std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
+    let file = ui_viewer("ui-quick-hl.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_quick();
+    app.quick.push_char('a');
+    app.quick.push_char('l');
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    // The popup is 70 wide, centered: x = 15. The result row is the
+    // second inner row (the prompt is the first).
+    let popup = crate::quick::popup_geometry(Rect::new(0, 0, 100, 24), app.quick.items.len());
+    let row = popup.y + 2;
+    // The label is `alpha.md`; the match covers `al` (columns 16..18).
+    let matched_bg = buffer[(popup.x + 1, row)].bg;
+    let unmatched_bg = buffer[(popup.x + 5, row)].bg;
+    assert_ne!(
+        matched_bg, unmatched_bg,
+        "the matched characters are highlighted differently"
+    );
+}

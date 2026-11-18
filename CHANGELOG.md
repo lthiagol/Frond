@@ -4,6 +4,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 
 ## [Unreleased]
 
+### Added
+- **Quick switcher (`Ctrl+P`)**: a modal popup that fuzzy-matches the typed
+  query against the vault's notes and opens the selected one. The query
+  filters live (no Enter needed); the match is a case-insensitive
+  subsequence match over the note's path and file name (a file-name match
+  wins, so `alpha` surfaces `alpha.md` before `archive/alpha-notes.md`).
+  `↑`/`↓` move the selection, `Enter` opens the note through the normal
+  navigation stack, `Esc` closes.
+
 ### Fixed
 - The mouse-wheel smoke check compares the whole body text instead of a single
   row, so a scroll is no longer missed when the sampled row happens to be a

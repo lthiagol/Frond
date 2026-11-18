@@ -107,6 +107,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `Backspace` / `Ctrl+O` | Back / forward in the navigation stack (scroll restored) |
 | `b` | Toggle backlinks panel |
 | `s` | Global vault search (Enter opens the hit line) |
+| `Ctrl+P` | Quick switcher: fuzzy jump to a note by name (Enter opens it) |
 | `u` | Sync status refresh (also auto on watch events) |
 | `v` / `1`–`9` | Switch table view while a `.base` file is open |
 | `w` | Toggle watch mode (content pane) |
@@ -186,6 +187,34 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   3 s, cleared by the poll tick. Errors (red) win over them.
 - Keyboard hints (`Tab sidebar · ⇧T theme · ? help`) sit at the right edge
   only when they fit whole, and are hidden while a message is shown.
+
+## Quick switcher (`Ctrl+P`)
+
+A modal popup that fuzzy-matches the typed query against the vault's
+notes and opens the selected one. It is the "jump to a note by name"
+counterpart to the global search (`s`): the search greps note *content*,
+the switcher matches note *paths*.
+
+- `Ctrl+P` opens the popup over every indexed note (an empty query lists
+  them all, ranked alphabetically); typing filters the list live — no
+  Enter needed, the matches update on every keystroke.
+- The match is a case-insensitive **subsequence** match (the query's
+  characters appear in the path in order, not necessarily adjacent), the
+  way every other fuzzy finder works. Two haystacks are tried per note:
+  the whole vault-relative path and the bare file name; a match inside the
+  file name wins, so typing `alpha` surfaces `alpha.md` before
+  `archive/alpha-notes.md`.
+- The scoring rewards contiguous matches, word boundaries (path
+  separators, dashes, camelCase humps), a substring match and an early
+  start; the matched characters are highlighted in the result row.
+- `↑`/`↓` (or `j`/`k`) move the selection, `Enter` opens the selected note
+  through the normal navigation stack (so `Backspace` returns to the
+  previous note), `Esc` closes the popup. A click selects a row; a second
+  click on the selected row opens it; the wheel over the popup moves the
+  selection.
+- The popup is modal: typed characters go into the query and never reach
+  the app (a typed `q` is a query character, not a quit). `Ctrl+C` still
+  quits.
 
 ## Guarded writes (post-v1 loop 4)
 

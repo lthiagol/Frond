@@ -199,6 +199,22 @@ def sidebar_row(needle):
     return None
 
 
+def popup_result_rows():
+    """The result rows of the open quick-switcher popup (between the query
+    prompt and the footer). The sidebar still lists every note, so the
+    checks must look at the popup only."""
+    prompt = footer = None
+    for y in range(ROWS):
+        text = row(y)
+        if ">▏" in text or ">b▏" in text:
+            prompt = y
+        if "↑/↓ move" in text:
+            footer = y
+    if prompt is None or footer is None:
+        return ""
+    return "\n".join(row(y) for y in range(prompt + 1, footer))
+
+
 def click(col, r):
     # SGR mouse encoding (SGR 1006, crossterm default): press + release,
     # button 0 = left, 1-based coordinates.
@@ -316,6 +332,27 @@ check(
     f"the dark theme really applied (heading fg {DARK_HEADING})",
 )
 
+# --- the quick switcher (Ctrl+P) -------------------------------------------
+send("\x10")  # Ctrl+P
+pump(0.5)
+check("jump:" in body_text(), "Ctrl+P opened the quick switcher")
+check(">▏" in body_text(), "the switcher shows an empty query prompt")
+check("alpha.md" in body_text(), "every note is listed before typing")
+
+send("b")
+pump(0.4)
+check(">b▏" in body_text(), "the query is typed into the prompt")
+results = popup_result_rows()
+check("beta.md" in results, "the matching note is listed")
+check("alpha.md" not in results, "the non-matching note is filtered out")
+
+send("\x1b[A")  # Up
+pump(0.3)
+send("\r")  # Enter opens the selected note
+pump(0.8)
+check("beta.md" in status_line(), "Enter opened the selected note")
+check("Beta" in body_text(), "the opened note is rendered")
+
 # --- .base tables in the sidebar tree -------------------------------------
 check("tasks.base" in body_text(), "the .base file is a tree row")
 check(
@@ -372,7 +409,7 @@ check(
 # --- clicking the .base row opens the table too ---------------------------
 send("\x7f")  # Backspace -> back to the note
 pump(0.8)
-check("Smoke Heading" in body_text(), "Backspace returned to the note")
+check("beta.md" in status_line(), "Backspace returned to the note")
 base_row = sidebar_row("tasks.base")
 check(base_row is not None, "the .base row is still visible")
 if base_row is not None:

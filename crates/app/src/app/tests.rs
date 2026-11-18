@@ -3280,3 +3280,133 @@ fn failed_clipboard_write_becomes_an_error() {
     let err = app.viewer.last_error.clone().expect("error surfaced");
     assert!(err.starts_with("copy failed"), "{err}");
 }
+
+// --- the quick note switcher (Ctrl+P) --------------------------------------
+
+/// `Ctrl+P` opens the switcher over every note in the vault; typing
+/// filters the list live.
+#[test]
+fn ctrl_p_opens_the_switcher_and_filters_live() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    assert_eq!(app.handle_key(ctrl(KeyCode::Char('p'))), Flow::Continue);
+    assert!(app.quick.open, "the switcher is open");
+    assert_eq!(
+        app.quick.items.len(),
+        3,
+        "every note is listed before the query"
+    );
+
+    app.handle_key(key(KeyCode::Char('b')));
+    assert_eq!(app.quick.query, "b");
+    // `b` matches `sub/b.md` (in the file name) and `sub/c.md` (the
+    // folder name contains a `b`); the file-name match ranks first.
+    assert_eq!(app.quick.items.len(), 2);
+    assert_eq!(app.quick.items[0].label, "sub/b.md");
+}
+
+/// Enter opens the selected note through the normal nav stack, so
+/// Backspace returns to the previous one.
+#[test]
+fn enter_in_the_switcher_opens_the_note_and_pushes_history() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(key(KeyCode::Char('b')));
+    assert_eq!(app.quick.items[0].label, "sub/b.md");
+    app.handle_key(key(KeyCode::Enter));
+
+    assert!(!app.quick.open, "the popup closes after the open");
+    assert_eq!(app.focus, Focus::Content);
+    assert!(
+        app.current_path().ends_with("sub/b.md"),
+        "the matched note is open: {:?}",
+        app.current_path()
+    );
+    // Backspace returns to `a.md` (the nav stack got the push).
+    app.handle_key(key(KeyCode::Backspace));
+    assert!(
+        app.current_path().ends_with("a.md"),
+        "{:?}",
+        app.current_path()
+    );
+}
+
+/// The switcher is modal: a typed `q` goes into the query, it never quits.
+#[test]
+fn the_switcher_is_modal() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.handle_key(ctrl(KeyCode::Char('p')));
+    assert_eq!(app.handle_key(key(KeyCode::Char('q'))), Flow::Continue);
+    assert!(app.quick.open, "still open");
+    assert_eq!(app.quick.query, "q");
+    // Ctrl+C still quits from the popup.
+    assert_eq!(app.handle_key(ctrl(KeyCode::Char('c'))), Flow::Quit);
+}
+
+/// Esc closes the switcher without opening anything.
+#[test]
+fn escape_closes_the_switcher() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    let before = app.current_path();
+    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(key(KeyCode::Esc));
+    assert!(!app.quick.open);
+    assert_eq!(app.current_path(), before, "nothing was opened");
+}
+
+/// `↑`/`↓` move the selection; the selection is clamped to the list.
+#[test]
+fn the_switcher_selection_moves_with_the_arrows() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.handle_key(ctrl(KeyCode::Char('p')));
+    assert_eq!(app.quick.selected, 0);
+    app.handle_key(key(KeyCode::Down));
+    assert_eq!(app.quick.selected, 1);
+    app.handle_key(key(KeyCode::Up));
+    assert_eq!(app.quick.selected, 0);
+    app.handle_key(key(KeyCode::Up));
+    assert_eq!(app.quick.selected, 0, "clamped at the top");
+    app.handle_key(key(KeyCode::PageDown));
+    assert_eq!(app.quick.selected, 2, "a page down jumps to the last item");
+}
+
+/// Without a vault index there is nothing to jump to: `Ctrl+P` is inert.
+#[test]
+fn ctrl_p_without_a_vault_does_nothing() {
+    let file = TempFile::new("app-noquick.md", "MAIN\n");
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let mut app = App::new(viewer, None, None).unwrap();
+    app.handle_key(ctrl(KeyCode::Char('p')));
+    assert!(!app.quick.open);
+}
+
+/// A click on a switcher row selects it; a second click on the selected
+/// row opens it.
+#[test]
+fn clicking_a_switcher_row_selects_then_opens_it() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.handle_key(ctrl(KeyCode::Char('p')));
+    // The popup geometry the renderer records: 70 wide, centered.
+    let area = Rect::new(0, 0, 100, 24);
+    app.layout.quick_area = Some(crate::quick::popup_geometry(area, app.quick.items.len()));
+    let popup = app.layout.quick_area.unwrap();
+    // First inner row is the prompt, the rows start one below it.
+    let row = popup.y + 2;
+
+    app.handle_click(popup.x + 2, row + 1);
+    assert_eq!(app.quick.selected, 1, "the clicked row is selected");
+    assert!(app.quick.open, "a first click only selects");
+    app.handle_click(popup.x + 2, row + 1);
+    assert!(!app.quick.open, "clicking the selected row opens it");
+    assert!(
+        app.current_path().ends_with("sub/b.md"),
+        "the clicked row is open: {:?}",
+        app.current_path()
+    );
+}

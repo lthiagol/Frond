@@ -238,6 +238,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let index = app.index.as_ref().map(|i| i.borrow());
         draw_disambiguation(f, area, disambiguation, ui, index.as_deref());
     }
+    if app.quick.open {
+        // Record the popup geometry for the mouse handlers before the
+        // index borrow (which would block the `&mut` access).
+        let popup = crate::quick::popup_geometry(area, app.quick.items.len());
+        app.layout.quick_area = Some(popup);
+        draw_quick(f, area, app, ui);
+    } else {
+        app.layout.quick_area = None;
+    }
     if app.search.open {
         // Record the popup geometry for the mouse handlers before the
         // index borrow (which would block the `&mut` access).
@@ -735,6 +744,124 @@ fn draw_disambiguation(
     );
 }
 
+/// Quick note switcher (`Ctrl+P`): the query prompt on top, the fuzzy
+/// matches below (the matched characters highlighted), a footer. A
+/// stateless scroll window keeps the selection visible when there are more
+/// matches than rows. The popup rectangle was recorded into
+/// `app.layout.quick_area` by `draw` (the mouse handlers map clicks/wheels
+/// through it, using the same row math as below).
+fn draw_quick(f: &mut Frame, area: Rect, app: &App, ui: UiTheme) {
+    let popup = app
+        .layout
+        .quick_area
+        .unwrap_or_else(|| crate::quick::popup_geometry(area, app.quick.items.len()));
+    let inner_width = popup.width.saturating_sub(2) as usize;
+    // borders (2) + prompt (1) + footer (1).
+    let list_rows = popup.height.saturating_sub(4).max(1) as usize;
+
+    let mut lines: Vec<Line<'static>> =
+        vec![Line::from(Span::raw(format!(">{}▏", app.quick.query)))];
+    if app.quick.items.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no matches",
+            Style::new().fg(ui.popup_dimmed_fg),
+        )));
+    } else {
+        // Stateless scroll window: the selection always visible.
+        let start = app
+            .quick
+            .selected
+            .saturating_sub(list_rows.saturating_sub(1));
+        lines.extend(
+            app.quick
+                .items
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(list_rows)
+                .map(|(i, item)| {
+                    let selected = i == app.quick.selected;
+                    quick_item_line(item, inner_width, selected, ui)
+                }),
+        );
+    }
+    lines.push(Line::from(Span::styled(
+        "↑/↓ move · Enter open · Esc close",
+        Style::new().fg(ui.popup_dimmed_fg),
+    )));
+
+    let title = format!(" jump: {} ", app.quick.items.len());
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(lines)
+            .style(Style::new().bg(ui.content_bg))
+            .block(
+                Block::new()
+                    .borders(Borders::ALL)
+                    .border_style(Style::new().fg(ui.popup_border_fg))
+                    .title(title),
+            ),
+        popup,
+    );
+}
+
+/// One quick-switcher row: the note's vault-relative path with the
+/// matched characters highlighted.
+fn quick_item_line(
+    item: &crate::quick::QuickItem,
+    inner_width: usize,
+    selected: bool,
+    ui: UiTheme,
+) -> Line<'static> {
+    let match_style = Style::new().fg(ui.popup_match_fg).bg(ui.popup_match_bg);
+    let chars: Vec<char> = item.label.chars().collect();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut run_match = false;
+    let mut run = String::new();
+    for (i, ch) in chars.iter().enumerate() {
+        let is_match = item.positions.contains(&i);
+        if is_match != run_match {
+            if !run.is_empty() {
+                spans.push(Span::styled(
+                    std::mem::take(&mut run),
+                    if run_match { match_style } else { Style::new() },
+                ));
+            }
+            run_match = is_match;
+        }
+        run.push(*ch);
+    }
+    if !run.is_empty() {
+        spans.push(Span::styled(
+            run,
+            if run_match { match_style } else { Style::new() },
+        ));
+    }
+    // Truncate to the popup width (keeping whole characters).
+    let mut used = 0usize;
+    let mut truncated: Vec<Span<'static>> = Vec::new();
+    for span in spans {
+        let w: usize = UnicodeWidthStr::width(span.content.as_ref());
+        if used + w > inner_width {
+            break;
+        }
+        used += w;
+        truncated.push(span);
+    }
+    let mut line = Line::from(truncated);
+    if selected {
+        // The selection tint replaces the background of the *unmatched*
+        // spans only: the matched characters keep the match highlight (the
+        // same rule the search popup uses).
+        for span in &mut line.spans {
+            if span.style.bg != Some(ui.popup_match_bg) {
+                span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
+            }
+        }
+    }
+    line
+}
+
 /// Global search popup (`s`): input prompt or results list, depending on
 /// the search state's mode. Results rows are `relpath:line snippet` with
 /// the match highlighted; a stateless scroll window keeps the selection
@@ -1104,7 +1231,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
                 "focus sidebar / content (l expands, h collapses)",
             ),
             ("b", "toggle backlinks panel"),
-            ("s", "global search (Enter opens hit line)"),
+            ("s / Ctrl+P", "global search · quick note switcher"),
             ("Backspace / Ctrl+O", "back / forward (scroll restored)"),
         ],
     ),

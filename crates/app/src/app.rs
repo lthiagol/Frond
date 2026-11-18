@@ -117,6 +117,9 @@ pub struct Layout {
     /// The search popup (`None` while closed): routes result-row clicks and
     /// wheels by position.
     pub search_area: Option<Rect>,
+    /// The quick-switcher popup (`None` while closed): routes result-row
+    /// clicks and wheels by position.
+    pub quick_area: Option<Rect>,
     /// The status bar's note-name segment (`None` when no name segment is
     /// drawn): routes the copy-path click.
     pub status_name_area: Option<Rect>,
@@ -146,6 +149,8 @@ pub struct App {
     pub disambiguation: Option<Disambiguation>,
     /// Global search popup (`s`): input prompt + results.
     pub search: SearchState,
+    /// Quick note switcher (`Ctrl+P`): fuzzy note jump over the index.
+    pub quick: crate::quick::QuickState,
     /// Last read-only git sync status (`None` = unavailable: no git, not
     /// a repository, or every command failed — the status bar shows
     /// nothing in that case).
@@ -250,6 +255,7 @@ impl App {
             backlink_viewport: 8,
             disambiguation: None,
             search: SearchState::default(),
+            quick: crate::quick::QuickState::default(),
             git: None,
             watcher,
             mouse_capture: true,
@@ -883,6 +889,12 @@ impl App {
     /// sidebar is visible its column owns the click (no click-through
     /// into the note viewport, which shares the same screen rows).
     pub fn handle_click(&mut self, col: u16, row: u16) {
+        // The quick switcher is position-routed (result rows are
+        // click-selectable); clicks elsewhere stay inert while it is open.
+        if self.quick.open {
+            self.quick_click(col, row);
+            return;
+        }
         // The search popup is position-routed (result rows are
         // click-selectable); clicks elsewhere stay inert while it is open.
         if self.search.open {
@@ -990,6 +1002,39 @@ impl App {
             if let Err(err) = self.open_note(&path) {
                 self.viewer.last_error = Some(format!("open failed: {err}"));
             }
+        }
+    }
+
+    /// A click inside the quick switcher: a click on a result row selects
+    /// it, and clicking the already-selected row opens it (the keyboard's
+    /// Enter semantics). The prompt row, the footer and clicks outside the
+    /// popup are no-ops.
+    fn quick_click(&mut self, col: u16, row: u16) {
+        let Some(popup) = self.layout.quick_area else {
+            return;
+        };
+        if !point_in_rect(col, row, popup) {
+            return;
+        }
+        // The prompt occupies the first inner row; the footer the last.
+        let first_row = popup.y + 2;
+        let last_row = popup.y + popup.height.saturating_sub(2);
+        if row < first_row || row >= last_row {
+            return;
+        }
+        let list_rows = popup.height.saturating_sub(4).max(1) as usize;
+        let start = self
+            .quick
+            .selected
+            .saturating_sub(list_rows.saturating_sub(1));
+        let index = start + (row - first_row) as usize;
+        if index >= self.quick.items.len() {
+            return;
+        }
+        if index == self.quick.selected {
+            self.open_quick_selection();
+        } else {
+            self.quick.selected = index;
         }
     }
 
@@ -1428,13 +1473,17 @@ impl App {
         Flow::Continue
     }
 
-    /// Handles one key press. The search popup (if open) gets the key
-    /// first; then the disambiguation popup; then any key closes the help
-    /// popup; `q` and Ctrl+C quit; everything else is focus-dependent.
+    /// Handles one key press. The quick switcher (if open) gets the key
+    /// first; then the search popup; then the disambiguation popup; then
+    /// any key closes the help popup; `q` and Ctrl+C quit; everything
+    /// else is focus-dependent.
     pub fn handle_key(&mut self, key: KeyEvent) -> Flow {
         // "Plain" keys: no modifiers, or Shift only (Shift is how terminals
         // deliver uppercase letters like `G`).
         let plain = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
+        if self.quick.open {
+            return self.handle_quick_key(key);
+        }
         if self.search.open {
             return self.handle_search_key(key);
         }
@@ -1459,6 +1508,7 @@ impl App {
             KeyCode::Char('<') if plain => self.narrow_sidebar(),
             KeyCode::Char('b') if plain => self.toggle_backlinks(),
             KeyCode::Char('s') if plain && self.index.is_some() => self.search.open_input(),
+            KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => self.open_quick(),
             KeyCode::Char('u') if plain => self.refresh_git(true),
             // While a `.base` table is displayed the viewer's note is
             // invisible: viewer-focus actions (x/X link focusing, Enter
@@ -1581,6 +1631,14 @@ impl App {
     /// behavior, kept via [`Self::handle_wheel`]). Help/disambiguation
     /// popups gate the wheel like clicks.
     pub fn handle_wheel_at(&mut self, col: u16, row: u16, down: bool) {
+        if self.quick.open {
+            if let Some(popup) = self.layout.quick_area {
+                if point_in_rect(col, row, popup) {
+                    self.quick.move_selection(if down { 3 } else { -3 });
+                }
+            }
+            return;
+        }
         if self.search.open {
             if let Some(popup) = self.layout.search_area {
                 if point_in_rect(col, row, popup) {
@@ -1601,6 +1659,60 @@ impl App {
             }
         }
         self.handle_wheel(down);
+    }
+
+    /// `Ctrl+P`: opens the quick note switcher over the vault index. The
+    /// popup lists every note (fuzzy-matched against the typed query) and
+    /// `Enter` opens the selected one through the normal navigation stack.
+    pub fn open_quick(&mut self) {
+        let Some(index) = self.index.as_ref() else {
+            return; // no vault: nothing to jump to
+        };
+        let candidates: Vec<crate::quick::QuickCandidate> = index
+            .borrow()
+            .notes()
+            .map(crate::quick::QuickCandidate::from_note)
+            .collect();
+        self.quick.open(candidates);
+    }
+
+    /// Keys while the quick switcher is open (modal: typed characters go
+    /// into the query, never into the app). Ctrl+C still quits.
+    fn handle_quick_key(&mut self, key: KeyEvent) -> Flow {
+        let plain = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
+        match key.code {
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => return Flow::Quit,
+            KeyCode::Esc => self.quick.close(),
+            KeyCode::Enter if plain => self.open_quick_selection(),
+            KeyCode::Backspace if plain => self.quick.backspace(),
+            KeyCode::Char('j') | KeyCode::Down if plain => self.quick.move_selection(1),
+            KeyCode::Char('k') | KeyCode::Up if plain => self.quick.move_selection(-1),
+            KeyCode::PageDown if plain => {
+                self.quick.move_selection(self.viewer.page_step() as isize)
+            }
+            KeyCode::PageUp if plain => self
+                .quick
+                .move_selection(-(self.viewer.page_step() as isize)),
+            KeyCode::Char(c) if plain => self.quick.push_char(c),
+            _ => {}
+        }
+        Flow::Continue
+    }
+
+    /// Enter on a quick-switcher row: opens that note through the normal
+    /// navigation stack (so `Backspace` returns to the previous note) and
+    /// closes the popup. A failed open surfaces the error and keeps the
+    /// popup open.
+    fn open_quick_selection(&mut self) {
+        let Some(item) = self.quick.selected_item().cloned() else {
+            return;
+        };
+        if let Err(err) = self.open_note(&item.path) {
+            self.viewer.last_error = Some(format!("open failed: {err}"));
+            return;
+        }
+        self.quick.close();
+        self.focus = Focus::Content;
     }
 
     /// Keys while the search popup is open (it is modal: nothing else
