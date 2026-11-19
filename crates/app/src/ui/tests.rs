@@ -1048,6 +1048,46 @@ fn outline_scrollbar_only_when_the_headings_overflow() {
     );
 }
 
+/// A `.base` table in the content pane has no outline: the panel and the
+/// status label both take their rows from the one source.
+#[test]
+fn outline_over_a_base_table_shows_no_headings() {
+    let vault_dir = TempDir::new("ui-outline-base");
+    std::fs::write(vault_dir.path().join("other.md"), "# Other\n\nbody\n").unwrap();
+    std::fs::write(
+        vault_dir.path().join("tbl.base"),
+        "views:\n  - type: table\n    name: Solo\n    order:\n      - file.name\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-outline-base.md", "# Open\n\nbody\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let screen = render(&mut app);
+    assert!(
+        screen.contains("Open"),
+        "precondition: the note's heading is listed"
+    );
+
+    app.open_note(&vault_dir.path().join("tbl.base")).unwrap();
+    assert!(app.base.is_some(), "precondition: the table is open");
+    // Focus the sidebar so the status bar carries the outline's label.
+    app.handle_key(key(KeyCode::Char('h')));
+    let screen = render(&mut app);
+    assert!(
+        screen.contains("no headings"),
+        "the panel's empty state: {screen}"
+    );
+    assert!(
+        !screen.contains("Open"),
+        "the hidden note's heading is not listed: {screen}"
+    );
+    assert!(
+        status_row(&screen).contains("(no headings)"),
+        "the status label follows the empty outline: {}",
+        status_row(&screen)
+    );
+}
+
 #[test]
 fn disambiguation_popup_renders_candidates() {
     let vault_dir = TempDir::new("ui-disamb");

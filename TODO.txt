@@ -7,10 +7,16 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 11 is closed and committed. The next unit is 12 (the outline's two
-  follow-ups); nothing is in flight.
+  Unit 12 is closed and committed. The next unit is 13 (the outline's
+  last three polish items); nothing is in flight.
 
 DONE
+  - Unit 12 — the outline's two follow-ups: the "a `.base` table means no
+    outline rows" rule now lives in `app::outline_rows` and both `ui.rs`
+    sites take their rows from it, and a session saved while the outline
+    was showing is pinned to restore to the tree or the tag view.
+    Reviewed clean on both axes (round 1: 0 blocking, 4 low — one of them
+    a gap in the orchestrator's spec wording, fixed in the same commit).
   - Unit 11 — the outline (`o`): the sidebar's third view over the tree
     and the tags, listing the open note's headings indented by level,
     with `j`/`k`, an `Enter`/click jump to the heading, the `no headings`
@@ -101,14 +107,15 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 12: the outline's two follow-ups. The rule "a `.base` table in
-      the pane means no outline rows" is written out three times in two
-      modules (`app.rs` `outline_len`, `ui.rs` twice) — `outline_len()`
-      could feed the `ui.rs` sites, so a future change to the rule (outlines
-      for tables) cannot leave the panel, the click routing and the status
-      label apart (unit 11, C1). And the session save-side mapping —
-      quitting in the outline persists the tree/tags view — has no
-      round-trip test: `session.rs` covers only "tags" (unit 11, C2).
+  - Unit 13: the outline's last three polish items. `jump_to_outline_heading`
+      still spells out the "a `.base` table means no outline rows" rule
+      inline instead of going through `app::outline_rows` — belt-and-braces
+      today, but one more site for a future change to find (unit 12, C1).
+      The tree half of the session round-trip test's restore assert is
+      vacuous — `Tree` is the default and `restore_session` has no "tree"
+      arm, so it cannot fail (C2). And the click assertion's comment
+      overstates what it pins: the jump's own guard masks a re-duplicated
+      row count (S1).
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
       recommendation is to drop it: the sidebar's scroll is a selection
@@ -116,7 +123,7 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 12 — the outline's follow-ups.
+  1. Unit 13 — the outline's last three polish items.
   2. Push `main` (18+ commits ahead of `origin/main`; the push is the
      human's call).
   3. Then the parked list.

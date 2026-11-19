@@ -326,7 +326,8 @@ last shown.
   empty state `no headings`.
 - While the sidebar is focused, the status bar shows the selected
   heading's title as the sidebar's label (the tree shows the focused
-  row's name, the tag view `#tag`).
+  row's name, the tag view `#tag`). With no heading selected the label
+  reads `(no headings)`.
 
 ## Guarded writes (post-v1 loop 4)
 

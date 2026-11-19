@@ -222,22 +222,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 index.as_deref(),
             );
         } else if app.sidebar_mode == SidebarMode::Outline {
-            // A `.base` table in the content pane is not a note: there is
-            // no outline for it (the viewer's last note is hidden).
-            let entries: &[engine::TocEntry] = if app.base.is_some() {
-                &[]
-            } else {
-                &app.viewer.toc
-            };
-            app.outline.sync(entries.len());
-            draw_outline(
-                f,
-                sidebar_rect,
-                &mut app.outline,
-                entries,
-                ui,
-                app.focus == Focus::Sidebar,
-            );
+            let focused = app.focus == Focus::Sidebar;
+            // The `.base`-table rule lives in `app::outline_rows`; split
+            // the fields so the rows and the cursor can be borrowed at once.
+            let App {
+                base,
+                viewer,
+                outline,
+                ..
+            } = app;
+            let entries = crate::app::outline_rows(base, viewer);
+            outline.sync(entries.len());
+            draw_outline(f, sidebar_rect, outline, entries, ui, focused);
         } else if let Some(sidebar) = &mut app.sidebar {
             draw_sidebar(
                 f,
@@ -1151,13 +1147,8 @@ fn status_path_label(app: &App, sidebar_focused: bool) -> String {
         }
         SidebarMode::Outline => {
             // The selected heading's title; a `.base` table in the content
-            // pane has no outline.
-            let entries = if app.base.is_some() {
-                &[][..]
-            } else {
-                &app.viewer.toc[..]
-            };
-            entries
+            // pane has no outline (see `app::outline_rows`).
+            crate::app::outline_rows(&app.base, &app.viewer)
                 .get(app.outline.selected)
                 .map(|entry| entry.title.clone())
                 .unwrap_or_else(|| "(no headings)".to_string())

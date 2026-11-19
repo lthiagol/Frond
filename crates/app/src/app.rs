@@ -609,15 +609,10 @@ impl App {
         }
     }
 
-    /// The outline's row count: the open note's heading table. A `.base`
-    /// table in the content pane is not a note, so it has no outline (the
-    /// viewer's last note is hidden behind the table).
+    /// The outline's row count, from the one place that decides whether
+    /// there are rows at all (see [`outline_rows`]).
     fn outline_len(&self) -> usize {
-        if self.base.is_some() {
-            0
-        } else {
-            self.viewer.toc.len()
-        }
+        outline_rows(&self.base, &self.viewer).len()
     }
 
     /// Enter on an outline row (or a click): scroll the note to the selected
@@ -2142,6 +2137,22 @@ impl App {
                 }
             }
         }
+    }
+}
+
+/// The outline's rows for the content pane: the open note's heading table.
+/// A `.base` table in the content pane is not a note, so it has no outline
+/// (the viewer's last note is hidden behind the table). Borrows the two
+/// fields rather than `&App` so the drawer can hold these rows alongside
+/// the outline cursor.
+pub(crate) fn outline_rows<'a>(
+    base: &Option<BaseState>,
+    viewer: &'a Viewer,
+) -> &'a [engine::TocEntry] {
+    if base.is_some() {
+        &[]
+    } else {
+        &viewer.toc
     }
 }
 
