@@ -1623,6 +1623,84 @@ fn outline_with_no_headings_has_an_empty_selection() {
     assert_eq!(app.focus, Focus::Content, "l still hands over the content");
 }
 
+#[test]
+fn outline_has_no_rows_while_a_base_table_is_open() {
+    let vault_dir = outline_vault();
+    std::fs::write(
+        vault_dir.path().join("tbl.base"),
+        "views:\n  - type: table\n    name: Solo\n    order:\n      - file.name\n",
+    )
+    .unwrap();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.outline_len(), 2, "the note's headings are the rows");
+
+    app.open_note(&vault_dir.path().join("tbl.base")).unwrap();
+    assert!(app.base.is_some());
+    assert_eq!(app.outline_len(), 0, "a .base table has no outline rows");
+
+    // Click routing uses the same row count: a click where a heading row
+    // used to be has nothing to jump to in the hidden note.
+    app.viewer.scroll = 5;
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 10));
+    app.handle_click(5, 2);
+    assert_eq!(app.viewer.scroll, 5, "no jump into the hidden note");
+
+    // Back to a note: its rows return.
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    assert_eq!(app.outline_len(), 2);
+}
+
+#[test]
+fn session_saved_in_the_outline_restores_the_view_behind_it() {
+    let vault_dir = outline_vault();
+    let (_f, mut shaped) = app(&vault_dir);
+    shaped.open_note(&vault_dir.path().join("a.md")).unwrap();
+
+    // Saved over the tree: the file names the tree, not the overlay.
+    shaped.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(shaped.sidebar_mode, SidebarMode::Outline);
+    let over_tree = shaped.session_state(vault_dir.path());
+    assert_eq!(
+        over_tree.mode.as_deref(),
+        Some("tree"),
+        "the outline is never persisted"
+    );
+    let (_f2, mut fresh) = app(&vault_dir);
+    fresh.restore_session(&over_tree, vault_dir.path());
+    assert_eq!(
+        fresh.sidebar_mode,
+        SidebarMode::Tree,
+        "restored to the tree"
+    );
+
+    // Saved over the tags: that view round-trips, and `o` still returns
+    // to it from the restored outline.
+    shaped.handle_key(key(KeyCode::Char('o')));
+    shaped.handle_key(key(KeyCode::Char('t')));
+    assert_eq!(shaped.sidebar_mode, SidebarMode::Tags);
+    shaped.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(shaped.sidebar_mode, SidebarMode::Outline);
+    let over_tags = shaped.session_state(vault_dir.path());
+    assert_eq!(over_tags.mode.as_deref(), Some("tags"));
+    let (_f3, mut fresh) = app(&vault_dir);
+    fresh.restore_session(&over_tags, vault_dir.path());
+    assert_eq!(
+        fresh.sidebar_mode,
+        SidebarMode::Tags,
+        "restored to the tags"
+    );
+    fresh.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(fresh.sidebar_mode, SidebarMode::Outline);
+    fresh.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(
+        fresh.sidebar_mode,
+        SidebarMode::Tags,
+        "the tags are behind it"
+    );
+}
+
 // --- M3: status glyphs -------------------------------------------
 
 #[test]
