@@ -7,10 +7,15 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 7 is closed and committed. The next unit is 8 (the help-popup
-  geometry helper); nothing is in flight.
+  Unit 8 is closed and committed. The next unit is 9 (the help popup's
+  geometry, finished); nothing is in flight.
 
 DONE
+  - Unit 8 — the help popup's geometry lives in one helper: `help_popup`
+    carries the popup rect, the total and the visible rows, and both
+    `draw_help` and the two help tests use it, so the clamp arithmetic
+    exists once. The popup's layout, scroll range and bar are unchanged.
+    Reviewed clean on both axes (round 1: 0 blocking, 3 low).
   - Unit 7 — the assertions that stopped testing: all five "border
     intact" assertions now check the thumb (the border column holds none,
     the bar column holds one), the border-glyph coverage is restored by a
@@ -63,6 +68,10 @@ DONE
   - 0.6.1 released (2026-11-17).
 
 HAPPENED
+  - A kickoff that enumerates instances by line number misses instances:
+    unit 7's brief named four "border intact" assertions and missed a
+    fifth, because the line numbers came from a read before the previous
+    diff. Grep the tree for the pattern instead.
   - The scrollbar bug survived because the test only asserted the thumb
     moved. A test that asserts "it moved" cannot catch "it stops short" —
     assert the end positions, not the motion.
@@ -83,14 +92,18 @@ OPEN
       in the base-table narrowing test to the unit invariant
       (`all(r.end <= 97)`) — it pins the column fitter, not the scrollbar
       (unit 6, L2).
-  - Unit 8: the help test mirrors `draw_help`'s clamp arithmetic instead
-      of sharing a helper (unit 4, C2). Drift fails loudly, so it is
-      polish. It also carries unit 7's N1: the comment in
-      `base_scrollbar_narrows_the_table_one_column` claims "98 would mean
-      the table was not narrowed", but the bar overwrites column 98 at the
-      rule row, so that count is unreachable — the region assert carries
-      the not-narrowed case.
-  - Unit 9: a test that a watch reload refreshes `viewer.last_reload`:
+  - Unit 9: the help popup's geometry, finished. The refactor left
+      `draw_help` calling `help_grid(area.height)` a second time for
+      `help_body` — the work does not matter, but the drift risk undercuts
+      the "single source" the unit was about: `HelpPopup` should carry the
+      `HelpGrid` (unit 8, L1). It also carries the two comment/message
+      corrections: the narrowing test's comment says "a cell ending at the
+      bar column", but `BaseLinkRegion::end` is exclusive, so the failing
+      value is `end == 98` and `end == 97` is the passing case (L2); and
+      the assert message "the table is one column narrower" claims more
+      than the count proves — an un-narrowed table also reads 97 dashes,
+      because the bar overwrites column 98 at the rule row (L3).
+  - Unit 10: a test that a watch reload refreshes `viewer.last_reload`:
       dropping the seconds from the render time left the smoke script
       unable to prove that the render segment follows a reload, and nothing
       else pins it (unit 3, L1). `viewer.reload()` sets it
