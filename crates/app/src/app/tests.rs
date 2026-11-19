@@ -1640,11 +1640,18 @@ fn outline_has_no_rows_while_a_base_table_is_open() {
     assert!(app.base.is_some());
     assert_eq!(app.outline_len(), 0, "a .base table has no outline rows");
 
-    // Click routing uses the same row count: a click where a heading row
-    // used to be has nothing to jump to in the hidden note.
+    // Click routing takes its row count from the same helper: with no rows,
+    // a click where a heading row used to be maps to nothing, so the
+    // selection stays on the first heading. The jump's own guard would keep
+    // the scroll put either way, so the selection is what pins the mapping.
+    assert_eq!(
+        app.outline.selected, 0,
+        "precondition: the first row is selected"
+    );
     app.viewer.scroll = 5;
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 10));
     app.handle_click(5, 2);
+    assert_eq!(app.outline.selected, 0, "the click mapped to no row");
     assert_eq!(app.viewer.scroll, 5, "no jump into the hidden note");
 
     // Back to a note: its rows return.
@@ -1658,7 +1665,10 @@ fn session_saved_in_the_outline_restores_the_view_behind_it() {
     let (_f, mut shaped) = app(&vault_dir);
     shaped.open_note(&vault_dir.path().join("a.md")).unwrap();
 
-    // Saved over the tree: the file names the tree, not the overlay.
+    // Saved over the tree: the file names the tree, not the overlay. The
+    // save side is what pins this half — `Tree` is a fresh app's default and
+    // `restore_session` has no "tree" arm, so a restore assert could not
+    // fail. The tags half below round-trips for real.
     shaped.handle_key(key(KeyCode::Char('o')));
     assert_eq!(shaped.sidebar_mode, SidebarMode::Outline);
     let over_tree = shaped.session_state(vault_dir.path());
@@ -1666,13 +1676,6 @@ fn session_saved_in_the_outline_restores_the_view_behind_it() {
         over_tree.mode.as_deref(),
         Some("tree"),
         "the outline is never persisted"
-    );
-    let (_f2, mut fresh) = app(&vault_dir);
-    fresh.restore_session(&over_tree, vault_dir.path());
-    assert_eq!(
-        fresh.sidebar_mode,
-        SidebarMode::Tree,
-        "restored to the tree"
     );
 
     // Saved over the tags: that view round-trips, and `o` still returns

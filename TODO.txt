@@ -7,10 +7,17 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 12 is closed and committed. The next unit is 13 (the outline's
-  last three polish items); nothing is in flight.
+  Units 1–13 are closed and committed. **0.6.2 is tagged** (`v0.6.2`).
+  Nothing is in flight: the follow-ups are done. What is left is the
+  parked list and the push.
 
 DONE
+  - Unit 13 — the outline's last three polish items: the jump takes its
+    rows from `outline_rows` too, so the rule exists in exactly one
+    place; the vacuous tree-side restore assert is dropped with a note
+    saying why; and the click assertion now pins the outline's selection,
+    which is the thing that actually distinguishes the cases. Reviewed
+    clean on both axes (round 1: 0 blocking, 1 low).
   - Unit 12 — the outline's two follow-ups: the "a `.base` table means no
     outline rows" rule now lives in `app::outline_rows` and both `ui.rs`
     sites take their rows from it, and a session saved while the outline
@@ -107,15 +114,11 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 13: the outline's last three polish items. `jump_to_outline_heading`
-      still spells out the "a `.base` table means no outline rows" rule
-      inline instead of going through `app::outline_rows` — belt-and-braces
-      today, but one more site for a future change to find (unit 12, C1).
-      The tree half of the session round-trip test's restore assert is
-      vacuous — `Tree` is the default and `restore_session` has no "tree"
-      arm, so it cannot fail (C2). And the click assertion's comment
-      overstates what it pins: the jump's own guard masks a re-duplicated
-      row count (S1).
+  - One wording nit: the precondition assert in
+      `crates/app/src/app/tests.rs` says "the first row is selected" while
+      the pinned state has zero rows — "the selection cursor is at 0"
+      would say what is actually pinned (unit 13, S1). Fold it into the
+      next unit that touches that file.
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
       recommendation is to drop it: the sidebar's scroll is a selection
@@ -123,7 +126,8 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 13 — the outline's last three polish items.
-  2. Push `main` (18+ commits ahead of `origin/main`; the push is the
+  1. Push `main` (19+ commits ahead of `origin/main`; the push is the
      human's call).
-  3. Then the parked list.
+  2. Then the parked list, in my order of value: the interactive
+     scrollbar, the link hover preview, the regex search, the line-number
+     gutter.
