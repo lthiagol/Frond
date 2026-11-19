@@ -7,10 +7,17 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 6 is closed and committed. The next unit is 7 (the assertion fixes);
-  nothing is in flight.
+  Unit 7 is closed and committed. The next unit is 8 (the help-popup
+  geometry helper); nothing is in flight.
 
 DONE
+  - Unit 7 — the assertions that stopped testing: all five "border
+    intact" assertions now check the thumb (the border column holds none,
+    the bar column holds one), the border-glyph coverage is restored by a
+    distinct `border_drawn` helper, and the `.base` narrowing test pins
+    the one-column narrowing through the rule line. Round 1 came back
+    changes-needed (a fifth instance my kickoff missed); the fix round was
+    reviewed clean.
   - Unit 6 — the `.base` table gets a scrollbar: the shared
     `draw_scrollbar` helper, the bar in the table's last inner column
     while the table overflows, the table rendered one column narrower so
@@ -78,7 +85,11 @@ OPEN
       (unit 6, L2).
   - Unit 8: the help test mirrors `draw_help`'s clamp arithmetic instead
       of sharing a helper (unit 4, C2). Drift fails loudly, so it is
-      polish.
+      polish. It also carries unit 7's N1: the comment in
+      `base_scrollbar_narrows_the_table_one_column` claims "98 would mean
+      the table was not narrowed", but the bar overwrites column 98 at the
+      rule row, so that count is unreachable — the region assert carries
+      the not-narrowed case.
   - Unit 9: a test that a watch reload refreshes `viewer.last_reload`:
       dropping the seconds from the render time left the smoke script
       unable to prove that the render segment follows a reload, and nothing

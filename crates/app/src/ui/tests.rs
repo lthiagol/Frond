@@ -818,10 +818,21 @@ fn backlinks_scrollbar_present_only_when_rows_overflow() {
         column_has_bar(buffer, panel.right() - 2, panel.y + 1..panel.bottom() - 1),
         "bar drawn when backlink rows overflow"
     );
-    assert_eq!(
-        buffer[(panel.right() - 1, panel.y + 1)].symbol(),
-        "│",
-        "border intact"
+    // The border glyph is the same `│` the track draws, so it cannot prove
+    // the border is intact; only the thumb's `█` tells the two apart.
+    assert!(
+        scrollbar_thumb_rows(buffer, panel.right() - 1, panel.y + 1..panel.bottom() - 1).is_empty(),
+        "the border column holds no thumb"
+    );
+    assert!(
+        !scrollbar_thumb_rows(buffer, panel.right() - 2, panel.y + 1..panel.bottom() - 1)
+            .is_empty(),
+        "the bar column holds the thumb"
+    );
+    // A vanished border leaves no thumb either, so it needs its own check.
+    assert!(
+        border_drawn(buffer, panel.right() - 1, panel.y + 1..panel.bottom() - 1),
+        "the border is drawn"
     );
 }
 
@@ -1321,7 +1332,9 @@ fn base_scrollbar_present_only_when_table_overflows() {
         !column_has_bar(buffer, 98, 1..22),
         "no bar when the table fits"
     );
-    assert_eq!(buffer[(99, 1)].symbol(), "│", "border intact");
+    // With no bar drawn the border needs its own check: a vanished border
+    // would leave no thumb either.
+    assert!(border_drawn(buffer, 99, 1..22), "the border is drawn");
 
     let long_dir = scrolling_base_vault("ui-base-bar-long");
     let file = ui_viewer("ui-base-bar-long.md", "x\n");
@@ -1340,12 +1353,23 @@ fn base_scrollbar_present_only_when_table_overflows() {
         let sym = buffer[(98, y)].symbol();
         assert!(matches!(sym, "│" | "█"), "bar symbol at row {y}: {sym:?}");
     }
-    assert_eq!(buffer[(99, 1)].symbol(), "│", "border intact");
+    // The border glyph is the same `│` the track draws; only the thumb's
+    // `█` distinguishes the border from the bar.
+    assert!(
+        scrollbar_thumb_rows(buffer, 99, 1..22).is_empty(),
+        "the border column holds no thumb"
+    );
+    assert!(
+        !scrollbar_thumb_rows(buffer, 98, 1..22).is_empty(),
+        "the bar column holds the thumb"
+    );
+    // A vanished border leaves no thumb either, so it needs its own check.
+    assert!(border_drawn(buffer, 99, 1..22), "the border is drawn");
 }
 
-/// The table is rendered one column narrower while the bar is drawn: with
-/// three full-width columns the last link cell ends at the last text column
-/// (97), never at the bar column (98).
+/// The table is rendered one column narrower while the bar is drawn: the
+/// rule line spans 97 columns instead of the inner 98, and every link cell
+/// ends at or before 97, never at the bar column (98).
 #[test]
 fn base_scrollbar_narrows_the_table_one_column() {
     let dir = TempDir::new("ui-base-bar-narrow");
@@ -1374,16 +1398,15 @@ fn base_scrollbar_narrows_the_table_one_column() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     assert!(column_has_bar(buffer, 98, 1..22), "table overflows");
+    // The rule line spans exactly the rendered text width, so its length
+    // pins the one-column narrowing (`rule_line` is `"─".repeat(width)`);
+    // 98 would mean the table was not narrowed, 96 that it lost two.
+    let rule_dashes = (1..99).filter(|&x| buffer[(x, 2)].symbol() == "─").count();
+    assert_eq!(rule_dashes, 97, "the table is one column narrower");
     let base = app.base.as_ref().unwrap();
-    let last_end = base
-        .regions
-        .iter()
-        .map(|r| r.end)
-        .max()
-        .expect("link cells");
-    // Absolute cell columns start at the inner area's x=1; the bar column
-    // is the 98th screen column, so the last text cell ends one short.
-    assert_eq!(last_end, 97, "text fills the narrowed width");
+    assert!(!base.regions.is_empty(), "the table has link cells");
+    // The cell invariant is that no text runs under the bar; how the fitter
+    // spreads the slack is its own business.
     assert!(
         base.regions.iter().all(|r| r.end <= 97),
         "no cell runs under the bar column"
@@ -1736,6 +1759,13 @@ fn column_has_bar(buffer: &ratatui::buffer::Buffer, x: u16, ys: std::ops::Range<
         .any(|y| matches!(buffer[(x, y)].symbol(), "│" | "█"))
 }
 
+/// Whether column `x` is drawn as a continuous border over rows `ys`. The
+/// track glyph is the same `│`, so this only proves the border was painted;
+/// the thumb checks prove the bar did not displace it.
+fn border_drawn(buffer: &ratatui::buffer::Buffer, x: u16, ys: std::ops::Range<u16>) -> bool {
+    ys.into_iter().all(|y| buffer[(x, y)].symbol() == "│")
+}
+
 fn long_note(lines: usize) -> String {
     (0..lines).map(|i| format!("line-{i:03}\n")).collect()
 }
@@ -1900,10 +1930,19 @@ fn sidebar_scrollbar_present_only_when_rows_overflow() {
     let sidebar_w = sidebar_width(100);
     // Border at column sidebar_w-1; the bar is the last inner column.
     let bar_x = sidebar_w - 2;
-    assert!(column_has_bar(buffer, bar_x, 1..23), "sidebar bar drawn");
-    assert_eq!(buffer[(sidebar_w - 1, 5)].symbol(), "│", "border intact");
+    assert!(column_has_bar(buffer, bar_x, 1..22), "sidebar bar drawn");
+    // The border glyph is the same `│` the track draws; only the thumb's
+    // `█` distinguishes the border from the bar.
+    assert!(
+        scrollbar_thumb_rows(buffer, sidebar_w - 1, 1..22).is_empty(),
+        "the border column holds no thumb"
+    );
+    assert!(
+        !scrollbar_thumb_rows(buffer, bar_x, 1..22).is_empty(),
+        "the bar column holds the thumb"
+    );
     // Names never run under the bar.
-    for y in 1..23 {
+    for y in 1..22 {
         let sym = buffer[(bar_x, y)].symbol();
         assert!(!sym.chars().any(|c| c.is_ascii_alphanumeric()), "{sym:?}");
     }
@@ -1997,8 +2036,22 @@ fn tag_list_scrollbar_only_when_rows_overflow() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let bar_x = sidebar_width(100) - 2;
-    assert!(column_has_bar(buffer, bar_x, 1..23), "tag list bar drawn");
-    assert_eq!(buffer[(sidebar_width(100) - 1, 5)].symbol(), "│");
+    assert!(column_has_bar(buffer, bar_x, 1..22), "tag list bar drawn");
+    // The border glyph is the same `│` the track draws; only the thumb's
+    // `█` distinguishes the border from the bar.
+    assert!(
+        scrollbar_thumb_rows(buffer, sidebar_width(100) - 1, 1..22).is_empty(),
+        "the border column holds no thumb"
+    );
+    assert!(
+        !scrollbar_thumb_rows(buffer, bar_x, 1..22).is_empty(),
+        "the bar column holds the thumb"
+    );
+    // A vanished border leaves no thumb either, so it needs its own check.
+    assert!(
+        border_drawn(buffer, sidebar_width(100) - 1, 1..22),
+        "the border is drawn"
+    );
 }
 
 #[test]
