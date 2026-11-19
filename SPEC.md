@@ -153,8 +153,8 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | Key | Action |
 |---|---|
 | `j` / `k`, arrows | Scroll (content); move selection (sidebar, backlinks) |
-| PgUp / PgDn | Half page |
-| `g` / `G`, Home / End | Top / bottom |
+| PgUp / PgDn | Half page (content pane) |
+| `g` / `G`, Home / End | Top / bottom (content pane) |
 | Mouse wheel | Scroll the content pane; over the sidebar, the backlinks panel or a popup it moves that pane's selection instead |
 | Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a popup row selects it (a second click on the selected row opens it) |
 | `Tab` | Hide/show sidebar |
@@ -177,6 +177,24 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `Ctrl+T` | Theme group for `Shift+T`: all → light → dark → all. Changes the group only; the status line shows the group and its size (session-only) |
 | `?` | Help popup: a centered single column with grouped sections (bold headers, keys aligned to one column) over a dimmed background, with a fixed title/footer; `j`/`k`/arrows, PgUp/PgDn, `g`/`G` scroll it; any other key closes it. The blank line between the groups is dropped when the body does not fit — then it scrolls behind a scrollbar |
 | `q` / `Ctrl+C` | Quit (while the help popup is open, `Ctrl+C` closes the popup instead) |
+
+The table is the key set of the **main view**. The modal popups have their
+own keys, and they take them instead of the app:
+
+- **Search (`s`)** — a query line over the vault's hits. In the query
+  line, `Enter` runs the search, `Backspace` edits the query and `Esc`
+  closes. In the results list, `j`/`k` (or the arrows) and PgUp/PgDn move
+  the selection, `Enter` opens the selected hit's line, and any typed
+  character returns to the query and refines it. `Esc` closes; `Ctrl+C`
+  quits.
+- **Quick switcher (`Ctrl+P`)** — a query line over the vault's notes:
+  `Enter` opens the selected note, `Backspace` edits the query, `j`/`k`
+  (or the arrows) and PgUp/PgDn move the selection, any typed character
+  goes into the query, and `Esc` closes (`Ctrl+C` quits). See "Quick
+  switcher" below for the matching rules.
+- **Disambiguation popup** (an ambiguous wikilink) — `j`/`k` or the
+  arrows choose a candidate, `Enter` opens it, and any other key cancels
+  the popup (`Ctrl+C` quits).
 
 ## Themes & configuration
 
@@ -247,16 +265,22 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 
 `¶ index.md · 12 lines ·  42% · watch on · ◷ 09:30 · ✓`
 
+(The example shows the **unicode** icon set; under the default
+`icons = "nerd"` the note, table and clock glyphs are the Nerd Font ones.)
+
 - Segments, in order: the name label, the size (`N lines`, or `N rows ·
   view X/Y: <name>` while a `.base` table is open), the scroll position, the
-  watch indicator (`watch on` / `watch off`), the last render time, the git
-  segment and — last — an error or info message.
+  watch indicator (`watch on` / `watch off`), the last render time, the
+  `mouse off` notice (only while the mouse capture is off), the
+  `metadata off` notice (only while the frontmatter block is hidden), the
+  git segment and — last — an error or info message.
 - Scroll position: the content pane's scroll **offset** as a percentage,
   immediately after the size segment (`12 lines ·  42%`). It reads `0%` at
   the top, `100%` at the bottom, and `100%` when the content fits in the
   pane; it is omitted when no document is open. It describes the content
-  pane — the open note, or the `.base` table when one is open — whichever
-  pane has the focus. It is styled like the size segment next to it, not
+  pane — the open note, or the `.base` table when one is open —
+  **regardless of which pane holds the focus**. It is styled like the size
+  segment next to it, not
   dimmed, and it does not change the hints' rule: they stay flush right and
   are hidden only while a message is shown or when they do not fit. The
   segment shares the left run's columns, so on a narrow terminal the hints
@@ -274,7 +298,9 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   glyph (`●`, `◐`, …) sits next to the note in the sidebar tree, and the
   tags are listed in the sidebar's tag view.
 - Path label: content focus shows the open note's **file name** (with its
-  icon: `¶` for a note, `▦` for a `.base` table); sidebar focus shows the
+  icon: `¶` for a note, `▦` for a `.base` table under the `unicode` icon
+  set — the glyphs follow the `icons` setting, so the nerd set shows the
+  Nerd Font's markdown and table glyphs instead); sidebar focus shows the
   focused row's name (or `#tag` in the tag view). The full path is never
   shown — a name shared by two notes is not disambiguated here (the
   sidebar and the wikilink popup still show folders).
@@ -304,13 +330,15 @@ the switcher matches note *paths*.
 - The scoring rewards contiguous matches, word boundaries (path
   separators, dashes, camelCase humps), a substring match and an early
   start; the matched characters are highlighted in the result row.
-- `↑`/`↓` (or `j`/`k`) move the selection, `Enter` opens the selected note
+- `↑`/`↓` (or `j`/`k`) move the selection, `PgUp`/`PgDn` move it by a
+  page, `Enter` opens the selected note
   through the normal navigation stack (so `Backspace` returns to the
   previous note), `Esc` closes the popup. A click selects a row; a second
   click on the selected row opens it; the wheel over the popup moves the
   selection.
 - The popup is modal: typed characters go into the query and never reach
-  the app (a typed `q` is a query character, not a quit). `Ctrl+C` still
+  the app (a typed `q` is a query character, not a quit). `Backspace`
+  edits the query. `Ctrl+C` still
   quits.
 
 ## Outline (`o`)

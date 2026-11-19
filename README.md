@@ -50,7 +50,7 @@ make release    # release build: target/release/frond
 
 ```sh
 frond                          # no vault given: prompts for the vault directory
-frond --vault ~/notes          # open a vault (index.md is shown first)
+frond --vault ~/notes          # open a vault (index.md is shown first, unless a saved session restores another note)
 frond --vault ~/notes project.md   # open a specific note inside the vault
 frond some-note.md             # open a file without a vault: no sidebar
 ```
