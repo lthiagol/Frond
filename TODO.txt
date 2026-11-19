@@ -1,0 +1,60 @@
+frond — orchestrator state
+
+HOW TO RESUME
+  Read AGENTS.md, then this file. The unit in flight is under WHERE WE ARE.
+  The open work is under OPEN, each with enough detail to start it. The
+  order is under NEXT. The loop mechanics are the global skill
+  `orchestration-flow`.
+
+WHERE WE ARE
+  Unit 1 is closed and committed. The next unit is 2 (the scrollbar symbols);
+  nothing is in flight.
+
+DONE
+  - Unit 1 — the scrollbar thumb geometry: all three draw paths feed the
+    scroll range (total - viewport) and drop `viewport_content_length`; the
+    thumb reaches the last track row at the bottom, and three new tests
+    assert the end positions on the note pane, the sidebar tree and the help
+    popup. Reviewed clean on both axes (round 1: 0 blocking, 3 low).
+  - Engine, shell, vault and polish milestones (M1–M4) are shipped.
+  - Theme groups (Ctrl+T), theme appearance, note margin, status-bar icon
+    sets, the quick switcher (Ctrl+P), session memory, guarded checkbox
+    writes, the .base table views.
+  - SPEC.md reconciled with the code; the README's "no vault" wording fixed.
+  - The smoke suite `smoke_m6` covers the 0.6.x features (theme groups,
+    icons, .base opening, the quick switcher).
+  - 0.6.1 released (2026-11-17).
+
+HAPPENED
+  - The scrollbar bug survived because the test only asserted the thumb
+    moved. A test that asserts "it moved" cannot catch "it stops short" —
+    assert the end positions, not the motion.
+  - ratatui's ScrollbarState wants the scroll RANGE as its content length,
+    not the line count. The two differ by the viewport, which is why the
+    thumb was short and stopped short of the track end.
+  - The Makefile assumed `cargo` was on the PATH. It now falls back to
+    rustup's default location.
+
+OPEN
+  - Unit 2: leaf-style scrollbar symbols (a `│` track, a `█` thumb, no
+      arrow heads) — cosmetic, its own unit. TODO.md §5.7. It carries the
+      three low findings from unit 1: make the help popup use the shared
+      `draw_scrollbar` helper instead of hand-building the state (L1); fix
+      the stale symbol set in the `column_has_bar` doc, which contradicts
+      the new `scrollbar_track_rows` doc in the same file (L2); pin the
+      proportionality invariant, which today holds only because the bar
+      area equals the viewport rows (L3).
+  - Unit 3: a scroll-percentage counter in the status bar. TODO.md §6 —
+      three open decisions (placement against the key hints, which pane,
+      and whether to add a `status_percent_fg` theme role or reuse
+      `status_watch_off_fg`).
+  - Unit 4: release 0.6.2 — the Unreleased section holds the quick
+      switcher, the smoke fix, the Makefile fallback and the doc
+      reconciliation; units 1–3 should ship in it.
+  - Parked: an outline/TOC panel (Ctrl+O), a link hover preview, regex and
+      match-next in the search popup, a line-number gutter.
+
+NEXT
+  1. Unit 2 — the scrollbar symbols, plus the three low findings above.
+  2. Unit 3 — the status percentage (needs the product decisions).
+  3. Unit 4 — cut 0.6.2.

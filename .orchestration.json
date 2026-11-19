@@ -1,0 +1,7 @@
+{
+  "prefix": "frond",
+  "role_configs": {
+    "builder": "flow/builder.json",
+    "reviewer": "flow/reviewer.json"
+  }
+}

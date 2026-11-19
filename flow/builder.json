@@ -1,0 +1,10 @@
+{
+  "default_agent": "builder",
+  "agents": {
+    "builder": {
+      "mode": "primary",
+      "description": "Implements one unit of work",
+      "model": "opencode-go/deepseek-v4.1-flash#high"
+    }
+  }
+}
