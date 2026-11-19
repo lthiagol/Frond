@@ -181,8 +181,9 @@ impl BaseState {
         self.clamp_scroll();
     }
 
-    fn line_count(&self) -> usize {
-        // Header + rule + one line per row.
+    /// Total table lines: header + rule + one line per row. The renderer
+    /// needs it before drawing to decide whether the table overflows.
+    pub fn line_count(&self) -> usize {
         self.table.rows.len() + 2
     }
 

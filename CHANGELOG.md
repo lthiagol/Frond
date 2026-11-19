@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- The `.base` table shows a scrollbar while it overflows, like the other
+  panes: the bar sits in the table's last inner column, and the table is
+  rendered one column narrower while the bar is drawn.
 
 ### Fixed
 

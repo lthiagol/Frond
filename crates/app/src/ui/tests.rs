@@ -1276,6 +1276,198 @@ fn base_view_switch_is_visible_in_the_title() {
     assert!(screen.contains("view 2/2: Two"), "{screen}");
 }
 
+/// A vault of 40 notes plus one all-notes `.base` (too tall for the 24-row
+/// test terminal, so its table overflows).
+fn scrolling_base_vault(label: &str) -> TempDir {
+    let dir = TempDir::new(label);
+    for i in 0..40 {
+        std::fs::write(dir.path().join(format!("note{i:02}.md")), "body\n").unwrap();
+    }
+    std::fs::write(
+        dir.path().join("many.base"),
+        "views:\n  - type: table\n    name: All\n    order:\n      - file.name\n",
+    )
+    .unwrap();
+    dir
+}
+
+/// The `.base` table's bar sits in the last inner column, just inside the
+/// border (x=98 at 100 wide), and only while the table overflows.
+#[test]
+fn base_scrollbar_present_only_when_table_overflows() {
+    let small_dir = TempDir::new("ui-base-bar-fit");
+    std::fs::write(small_dir.path().join("a.md"), "a\n").unwrap();
+    std::fs::write(small_dir.path().join("b.md"), "b\n").unwrap();
+    std::fs::write(
+        small_dir.path().join("small.base"),
+        "views:\n  - type: table\n    name: All\n    order:\n      - file.name\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-base-bar-fit.md", "x\n");
+    let mut app = app_with_index(&file, &small_dir);
+    app.open_base_at(&small_dir.path().join("small.base"), 0)
+        .unwrap();
+    app.sidebar_visible = false;
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        app.base.as_ref().unwrap().max_scroll(),
+        0,
+        "the table fits the viewport"
+    );
+    assert!(
+        !column_has_bar(buffer, 98, 1..22),
+        "no bar when the table fits"
+    );
+    assert_eq!(buffer[(99, 1)].symbol(), "│", "border intact");
+
+    let long_dir = scrolling_base_vault("ui-base-bar-long");
+    let file = ui_viewer("ui-base-bar-long.md", "x\n");
+    let mut app = app_with_index(&file, &long_dir);
+    app.open_base_at(&long_dir.path().join("many.base"), 0)
+        .unwrap();
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert!(
+        column_has_bar(buffer, 98, 1..22),
+        "bar drawn in the last inner column"
+    );
+    for y in 1..22 {
+        let sym = buffer[(98, y)].symbol();
+        assert!(matches!(sym, "│" | "█"), "bar symbol at row {y}: {sym:?}");
+    }
+    assert_eq!(buffer[(99, 1)].symbol(), "│", "border intact");
+}
+
+/// The table is rendered one column narrower while the bar is drawn: with
+/// three full-width columns the last link cell ends at the last text column
+/// (97), never at the bar column (98).
+#[test]
+fn base_scrollbar_narrows_the_table_one_column() {
+    let dir = TempDir::new("ui-base-bar-narrow");
+    let long_name = "a".repeat(40);
+    for i in 0..40 {
+        std::fs::write(
+            dir.path().join(format!("{long_name}{i:02}.md")),
+            format!(
+                "---\nalpha: {}\nbeta: {}\n---\nbody\n",
+                "x".repeat(40),
+                "y".repeat(40)
+            ),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        dir.path().join("wide.base"),
+        "views:\n  - type: table\n    name: All\n    order:\n      - alpha\n      - beta\n      - file.name\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-base-bar-narrow.md", "x\n");
+    let mut app = app_with_index(&file, &dir);
+    app.open_base_at(&dir.path().join("wide.base"), 0).unwrap();
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert!(column_has_bar(buffer, 98, 1..22), "table overflows");
+    let base = app.base.as_ref().unwrap();
+    let last_end = base
+        .regions
+        .iter()
+        .map(|r| r.end)
+        .max()
+        .expect("link cells");
+    // Absolute cell columns start at the inner area's x=1; the bar column
+    // is the 98th screen column, so the last text cell ends one short.
+    assert_eq!(last_end, 97, "text fills the narrowed width");
+    assert!(
+        base.regions.iter().all(|r| r.end <= 97),
+        "no cell runs under the bar column"
+    );
+}
+
+/// The thumb's ends track the scroll position, and the status percentage
+/// reflects the same offset as the bar.
+#[test]
+fn base_scrollbar_thumb_ends_track_the_scroll_position() {
+    let dir = scrolling_base_vault("ui-base-bar-ends");
+    let file = ui_viewer("ui-base-bar-ends.md", "x\n");
+    let mut app = app_with_index(&file, &dir);
+    app.open_base_at(&dir.path().join("many.base"), 0).unwrap();
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+
+    let screen = terminal.backend().to_string();
+    let buffer = terminal.backend().buffer();
+    let track = scrollbar_track_rows(buffer, 98, 1..22);
+    let thumb = scrollbar_thumb_rows(buffer, 98, 1..22);
+    assert_eq!(track.len(), 21, "track spans the inner height");
+    assert_eq!(
+        thumb.first(),
+        track.first(),
+        "at the top the thumb starts at the first track row"
+    );
+    let total = app.base.as_ref().unwrap().line_count();
+    let visible = 21;
+    let expected = proportional_thumb_len(total, visible, track.len());
+    assert!(
+        (thumb.len() as f64 - expected).abs() <= 1.0,
+        "thumb length {} is within 1 row of the proportional {expected:.1}",
+        thumb.len()
+    );
+    assert!(
+        status_row(&screen).contains("  0%"),
+        "the bar and the status agree at the top"
+    );
+
+    app.base.as_mut().unwrap().scroll_bottom();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let screen = terminal.backend().to_string();
+    let buffer = terminal.backend().buffer();
+    let track = scrollbar_track_rows(buffer, 98, 1..22);
+    let thumb = scrollbar_thumb_rows(buffer, 98, 1..22);
+    assert_eq!(
+        thumb.last(),
+        track.last(),
+        "at the bottom the thumb ends at the last track row"
+    );
+    assert!(
+        status_row(&screen).contains("100%"),
+        "the bar and the status agree at the bottom"
+    );
+}
+
+/// A click on the bar column maps to a cell that no region covers (no-op);
+/// a click on a link cell still opens the note.
+#[test]
+fn base_click_on_the_scrollbar_column_is_a_no_op() {
+    let dir = scrolling_base_vault("ui-base-bar-click");
+    let file = ui_viewer("ui-base-bar-click.md", "x\n");
+    let mut app = app_with_index(&file, &dir);
+    app.open_base_at(&dir.path().join("many.base"), 0).unwrap();
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let before = app.viewer.path.clone();
+    // The first data row is table line 2 (after the header and the rule).
+    let first_row = app.base.as_ref().unwrap().link_at(2, 0).expect("link cell");
+
+    // Bar column, first data row (inner y=1 is the header, y=2 the rule).
+    app.handle_click(98, 3);
+    assert_eq!(app.viewer.path, before, "a bar click opens nothing");
+    assert!(app.base.is_some(), "the table stays open");
+
+    // The file.name cell on that row is a link: it opens the note.
+    app.handle_click(2, 3);
+    assert!(app.base.is_none(), "the link left the table");
+    assert_eq!(app.viewer.path, first_row, "the first row's note opened");
+}
+
 #[test]
 fn chrome_uses_the_themed_border_and_content_bg() {
     let vault_dir = TempDir::new("ui-theme-vault");
