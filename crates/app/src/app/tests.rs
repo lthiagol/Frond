@@ -815,6 +815,42 @@ fn click_on_link_region_activates_it() {
     assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
 }
 
+/// The link hit-test under the geometry the frame actually records: a
+/// vertical margin insets the text area by rows, and a click on the link's
+/// line inside that inset still activates it. The tests above fake the
+/// viewport and so never see the margin.
+#[test]
+fn click_on_link_region_activates_it_under_the_real_margin_geometry() {
+    let vault_dir = link_vault();
+    let (_f, mut app) = link_app(&vault_dir);
+    app.open_note(&vault_dir.path().join("start.md")).unwrap();
+    app.note_margin_y = 2;
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 24)).unwrap();
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    let vp = app.layout.note_viewport;
+    assert_eq!(vp.y, 2, "the draw recorded the vertical margin inset");
+    assert_eq!(app.viewer.scroll, 0, "the note opens at the top");
+    // Regions are taken after the draw: the frame re-wraps the note to the
+    // real text width, which is what the click arithmetic must agree with.
+    let link = app
+        .viewer
+        .links
+        .iter()
+        .find(|l| l.wikilink.as_ref().is_some_and(|w| w.target == "a"))
+        .expect("a link rendered")
+        .clone();
+    let region = link.regions[0];
+    // The cells the click lands on are the link's own cells, painted (the
+    // engine's `#` link marker plus the target) — not a blank margin row.
+    let row = vp.y + region.line as u16;
+    let painted: String = (vp.x + region.start as u16..vp.x + region.end as u16)
+        .map(|x| term.backend().buffer()[(x, row)].symbol().to_string())
+        .collect();
+    assert_eq!(painted, "#a", "the link is painted where the click lands");
+    app.handle_click(vp.x + region.start as u16, row);
+    assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
+}
+
 /// The scrollbar column sits just past the note text rect. A link region
 /// reaching that column must not be activated by a click on it (the
 /// bounds check, not the regions, is what keeps bar clicks out), while
@@ -1646,7 +1682,7 @@ fn outline_has_no_rows_while_a_base_table_is_open() {
     // the scroll put either way, so the selection is what pins the mapping.
     assert_eq!(
         app.outline.selected, 0,
-        "precondition: the first row is selected"
+        "precondition: the selection cursor is at 0"
     );
     app.viewer.scroll = 5;
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 10));
