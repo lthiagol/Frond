@@ -368,4 +368,5 @@ edits move rows between views through the normal watch pipeline.
 All four are shipped. The work after them (each documented in its own
 section above): the guarded checkbox write, the `.base` table views, the
 theme groups, the note margin, the status-bar icon sets, the quick
-switcher, and the session memory.
+switcher, the session memory, and — in 0.6.2 — the scrollbar geometry and
+symbols, and the scroll position in the status bar.
