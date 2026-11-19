@@ -7,11 +7,15 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Units 1–15 are closed and committed. **0.6.2 is tagged** (`v0.6.2`).
-  Nothing is in flight: the follow-ups are done. What is left is the
-  parked list and the push.
+  Units 1–16 are closed and committed. **0.6.2 and 0.6.3 are tagged and
+  pushed** (`v0.6.2`, `v0.6.3`), and CI is green on both pushes. Nothing
+  is in flight: the follow-ups are done and the release is cut.
 
 DONE
+  - Unit 16 — 0.6.3 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
+    released as `## [0.6.3] — 2026-11-19` with a fresh empty
+    `## [Unreleased]` above it, and the `v0.6.3` tag. Reviewed clean on
+    both axes (round 1: 0 blocking, 1 low) and CI green on the push.
   - Unit 15 — the vertical margin's two test gaps: a link clicked in a
     note rendered with a vertical margin now activates through the real
     geometry, and a pane too short for the margin draws no bar that
@@ -134,9 +138,6 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Push `main` (22+ commits ahead of `origin/main`; the push is the
-     human's call).
-  2. Then the parked list, in my order of value: the interactive
-     scrollbar, the link hover preview, the regex search, the line-number
-     gutter.
-  3. Or cut 0.6.3 with the outline, the vertical margin and the rest.
+  1. The parked list, in my order of value: the interactive scrollbar,
+     the link hover preview, the regex search, the line-number gutter.
+  2. Or cut 0.6.4 with whichever of them land.
