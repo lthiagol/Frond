@@ -7,10 +7,16 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 3 is closed and committed. The next unit is 4 (the scrollbar
-  symbols); nothing is in flight.
+  Unit 4 is closed and committed. The next unit is 5 — cut 0.6.2.
 
 DONE
+  - Unit 4 — the scrollbar symbols: a thin `│` track and a solid `█` thumb
+    with no arrow heads, so the track spans the full height of the bar
+    column; the help popup draws its bar through the shared
+    `draw_scrollbar`; the test helpers' glyph sets match what is drawn;
+    and the proportionality invariant (bar column height == viewport rows)
+    is pinned in all three draw paths. Reviewed clean on both axes
+    (round 1: 0 blocking, 4 low).
   - Unit 3 — the status bar does not move while scrolling: the percentage
     sits in a fixed four-column right-aligned field (`  0%`, ` 50%`,
     `100%`), the render time is a clock glyph plus `HH:MM` (nerd U+F017,
@@ -48,26 +54,25 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 4: leaf-style scrollbar symbols (a `│` track, a `█` thumb, no
-      arrow heads) — cosmetic. TODO.md §5.7. It carries three low findings:
-      make the help popup use the shared `draw_scrollbar` helper instead of
-      hand-building the state (unit 1, L1); fix the stale symbol set in the
-      `column_has_bar` doc, which contradicts the new
-      `scrollbar_track_rows` doc in the same file (unit 1, L2); pin the
-      proportionality invariant, which today holds only because the bar
-      area equals the viewport rows (unit 1, L3).
+  - Unit 5: release 0.6.2 — the Unreleased section holds the quick
+      switcher, the smoke fix, the Makefile fallback, the doc
+      reconciliation, the scrollbar fix, the scroll percentage, the
+      status-bar polish and the scrollbar symbols; units 1–4 should ship
+      in it. Version bumps in `Cargo.toml` + `Cargo.lock`, the changelog
+      date, and the `v0.6.2` tag.
   - A test that a watch reload refreshes `viewer.last_reload`: dropping the
       seconds from the render time left the smoke script unable to prove
       that the render segment follows a reload, and nothing else pins it
       (unit 3, L1). Touches the viewer, so it is its own small unit.
-  - Unit 5: release 0.6.2 — the Unreleased section holds the quick
-      switcher, the smoke fix, the Makefile fallback, the doc
-      reconciliation, the scrollbar fix, the scroll percentage and the
-      status-bar polish; units 2–4 should ship in it.
+  - The "border intact" assertions can no longer tell the track from the
+      border — both draw `│` (unit 4, C1). Either assert the border cell's
+      style or drop the check.
+  - The help test mirrors `draw_help`'s clamp arithmetic instead of
+      sharing a helper (unit 4, C2). Drift fails loudly, so it is
+      polish.
   - Parked: an outline/TOC panel (Ctrl+O), a link hover preview, regex and
       match-next in the search popup, a line-number gutter, a scroll
       position for the sidebar tree.
 
 NEXT
-  1. Unit 4 — the scrollbar symbols, plus the three low findings above.
-  2. Unit 5 — cut 0.6.2.
+  1. Unit 5 — cut 0.6.2.

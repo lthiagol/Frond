@@ -1437,9 +1437,9 @@ fn help_scroll_j_moves_and_k_returns() {
     assert!(app.viewer.help_scroll < usize::MAX, "clamped at draw");
 }
 
-/// The help popup builds its own scrollbar state: its thumb must end on the
-/// last track row at the bottom too, and span the visible fraction of the
-/// body.
+/// The help popup draws its bar through the shared helper: its thumb must
+/// end on the last track row at the bottom too, and span the visible
+/// fraction of the body.
 #[test]
 fn help_scrollbar_thumb_ends_track_the_scroll_position() {
     let file = ui_viewer("ui-bar-help-ends.md", "x\n");
@@ -1449,24 +1449,35 @@ fn help_scrollbar_thumb_ends_track_the_scroll_position() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
 
-    // The popup is the only scrollbar at 100x30 (the note is one line): find
-    // its begin arrow, then read the bar's column below it.
+    // The popup is the only scrollbar at 100x30 (the note is one line):
+    // locate its bar from the popup geometry, not from a glyph, so the test
+    // pins the body height the viewport should equal.
     let buffer = terminal.backend().buffer();
-    let (x, top) = (0..buffer.area.width)
-        .find_map(|x| {
-            (0..buffer.area.height).find_map(|y| (buffer[(x, y)].symbol() == "▲").then_some((x, y)))
-        })
-        .expect("help scrollbar drawn");
-    let track = scrollbar_track_rows(buffer, x, top..buffer.area.height);
-    let thumb = scrollbar_thumb_rows(buffer, x, top..buffer.area.height);
+    let grid = help_grid(buffer.area.height);
+    let popup_height = (grid.rows as u16)
+        .saturating_add(3)
+        .min(buffer.area.height.saturating_sub(2))
+        .max(1);
+    let width = grid.width.min(buffer.area.width.saturating_sub(2)).max(1);
+    let popup = centered(buffer.area, width, popup_height);
+    let body_height = help_visible_rows(popup_height);
+    assert!(body_height > 0, "help body has rows at 100x30");
+    let x = popup.x + popup.width - 2;
+    let body = popup.y + 1..popup.y + 1 + body_height as u16;
+
+    let track = scrollbar_track_rows(buffer, x, body.clone());
+    let thumb = scrollbar_thumb_rows(buffer, x, body.clone());
+    assert_eq!(
+        track.len(),
+        body_height,
+        "the track spans the full body, no arrow heads"
+    );
     assert_eq!(
         thumb.first(),
         track.first(),
         "at the top the thumb starts at the first track row"
     );
-    // The bar area is the body rows (two arrow heads included).
-    let body_height = track.len() + 2;
-    let total = help_grid(buffer.area.height).rows;
+    let total = grid.rows;
     let expected = proportional_thumb_len(total, body_height, track.len());
     assert!(
         (thumb.len() as f64 - expected).abs() <= 1.0,
@@ -1478,8 +1489,8 @@ fn help_scrollbar_thumb_ends_track_the_scroll_position() {
     app.viewer.help_scroll = usize::MAX;
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
-    let track = scrollbar_track_rows(buffer, x, top..buffer.area.height);
-    let thumb = scrollbar_thumb_rows(buffer, x, top..buffer.area.height);
+    let track = scrollbar_track_rows(buffer, x, body.clone());
+    let thumb = scrollbar_thumb_rows(buffer, x, body);
     assert_eq!(
         thumb.last(),
         track.last(),
@@ -1496,16 +1507,16 @@ fn row_symbols(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
         .collect()
 }
 
-/// Rows of column `x` drawn as the scrollbar's track or thumb, arrow heads
-/// excluded: the extent a proportional thumb has to span. The default
-/// symbols are `║` (track), `█` (thumb), `▲`/`▼` (heads).
+/// Rows of column `x` drawn as the scrollbar's track or thumb: the extent a
+/// proportional thumb has to span. The drawn symbols are `│` (track) and `█`
+/// (thumb); there are no arrow heads.
 fn scrollbar_track_rows(
     buffer: &ratatui::buffer::Buffer,
     x: u16,
     ys: std::ops::Range<u16>,
 ) -> Vec<u16> {
     ys.into_iter()
-        .filter(|&y| matches!(buffer[(x, y)].symbol(), "║" | "█"))
+        .filter(|&y| matches!(buffer[(x, y)].symbol(), "│" | "█"))
         .collect()
 }
 
@@ -1527,14 +1538,10 @@ fn proportional_thumb_len(total: usize, visible: usize, track_len: usize) -> f64
 }
 
 /// Whether a scrollbar glyph (track or thumb) sits in column `x` of rows
-/// `ys`. The default scrollbar symbols are `░`/`█`/`▲`/`▼`/`↑`/`↓`.
+/// `ys`. The drawn symbols are `│` (track) and `█` (thumb), no arrow heads.
 fn column_has_bar(buffer: &ratatui::buffer::Buffer, x: u16, ys: std::ops::Range<u16>) -> bool {
-    ys.into_iter().any(|y| {
-        matches!(
-            buffer[(x, y)].symbol(),
-            "█" | "░" | "▲" | "▼" | "↑" | "↓" | "▴" | "▾"
-        )
-    })
+    ys.into_iter()
+        .any(|y| matches!(buffer[(x, y)].symbol(), "│" | "█"))
 }
 
 fn long_note(lines: usize) -> String {
@@ -1572,6 +1579,15 @@ fn note_scrollbar_present_only_when_overflowing_and_text_stops_before_it() {
     // Bar on the right edge column only (the rightmost column of the note
     // area), spanning the note rows (status line excluded).
     assert!(column_has_bar(buffer, 99, 0..23), "bar drawn at right edge");
+    // Leaf's symbols only: a `│` track and a `█` thumb, no heads, no `║`.
+    for y in 0..23 {
+        let sym = buffer[(99, y)].symbol();
+        assert!(matches!(sym, "│" | "█"), "bar symbol at row {y}: {sym:?}");
+    }
+    assert!(
+        (0..23).any(|y| buffer[(99, y)].symbol() == "█"),
+        "thumb drawn"
+    );
     // Text is narrowed: the note viewport stops one column short of the edge.
     assert_eq!(
         app.layout.note_viewport.x + app.layout.note_viewport.width,
@@ -1624,15 +1640,22 @@ fn note_scrollbar_thumb_ends_track_the_scroll_position() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
+    // The viewport is the note area, independent of the bar's own rect.
+    let note_rows = app.layout.note_viewport.height as usize;
+    let total = app.viewer.lines.len();
     let track = scrollbar_track_rows(buffer, 99, 0..23);
     let thumb = scrollbar_thumb_rows(buffer, 99, 0..23);
+    assert_eq!(
+        track.len(),
+        note_rows,
+        "the track spans the full note viewport, no arrow heads"
+    );
     assert_eq!(
         thumb.first(),
         track.first(),
         "at the top the thumb starts at the first track row"
     );
-    // The bar spans 23 rows here (2 arrow heads), the note 200 lines.
-    let expected = proportional_thumb_len(200, 23, track.len());
+    let expected = proportional_thumb_len(total, note_rows, track.len());
     assert!(
         (thumb.len() as f64 - expected).abs() <= 1.0,
         "thumb length {} is within 1 row of the proportional {expected:.1}",
@@ -1734,6 +1757,11 @@ fn sidebar_scrollbar_thumb_ends_track_the_scroll_position() {
     let buffer = terminal.backend().buffer();
     let track = scrollbar_track_rows(buffer, bar_x, inner.clone());
     let thumb = scrollbar_thumb_rows(buffer, bar_x, inner.clone());
+    assert_eq!(
+        track.len(),
+        inner_height,
+        "the track spans the full panel viewport, no arrow heads"
+    );
     assert_eq!(
         thumb.first(),
         track.first(),

@@ -33,6 +33,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   sideways as the number grows while you scroll.
 - The render time is a clock glyph plus `HH:MM` — the glyph follows the
   `icons` setting — instead of the word "rendered" and the seconds.
+- The scrollbar draws a thin `│` track and a solid `█` thumb, without the
+  arrow heads: the track now spans the full height of the bar column.
 - The Makefile finds `cargo` on the `PATH` and falls back to
   `~/.cargo/bin/cargo` (rustup's default), so every target — `make run`
   included — works in a shell whose `PATH` lacks it. Override with
