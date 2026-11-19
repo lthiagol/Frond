@@ -1486,6 +1486,32 @@ fn help_visible_rows(popup_height: u16) -> usize {
     popup_height.saturating_sub(3) as usize
 }
 
+/// The help popup's geometry for a frame `area`.
+struct HelpPopup {
+    /// The popup's rectangle (borders and scrollbar column included).
+    rect: Rect,
+    /// Body rows of the chosen layout.
+    total: usize,
+    /// Body rows the popup shows at once.
+    visible: usize,
+}
+
+/// The popup's geometry: the layout's width, its height fitted to the body
+/// (+ borders and footer) and clamped to the terminal, centered in `area`.
+/// The single source of the clamps for `draw_help` and its tests.
+fn help_popup(area: Rect) -> HelpPopup {
+    let grid = help_grid(area.height);
+    let width = grid.width.min(area.width.saturating_sub(2)).max(1);
+    let total = grid.rows;
+    let want_height = (total as u16).saturating_add(3);
+    let height = want_height.min(area.height.saturating_sub(2)).max(1);
+    HelpPopup {
+        rect: centered(area, width, height),
+        total,
+        visible: help_visible_rows(height),
+    }
+}
+
 fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
     // Dim everything behind the popup (herdr's overlay treatment). The popup
     // cells are cleared below, which resets their style and so drops DIM.
@@ -1498,14 +1524,11 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
     }
 
     let grid = help_grid(area.height);
-    let width = grid.width.min(area.width.saturating_sub(2)).max(1);
-    let total = grid.rows;
-    // Fit to the content (+ borders + footer), clamped to the terminal.
-    let want_height = (total as u16).saturating_add(3);
-    let height = want_height.min(area.height.saturating_sub(2)).max(1);
-    let popup = centered(area, width, height);
-
-    let visible = help_visible_rows(height);
+    let HelpPopup {
+        rect: popup,
+        total,
+        visible,
+    } = help_popup(area);
     let max_scroll = total.saturating_sub(visible);
     app.viewer.help_scroll = app.viewer.help_scroll.min(max_scroll);
     let scroll = app.viewer.help_scroll;

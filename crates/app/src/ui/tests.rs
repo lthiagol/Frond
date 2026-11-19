@@ -1398,9 +1398,13 @@ fn base_scrollbar_narrows_the_table_one_column() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     assert!(column_has_bar(buffer, 98, 1..22), "table overflows");
-    // The rule line spans exactly the rendered text width, so its length
-    // pins the one-column narrowing (`rule_line` is `"─".repeat(width)`);
-    // 98 would mean the table was not narrowed, 96 that it lost two.
+    // The rule line spans exactly the rendered text width (`rule_line` is
+    // `"─".repeat(width)`), so 97 proves the table did not lose two
+    // columns. It cannot prove the narrowing itself: `draw_scrollbar` runs
+    // after the table and overwrites column 98 at every row, so an
+    // un-narrowed table also reads 97. The region assert below carries the
+    // not-narrowed case — a cell ending at the bar column means no
+    // narrowing.
     let rule_dashes = (1..99).filter(|&x| buffer[(x, 2)].symbol() == "─").count();
     assert_eq!(rule_dashes, 97, "the table is one column narrower");
     let base = app.base.as_ref().unwrap();
@@ -1668,14 +1672,11 @@ fn help_scrollbar_thumb_ends_track_the_scroll_position() {
     // locate its bar from the popup geometry, not from a glyph, so the test
     // pins the body height the viewport should equal.
     let buffer = terminal.backend().buffer();
-    let grid = help_grid(buffer.area.height);
-    let popup_height = (grid.rows as u16)
-        .saturating_add(3)
-        .min(buffer.area.height.saturating_sub(2))
-        .max(1);
-    let width = grid.width.min(buffer.area.width.saturating_sub(2)).max(1);
-    let popup = centered(buffer.area, width, popup_height);
-    let body_height = help_visible_rows(popup_height);
+    let HelpPopup {
+        rect: popup,
+        total,
+        visible: body_height,
+    } = help_popup(buffer.area);
     assert!(body_height > 0, "help body has rows at 100x30");
     let x = popup.x + popup.width - 2;
     let body = popup.y + 1..popup.y + 1 + body_height as u16;
@@ -1692,7 +1693,6 @@ fn help_scrollbar_thumb_ends_track_the_scroll_position() {
         track.first(),
         "at the top the thumb starts at the first track row"
     );
-    let total = grid.rows;
     let expected = proportional_thumb_len(total, body_height, track.len());
     assert!(
         (thumb.len() as f64 - expected).abs() <= 1.0,
@@ -2348,11 +2348,7 @@ fn help_dims_background_and_keeps_popup_crisp() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let frame = Rect::new(0, 0, 100, 30);
-    let popup = centered(
-        frame,
-        help_grid(frame.height).width.min(frame.width - 2),
-        (help_grid(frame.height).rows as u16 + 3).min(frame.height - 2),
-    );
+    let popup = help_popup(frame).rect;
     for y in frame.y..frame.bottom() {
         for x in frame.x..frame.right() {
             let inside = x >= popup.x && x < popup.right() && y >= popup.y && y < popup.bottom();
