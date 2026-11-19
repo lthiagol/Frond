@@ -1490,6 +1490,8 @@ fn help_visible_rows(popup_height: u16) -> usize {
 struct HelpPopup {
     /// The popup's rectangle (borders and scrollbar column included).
     rect: Rect,
+    /// The layout the popup renders, so `draw_help` need not rebuild it.
+    grid: HelpGrid,
     /// Body rows of the chosen layout.
     total: usize,
     /// Body rows the popup shows at once.
@@ -1507,6 +1509,7 @@ fn help_popup(area: Rect) -> HelpPopup {
     let height = want_height.min(area.height.saturating_sub(2)).max(1);
     HelpPopup {
         rect: centered(area, width, height),
+        grid,
         total,
         visible: help_visible_rows(height),
     }
@@ -1523,9 +1526,9 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         }
     }
 
-    let grid = help_grid(area.height);
     let HelpPopup {
         rect: popup,
+        grid,
         total,
         visible,
     } = help_popup(area);

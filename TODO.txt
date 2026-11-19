@@ -7,10 +7,15 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 8 is closed and committed. The next unit is 9 (the help popup's
-  geometry, finished); nothing is in flight.
+  Unit 9 is closed and committed. The next unit is 10 (the watch-reload
+  render-time test); nothing is in flight.
 
 DONE
+  - Unit 9 — the help popup's geometry, finished: `HelpPopup` carries the
+    grid so `help_grid` is called once, the narrowing test's comment names
+    the exclusive end value, and its assert message says what the rule
+    count actually proves. Reviewed clean on both axes (round 1: 0
+    blocking, 0 low).
   - Unit 8 — the help popup's geometry lives in one helper: `help_popup`
     carries the popup rect, the total and the visible rows, and both
     `draw_help` and the two help tests use it, so the clamp arithmetic
@@ -110,7 +115,7 @@ OPEN
       (`crates/app/src/viewer.rs:571`); the existing
       `vault_watcher_reindexes_and_reparses` forces `last_reload = None`
       and asserts only the index.
-  - Unit 10 (feature, when wanted): the outline/TOC panel. Its key is
+  - Unit 11 (feature, when wanted): the outline/TOC panel. Its key is
       decided with the human — **plain `o`** (`Ctrl+O` stays
       forward-navigation, and leaf's `t` is taken by the sidebar mode).
   - Parked: a link hover preview, regex + match-next in the search popup, a
@@ -120,7 +125,6 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 7 — the assertion fixes.
-  2. Unit 8 — the help-popup geometry helper.
-  3. Unit 9 — the watch-reload `last_reload` test.
-  4. Then push `main` and open the next cycle (unit 10 and the parked list).
+  1. Unit 10 — the watch-reload `last_reload` test.
+  2. Unit 11 — the outline/TOC panel, when wanted.
+  3. Then push `main` and open the next cycle (the parked list).
