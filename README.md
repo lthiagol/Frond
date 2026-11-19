@@ -131,7 +131,7 @@ sidebar_width = 40              # sidebar columns, clamped 24-120
 metadata = true                 # render the note's frontmatter block (f toggles)
 theme_rotation = "all"          # Shift+T group at startup: all, light or dark
 margin = 2                      # blank columns on each side of the note (0-10)
-icons = "nerd"                  # status-bar note icon: nerd (needs a Nerd Font) or unicode
+icons = "nerd"                  # status-bar icons: nerd (needs a Nerd Font) or unicode
 ```
 
 Missing file means defaults. A malformed file prints a warning and falls back

@@ -28,6 +28,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   blank gap.
 
 ### Changed
+- The status bar's scroll percentage sits in a fixed four-column field
+  (`  0%`, ` 50%`, `100%`), so the segments after it no longer slide
+  sideways as the number grows while you scroll.
+- The render time is a clock glyph plus `HH:MM` — the glyph follows the
+  `icons` setting — instead of the word "rendered" and the seconds.
 - The Makefile finds `cargo` on the `PATH` and falls back to
   `~/.cargo/bin/cargo` (rustup's default), so every target — `make run`
   included — works in a shell whose `PATH` lacks it. Override with

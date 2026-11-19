@@ -1122,8 +1122,10 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
     ];
     if let Some((offset, max_scroll)) = scroll {
         spans.push(Span::raw(" · "));
+        // Fixed four columns, right-aligned: the segments after it must not
+        // move while the percentage grows (SPEC, "Status bar").
         spans.push(Span::raw(format!(
-            "{}%",
+            "{:>3}%",
             scroll_percent(offset, max_scroll)
         )));
     }
@@ -1141,8 +1143,8 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
     }
     spans.push(Span::raw(" · "));
     spans.push(Span::raw(match app.viewer.last_reload {
-        Some(t) => format!("rendered {}", format_time(t)),
-        None => "not rendered".to_string(),
+        Some(t) => format!("{} {}", app.icons.clock(), format_clock(t)),
+        None => app.icons.clock().to_string(),
     }));
     // Mouse capture hint: only shown while capture is OFF (the surprising
     // state — clicks/wheel are dead in-app, the terminal selects natively).
@@ -1241,10 +1243,11 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
 /// Static keyboard hints shown on the status bar's right edge when room.
 const STATUS_HINT: &str = "Tab sidebar · ⇧T theme · ? help";
 
-/// `HH:MM:SS` in the local timezone.
-fn format_time(t: SystemTime) -> String {
+/// `HH:MM` in the local timezone. Seconds are dropped on purpose: the
+/// status bar would otherwise churn a column every tick.
+fn format_clock(t: SystemTime) -> String {
     chrono::DateTime::<chrono::Local>::from(t)
-        .format("%H:%M:%S")
+        .format("%H:%M")
         .to_string()
 }
 

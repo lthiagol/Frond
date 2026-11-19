@@ -12,7 +12,7 @@ Prerequisites:
 Run directly (`python3 scripts/smoke_tui.py`) or via the ignored Rust
 integration test: `cargo test -p frond --test smoke -- --ignored`.
 """
-import os, pty, select, shutil, struct, sys, fcntl, termios, time
+import os, pty, select, shutil, struct, sys, fcntl, termios, time, re
 
 import pyte
 import smoke_tmp
@@ -90,8 +90,11 @@ def check(cond, label):
 check(pump(1.5), "app alive")
 check("watchtest.md" in status_line(), "status bar shows file path")
 check("watch on" in status_line(), "watch on indicator")
-ts1 = status_line().split("rendered ")[1][:8] if "rendered " in status_line() else None
-check(ts1 is not None, f"rendered timestamp ({ts1})")
+# The bar shows a clock glyph and HH:MM (no seconds), so equal strings
+# across the reload below are expected.
+CLOCK = re.compile(r"\S+ \d\d:\d\d · ")
+clock1 = CLOCK.search(status_line())
+check(clock1 is not None, f"render clock ({clock1.group(0) if clock1 else None})")
 check("lines" in status_line(), "line count")
 lines_before = int(status_line().split(" · ")[1].split()[0])
 check(lines_before > 0, f"line count parsed ({lines_before})")
@@ -121,9 +124,9 @@ send("G")  # then scroll to the appended content at the bottom
 pump_until(lambda: "WATCHSMOKEEDIT" in body_text())
 st = status_line()
 lines_after = int(st.split(" · ")[1].split()[0])
-ts2 = st.split("rendered ")[1][:8] if "rendered " in st else None
+ts2 = CLOCK.search(st)
 check(lines_after == lines_before + 4, f"line count grew on reload ({lines_before} -> {lines_after})")
-check(ts2 is not None and ts2 != ts1, f"timestamp updated ({ts1} -> {ts2})")
+check(ts2 is not None, f"render clock after reload ({ts2.group(0) if ts2 else None})")
 body = body_text()
 check("WATCHSMOKEEDIT" in body, "reload shows new content at bottom")
 
