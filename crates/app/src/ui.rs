@@ -38,9 +38,13 @@ fn draw_scrollbar(
     fg: Color,
     bg: Color,
 ) {
-    let mut state = ScrollbarState::new(total)
-        .position(position)
-        .viewport_content_length(viewport);
+    // ratatui wants the scroll *range* here, not the line count: its
+    // denominator is `content_length - 1 + viewport`, so feeding it the
+    // line count shrinks the thumb and stops it short of the track end.
+    // Leaving `viewport_content_length` unset makes ratatui use the track
+    // height, which is what the classic formula assumes.
+    let range = total.saturating_sub(viewport);
+    let mut state = ScrollbarState::new(range).position(position);
     f.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::new().fg(fg).bg(bg)),
         bar_area,
@@ -1490,9 +1494,10 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             width: 1,
             height: body_height,
         };
-        let mut state = ScrollbarState::new(total)
-            .position(scroll)
-            .viewport_content_length(body_height as usize);
+        // Same as `draw_scrollbar`: the content length is the scroll range,
+        // and the track height is the viewport.
+        let mut state =
+            ScrollbarState::new(total.saturating_sub(body_height as usize)).position(scroll);
         f.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .style(Style::new().fg(ui.popup_dimmed_fg).bg(ui.content_bg)),
