@@ -122,6 +122,8 @@ error (`unresolved link: <target>`), never a guess.
   pane, the sidebar tree, the tag list, the backlinks panel, the `.base`
   table and the help popup. It is drawn only while the content overflows the
   pane, and the text area is narrowed by that one column while it is drawn.
+  A pane too short for twice the vertical margin has no text rows at all,
+  and draws no bar.
   The `.base` table's bar sits inside its border, in the last inner column,
   and the table is rendered one column narrower while it is drawn.
 - The bar is drawn as a thin `│` track with a solid `█` thumb and **no

@@ -2285,6 +2285,39 @@ fn note_scrollbar_thumb_uses_the_text_viewport_with_a_vertical_margin() {
     );
 }
 
+/// A pane shorter than twice the vertical margin saturates the text height
+/// to 0, so no text row is visible. The note still overflows that empty
+/// viewport, but a bar scaled against it would claim rows the pane does not
+/// have, so the guard must suppress it: this pins that the frame draws (no
+/// panic), records a zero-row text viewport, and leaves the bar column and
+/// every text row blank.
+#[test]
+fn pane_shorter_than_twice_the_margin_draws_no_scrollbar() {
+    let file = ui_viewer("ui-margin-y-degenerate.md", &long_note(3));
+    let mut app = app_for(&file, None);
+    app.note_margin_y = 5;
+    // 24 rows would fit; 9 rows leaves an 8-row pane, short of 2 × 5.
+    let backend = TestBackend::new(100, 9);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        app.layout.note_viewport.height, 0,
+        "no text row fits between the margins"
+    );
+    assert!(
+        !column_has_bar(buffer, 99, 0..8),
+        "no bar without a text viewport"
+    );
+    for y in 0..8 {
+        let symbols = row_symbols(buffer, y);
+        assert!(
+            !symbols.chars().any(|c| c.is_ascii_alphanumeric()),
+            "pane row {y} stays blank: {symbols:?}"
+        );
+    }
+}
+
 #[test]
 fn note_scrollbar_click_mapping_matches_the_narrowed_viewport() {
     let file = ui_viewer("ui-bar-click.md", &long_note(200));

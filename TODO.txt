@@ -7,10 +7,17 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 14 is closed and committed. The next unit is 15 (two test gaps the
-  review left); nothing is in flight.
+  Units 1–15 are closed and committed. **0.6.2 is tagged** (`v0.6.2`).
+  Nothing is in flight: the follow-ups are done. What is left is the
+  parked list and the push.
 
 DONE
+  - Unit 15 — the vertical margin's two test gaps: a link clicked in a
+    note rendered with a vertical margin now activates through the real
+    geometry, and a pane too short for the margin draws no bar that
+    lies (the guard that suppresses it is now in the spec). Round 1 came
+    back changes-needed (a spec line that did not move with the
+    behaviour — the orchestrator's own); the fix round was reviewed clean.
   - Unit 14 — the vertical margin (`margin_y`): blank rows above and below
     the note text (0–5, default 1), the visible rows and the scroll range
     follow the shorter text viewport, and the scrollbar's thumb is computed
@@ -120,19 +127,6 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 15: two test gaps the vertical-margin review left. The "a click
-      on the text still hits links" half is met structurally — both
-      hit-tests share the `vp.y + line` arithmetic the checkbox test
-      proves — but the dedicated link tests fake
-      `note_viewport = Rect::new(0, 0, 40, 20)` and never see the real
-      inset geometry (unit 14, S2). And the degenerate case where the
-      pane is shorter than twice the margin: `text_rows` is 0, ratatui
-      treats 0 as "unset" and falls back to the track height — no panic,
-      but nothing pins it (unit 14, C1).
-  - One wording nit: the precondition assert in
-      `crates/app/src/app/tests.rs` says "the first row is selected" while
-      the pinned state has zero rows — "the selection cursor is at 0"
-      would say what is actually pinned (unit 13, S1).
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
       recommendation is to drop it: the sidebar's scroll is a selection
@@ -140,9 +134,9 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 15 — the two test gaps.
-  2. Push `main` (21+ commits ahead of `origin/main`; the push is the
+  1. Push `main` (22+ commits ahead of `origin/main`; the push is the
      human's call).
-  3. Then the parked list, in my order of value: the interactive
+  2. Then the parked list, in my order of value: the interactive
      scrollbar, the link hover preview, the regex search, the line-number
      gutter.
+  3. Or cut 0.6.3 with the outline, the vertical margin and the rest.

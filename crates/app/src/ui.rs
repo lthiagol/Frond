@@ -153,7 +153,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         };
         let text_rows = text_full.height as usize;
         let full_width = text_full.width as usize;
-        let bar_shown = app.viewer.line_count_at(full_width) > text_rows && note_full.width > 3;
+        // A pane shorter than twice the margin leaves no text rows. ratatui
+        // reads a 0 viewport as "unset" and scales the thumb against the
+        // track, claiming visible rows the pane does not have: draw no bar.
+        let bar_shown = text_rows > 0
+            && app.viewer.line_count_at(full_width) > text_rows
+            && note_full.width > 3;
         let wrap_width = if bar_shown {
             full_width.saturating_sub(1).max(1)
         } else {
