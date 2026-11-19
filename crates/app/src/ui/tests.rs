@@ -102,6 +102,15 @@ fn ui_viewer(name: &str, content: &str) -> TempFile {
     TempFile::new(name, content)
 }
 
+/// A note long enough to overflow the 100x24 test pane.
+fn overflowing_note(name: &str) -> TempFile {
+    let body: String = (0..123)
+        .map(|i| format!("line {i}\n\n"))
+        .chain(std::iter::once("tail\n".to_string()))
+        .collect();
+    ui_viewer(name, &body)
+}
+
 fn vault() -> TempDir {
     let dir = TempDir::new("ui-vault");
     std::fs::write(dir.path().join("alpha.md"), "alpha note\n").unwrap();
@@ -125,6 +134,18 @@ fn render_at(app: &mut App, cols: u16) -> String {
 /// The bottom screen row (the status bar).
 fn status_row(screen: &str) -> String {
     screen.lines().last().unwrap_or("").to_string()
+}
+
+/// Screen column where `needle` starts on the status row. Byte offsets are
+/// not columns: the bar carries multi-byte glyphs before the segments. (The
+/// test backend frames each row in quotes; strip them.)
+fn status_column(screen: &str, needle: &str) -> usize {
+    let row = status_row(screen);
+    let row = row.trim_matches('"');
+    let byte = row
+        .find(needle)
+        .unwrap_or_else(|| panic!("{needle:?} missing from {row:?}"));
+    UnicodeWidthStr::width(&row[..byte])
 }
 
 /// Mirrors `main`: the vault index is built and shared with the app,
@@ -302,15 +323,11 @@ fn scroll_percent_reads_the_offset() {
 fn status_bar_shows_the_scroll_percentage() {
     // The paragraphs and the tail overflow the pane; half way up the range
     // (rounded) is 50%.
-    let body: String = (0..123)
-        .map(|i| format!("line {i}\n\n"))
-        .chain(std::iter::once("tail\n".to_string()))
-        .collect();
-    let file = ui_viewer("ui-percent.md", &body);
+    let file = overflowing_note("ui-percent.md");
     let mut app = app_for(&file, None);
     let top = render(&mut app);
     assert!(
-        status_row(&top).contains("lines · 0% · watch on"),
+        status_row(&top).contains("lines ·   0% · watch on"),
         "top reads 0% right after the size: {}",
         status_row(&top)
     );
@@ -319,7 +336,7 @@ fn status_bar_shows_the_scroll_percentage() {
     app.viewer.scroll = max.div_ceil(2);
     let middle = render(&mut app);
     assert!(
-        status_row(&middle).contains("· 50% ·"),
+        status_row(&middle).contains("·  50% ·"),
         "half way reads 50%: {}",
         status_row(&middle)
     );
@@ -329,6 +346,48 @@ fn status_bar_shows_the_scroll_percentage() {
         status_row(&bottom).contains("· 100% ·"),
         "bottom reads 100%: {}",
         status_row(&bottom)
+    );
+}
+
+/// The percentage owns a fixed four-column, right-aligned field, so every
+/// segment after it keeps its column while the user scrolls.
+#[test]
+fn status_bar_percentage_field_is_fixed_width_and_does_not_move() {
+    let file = overflowing_note("ui-percent-field.md");
+    let mut app = app_for(&file, None);
+    let top = render(&mut app);
+    let max = app.viewer.max_scroll();
+    assert!(max > 0, "fixture must overflow");
+    app.viewer.scroll = max.div_ceil(2);
+    let middle = render(&mut app);
+    app.viewer.scroll_bottom();
+    let bottom = render(&mut app);
+
+    // Exactly four columns: `  0%`, ` 50%`, `100%`.
+    for (screen, field) in [
+        (&top, "·   0% ·"),
+        (&middle, "·  50% ·"),
+        (&bottom, "· 100% ·"),
+    ] {
+        assert!(
+            status_row(screen).contains(field),
+            "{field:?} missing: {}",
+            status_row(screen)
+        );
+    }
+    // And the first segment after it starts on the same screen column.
+    let columns = [
+        status_column(&top, "watch on"),
+        status_column(&middle, "watch on"),
+        status_column(&bottom, "watch on"),
+    ];
+    assert_eq!(
+        columns[0], columns[1],
+        "the watch segment moved between 0% and 50%: {columns:?}"
+    );
+    assert_eq!(
+        columns[1], columns[2],
+        "the watch segment moved between 50% and 100%: {columns:?}"
     );
 }
 
@@ -359,13 +418,118 @@ fn status_bar_omits_the_scroll_percentage_without_a_document() {
 }
 
 #[test]
+fn status_bar_shows_the_content_percentage_with_sidebar_focus() {
+    let dir = TempDir::new("ui-sidebar-percent");
+    let body: String = (0..123).map(|i| format!("line {i}\n\n")).collect();
+    std::fs::write(dir.path().join("long.md"), body).unwrap();
+    let mut app = status_app(&dir, "long.md");
+    render_at(&mut app, 100);
+    let max = app.viewer.max_scroll();
+    assert!(max > 0, "fixture must overflow");
+    app.viewer.scroll = max.div_ceil(2);
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.focus, crate::app::Focus::Sidebar);
+    let screen = render_at(&mut app, 100);
+    assert!(
+        status_row(&screen).contains("·  50% ·"),
+        "sidebar focus still shows the content pane's offset: {}",
+        status_row(&screen)
+    );
+}
+
+#[test]
+fn status_bar_shows_the_clock_and_hh_mm() {
+    let file = ui_viewer("ui-clock.md", "# Hi\n");
+    let mut app = app_for(&file, None);
+    let rendered_at = app
+        .viewer
+        .last_reload
+        .expect("the opened note has a render time");
+    let screen = render(&mut app);
+    let row = status_row(&screen);
+    let glyph = app.icons.clock();
+    assert_eq!(UnicodeWidthStr::width(glyph), 1, "single-width clock glyph");
+    let clock = format!("{} {}", glyph, format_clock(rendered_at));
+    assert_eq!(UnicodeWidthStr::width(clock.as_str()), 7, "◷ HH:MM");
+    let at = row
+        .find(&clock)
+        .unwrap_or_else(|| panic!("{clock:?} missing from {row:?}"));
+    assert_ne!(
+        row[at + clock.len()..].chars().next(),
+        Some(':'),
+        "the seconds are dropped: {row:?}"
+    );
+}
+
+#[test]
+fn format_clock_is_hh_mm() {
+    let text = format_clock(std::time::SystemTime::now());
+    assert_eq!(text.len(), 5, "HH:MM: {text:?}");
+    assert_eq!(&text[2..3], ":");
+    assert_eq!(text.matches(':').count(), 1, "no seconds field: {text:?}");
+    assert!(
+        text[..2]
+            .bytes()
+            .chain(text[3..].bytes())
+            .all(|b| b.is_ascii_digit()),
+        "digits around the colon: {text:?}"
+    );
+}
+
+#[test]
+fn status_bar_clock_follows_the_icon_set() {
+    let file = ui_viewer("ui-clock-icons.md", "# Hi\n");
+    let mut app = app_for(&file, None);
+    let rendered_at = app
+        .viewer
+        .last_reload
+        .expect("the opened note has a render time");
+    let time = format_clock(rendered_at);
+    let screen = render(&mut app);
+    let row = status_row(&screen);
+    assert!(
+        row.contains(&format!("\u{f017} {time}")),
+        "nerd clock glyph: {row:?}"
+    );
+    app.icons = crate::config::IconSet::Unicode;
+    let screen = render(&mut app);
+    let row = status_row(&screen);
+    assert!(
+        row.contains(&format!("◷ {time}")),
+        "unicode clock glyph: {row:?}"
+    );
+}
+
+#[test]
+fn status_bar_clock_shows_the_glyph_alone_before_the_first_render() {
+    let file = ui_viewer("ui-clock-none.md", "# Hi\n");
+    let mut app = app_for(&file, None);
+    app.viewer.last_reload = None;
+    let screen = render(&mut app);
+    let row = status_row(&screen);
+    let glyph = app.icons.clock();
+    let at = row
+        .find(glyph)
+        .unwrap_or_else(|| panic!("{glyph:?} missing from {row:?}"));
+    let after = row[at + glyph.len()..].trim_start();
+    assert!(
+        !after.chars().next().is_some_and(|c| c.is_ascii_digit()),
+        "no time before the first render: {row:?}"
+    );
+}
+
+#[test]
 fn status_bar_shows_path_lines_watch_timestamp() {
     let file = ui_viewer("ui.md", "# Hi\n\nbody\n");
     let mut app = app_for(&file, None);
     let screen = render(&mut app);
     assert!(screen.contains("lines"), "status bar missing line count");
     assert!(screen.contains("watch on"), "watch indicator missing");
-    assert!(screen.contains("rendered "), "render timestamp missing");
+    assert!(
+        status_row(&screen).contains(app.icons.clock()),
+        "render clock missing: {}",
+        status_row(&screen)
+    );
     assert!(screen.contains("Hi"), "content missing");
 }
 
@@ -1052,7 +1216,7 @@ fn base_table_status_bar_shows_the_tables_scroll_percentage() {
     app.sidebar_visible = false;
     let top = render(&mut app);
     assert!(
-        status_row(&top).contains("rows · view 1/1: All · 0% · watch on"),
+        status_row(&top).contains("rows · view 1/1: All ·   0% · watch on"),
         "table at the top reads 0% after its size segment: {}",
         status_row(&top)
     );

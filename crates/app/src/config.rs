@@ -36,8 +36,9 @@ pub struct Config {
     pub icons: Option<String>,
 }
 
-/// Glyph set for the status bar's note icons. `nerd` (the default) needs
-/// a Nerd Font in the terminal; `unicode` uses only standard glyphs.
+/// Glyph set for the status bar's note, table and clock icons. `nerd` (the
+/// default) needs a Nerd Font in the terminal; `unicode` uses only standard
+/// glyphs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum IconSet {
     #[default]
@@ -68,6 +69,14 @@ impl IconSet {
         match self {
             Self::Nerd => "\u{f04eb}",
             Self::Unicode => "▦",
+        }
+    }
+
+    /// Icon before the last render time (Nerd: clock, U+F017; unicode: ◷).
+    pub fn clock(self) -> &'static str {
+        match self {
+            Self::Nerd => "\u{f017}",
+            Self::Unicode => "\u{25f7}",
         }
     }
 }
@@ -381,6 +390,8 @@ mod tests {
         assert_eq!(IconSet::Nerd.note(), "\u{e73e}");
         assert_eq!(IconSet::Nerd.base(), "\u{f04eb}");
         assert_eq!(IconSet::Unicode.base(), "▦");
+        assert_eq!(IconSet::Nerd.clock(), "\u{f017}");
+        assert_eq!(IconSet::Unicode.clock(), "\u{25f7}");
     }
 
     #[test]

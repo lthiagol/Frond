@@ -7,10 +7,16 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 2 is closed and committed. The next unit is 3 (the scrollbar
+  Unit 3 is closed and committed. The next unit is 4 (the scrollbar
   symbols); nothing is in flight.
 
 DONE
+  - Unit 3 — the status bar does not move while scrolling: the percentage
+    sits in a fixed four-column right-aligned field (`  0%`, ` 50%`,
+    `100%`), the render time is a clock glyph plus `HH:MM` (nerd U+F017,
+    unicode U+25F7, the glyph alone before the first render), and the
+    percentage has its sidebar-focus test. Reviewed clean on both axes
+    (round 1: 0 blocking, 3 low).
   - Unit 2 — the scroll position in the status bar: the content pane's
     scroll offset as a percentage, immediately after the size segment
     (`¶ index.md · 12 lines · 42% · watch on · …`). 0% at the top, 100% at
@@ -42,25 +48,26 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 3: leaf-style scrollbar symbols (a `│` track, a `█` thumb, no
-      arrow heads) — cosmetic. TODO.md §5.7. It carries four low findings:
+  - Unit 4: leaf-style scrollbar symbols (a `│` track, a `█` thumb, no
+      arrow heads) — cosmetic. TODO.md §5.7. It carries three low findings:
       make the help popup use the shared `draw_scrollbar` helper instead of
       hand-building the state (unit 1, L1); fix the stale symbol set in the
       `column_has_bar` doc, which contradicts the new
       `scrollbar_track_rows` doc in the same file (unit 1, L2); pin the
       proportionality invariant, which today holds only because the bar
-      area equals the viewport rows (unit 1, L3); and add a
-      sidebar-focused render assertion for the status bar's scroll
-      percentage, so a future change cannot make the segment follow the
-      focus (unit 2, L1).
-  - Unit 4: release 0.6.2 — the Unreleased section holds the quick
+      area equals the viewport rows (unit 1, L3).
+  - A test that a watch reload refreshes `viewer.last_reload`: dropping the
+      seconds from the render time left the smoke script unable to prove
+      that the render segment follows a reload, and nothing else pins it
+      (unit 3, L1). Touches the viewer, so it is its own small unit.
+  - Unit 5: release 0.6.2 — the Unreleased section holds the quick
       switcher, the smoke fix, the Makefile fallback, the doc
-      reconciliation, the scrollbar fix and the scroll percentage; units
-      2–3 should ship in it.
+      reconciliation, the scrollbar fix, the scroll percentage and the
+      status-bar polish; units 2–4 should ship in it.
   - Parked: an outline/TOC panel (Ctrl+O), a link hover preview, regex and
       match-next in the search popup, a line-number gutter, a scroll
       position for the sidebar tree.
 
 NEXT
-  1. Unit 3 — the scrollbar symbols, plus the four low findings above.
-  2. Unit 4 — cut 0.6.2.
+  1. Unit 4 — the scrollbar symbols, plus the three low findings above.
+  2. Unit 5 — cut 0.6.2.
