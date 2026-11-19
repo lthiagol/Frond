@@ -110,9 +110,11 @@ error (`unresolved link: <target>`), never a guess.
 ## Scrollbars
 
 - A scrollable pane shows a one-column scrollbar on its right edge: the note
-  pane, the sidebar tree, the tag list, the backlinks panel and the help
-  popup. It is drawn only while the content overflows the pane, and the text
-  area is narrowed by that one column while it is drawn.
+  pane, the sidebar tree, the tag list, the backlinks panel, the `.base`
+  table and the help popup. It is drawn only while the content overflows the
+  pane, and the text area is narrowed by that one column while it is drawn.
+  The `.base` table's bar sits inside its border, in the last inner column,
+  and the table is rendered one column narrower while it is drawn.
 - The bar is drawn as a thin `│` track with a solid `█` thumb and **no
   arrow heads**: the track spans the full height of the bar column, so at
   the top of the content the thumb's first row is the column's first row,

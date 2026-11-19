@@ -7,11 +7,16 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Units 1–5 are closed and committed. **0.6.2 is tagged** (`v0.6.2`,
-  commit 9df6397). Nothing is in flight; `main` is ahead of `origin/main`
-  by 10 commits and the push is the human's call.
+  Unit 6 is closed and committed. The next unit is 7 (the assertion fixes);
+  nothing is in flight.
 
 DONE
+  - Unit 6 — the `.base` table gets a scrollbar: the shared
+    `draw_scrollbar` helper, the bar in the table's last inner column
+    while the table overflows, the table rendered one column narrower so
+    no text runs under it, and four new tests (overflow, narrowing, thumb
+    ends and proportion, bar-column click is a no-op). Reviewed clean on
+    both axes (round 1: 0 blocking, 3 low).
   - Unit 5 — 0.6.2 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
     released as `## [0.6.2] — 2026-11-19` with a fresh empty
     `## [Unreleased]` above it, and the `v0.6.2` tag. Reviewed clean on
@@ -61,26 +66,37 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - The `.base` table has no scrollbar: it scrolls (PgUp/PgDn, `g`/`G`,
-      the wheel) but draws no bar, so its position is invisible. TODO.md
-      §5.9 left this as a decision to make: give the table a bar like the
-      other panes, or leave it. The table's scroll offset is already
-      reported in the status bar, which is the reason to leave it.
-  - A test that a watch reload refreshes `viewer.last_reload`: dropping the
-      seconds from the render time left the smoke script unable to prove
-      that the render segment follows a reload, and nothing else pins it
-      (unit 3, L1). Touches the viewer, so it is its own small unit.
-  - The "border intact" assertions can no longer tell the track from the
-      border — both draw `│` (unit 4, C1). Either assert the border cell's
-      style or drop the check.
-  - The help test mirrors `draw_help`'s clamp arithmetic instead of
-      sharing a helper (unit 4, C2). Drift fails loudly, so it is
+  - Unit 7: the assertion fixes (all in `crates/app/src/ui/tests.rs`):
+      the "border intact" assertions now compare the same `│` glyph as the
+      track, so they cannot tell the border from the track — decided with
+      the human: check the **thumb** instead (the border column holds no
+      `█`, the inner column does). There are **three** instances now: the
+      backlinks panel, the tag list, and the new `.base` table test
+      (unit 6, L1). Also relax the over-pinned `assert_eq!(last_end, 97)`
+      in the base-table narrowing test to the unit invariant
+      (`all(r.end <= 97)`) — it pins the column fitter, not the scrollbar
+      (unit 6, L2).
+  - Unit 8: the help test mirrors `draw_help`'s clamp arithmetic instead
+      of sharing a helper (unit 4, C2). Drift fails loudly, so it is
       polish.
-  - Parked: an outline/TOC panel (Ctrl+O), a link hover preview, regex and
-      match-next in the search popup, a line-number gutter, a scroll
-      position for the sidebar tree, an interactive scrollbar (click and
+  - Unit 9: a test that a watch reload refreshes `viewer.last_reload`:
+      dropping the seconds from the render time left the smoke script
+      unable to prove that the render segment follows a reload, and nothing
+      else pins it (unit 3, L1). `viewer.reload()` sets it
+      (`crates/app/src/viewer.rs:571`); the existing
+      `vault_watcher_reindexes_and_reparses` forces `last_reload = None`
+      and asserts only the index.
+  - Unit 10 (feature, when wanted): the outline/TOC panel. Its key is
+      decided with the human — **plain `o`** (`Ctrl+O` stays
+      forward-navigation, and leaf's `t` is taken by the sidebar mode).
+  - Parked: a link hover preview, regex + match-next in the search popup, a
+      line-number gutter, a scroll position for the sidebar tree (the
+      recommendation is to drop it: the sidebar's scroll is a selection
+      cursor, not a document position), an interactive scrollbar (click and
       drag — TODO.md §5.8).
 
 NEXT
-  1. The three follow-ups above, if the human wants them.
-  2. Otherwise: push `main`, and open the next cycle (the parked features).
+  1. Unit 7 — the assertion fixes.
+  2. Unit 8 — the help-popup geometry helper.
+  3. Unit 9 — the watch-reload `last_reload` test.
+  4. Then push `main` and open the next cycle (unit 10 and the parked list).

@@ -300,10 +300,41 @@ fn draw_base_table(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         width: area.width.saturating_sub(2),
         height: area.height.saturating_sub(2),
     };
-    let lines = base.render(ui, inner.width as usize, inner.height as usize);
+    // The bar takes the last inner column while the table overflows. Decide
+    // before the render: the extra column only ever narrows the table, and
+    // the height (and so the viewport) stays the same either way.
+    let overflow = base.line_count() > inner.height as usize;
+    let bar_shown = overflow && inner.width > 1;
+    let text_width = if bar_shown {
+        inner.width - 1
+    } else {
+        inner.width
+    };
+    let text_area = Rect {
+        width: text_width,
+        ..inner
+    };
+    let lines = base.render(ui, text_width as usize, inner.height as usize);
     Paragraph::new(ratatui::text::Text::from(lines))
         .style(Style::new().bg(ui.content_bg))
-        .render(inner, f.buffer_mut());
+        .render(text_area, f.buffer_mut());
+    if bar_shown {
+        let bar = Rect {
+            x: inner.right() - 1,
+            y: inner.y,
+            width: 1,
+            height: inner.height,
+        };
+        draw_scrollbar(
+            f,
+            bar,
+            base.line_count(),
+            base.scroll,
+            inner.height as usize,
+            ui.popup_dimmed_fg,
+            ui.content_bg,
+        );
+    }
 }
 
 /// Visual treatment for a status glyph. Built only from colors the app
