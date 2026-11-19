@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+
+### Fixed
+
+### Changed
+
+## [0.6.2] — 2026-11-19
+
+### Added
 - **Scroll position in the status bar**: the content pane's scroll offset as
   a percentage, right after the size segment (`¶ index.md · 12 lines · 42% ·
   watch on · …`). It reads `0%` at the top, `100%` at the bottom and `100%`
