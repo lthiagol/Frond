@@ -61,6 +61,11 @@ HAPPENED
     rustup's default location.
 
 OPEN
+  - The `.base` table has no scrollbar: it scrolls (PgUp/PgDn, `g`/`G`,
+      the wheel) but draws no bar, so its position is invisible. TODO.md
+      §5.9 left this as a decision to make: give the table a bar like the
+      other panes, or leave it. The table's scroll offset is already
+      reported in the status bar, which is the reason to leave it.
   - A test that a watch reload refreshes `viewer.last_reload`: dropping the
       seconds from the render time left the smoke script unable to prove
       that the render segment follows a reload, and nothing else pins it
