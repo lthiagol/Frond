@@ -7,9 +7,16 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 4 is closed and committed. The next unit is 5 — cut 0.6.2.
+  Units 1–5 are closed and committed. **0.6.2 is tagged** (`v0.6.2`,
+  commit 9df6397). Nothing is in flight; `main` is ahead of `origin/main`
+  by 10 commits and the push is the human's call.
 
 DONE
+  - Unit 5 — 0.6.2 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
+    released as `## [0.6.2] — 2026-11-19` with a fresh empty
+    `## [Unreleased]` above it, and the `v0.6.2` tag. Reviewed clean on
+    both axes (round 1: 0 blocking, 0 low) — every release-note entry was
+    traced to a real commit.
   - Unit 4 — the scrollbar symbols: a thin `│` track and a solid `█` thumb
     with no arrow heads, so the track spans the full height of the bar
     column; the help popup draws its bar through the shared
@@ -54,12 +61,6 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 5: release 0.6.2 — the Unreleased section holds the quick
-      switcher, the smoke fix, the Makefile fallback, the doc
-      reconciliation, the scrollbar fix, the scroll percentage, the
-      status-bar polish and the scrollbar symbols; units 1–4 should ship
-      in it. Version bumps in `Cargo.toml` + `Cargo.lock`, the changelog
-      date, and the `v0.6.2` tag.
   - A test that a watch reload refreshes `viewer.last_reload`: dropping the
       seconds from the render time left the smoke script unable to prove
       that the render segment follows a reload, and nothing else pins it
@@ -72,7 +73,9 @@ OPEN
       polish.
   - Parked: an outline/TOC panel (Ctrl+O), a link hover preview, regex and
       match-next in the search popup, a line-number gutter, a scroll
-      position for the sidebar tree.
+      position for the sidebar tree, an interactive scrollbar (click and
+      drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 5 — cut 0.6.2.
+  1. The three follow-ups above, if the human wants them.
+  2. Otherwise: push `main`, and open the next cycle (the parked features).
