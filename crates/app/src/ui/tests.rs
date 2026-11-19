@@ -1368,8 +1368,8 @@ fn base_scrollbar_present_only_when_table_overflows() {
 }
 
 /// The table is rendered one column narrower while the bar is drawn: the
-/// rule line spans 97 columns instead of the inner 98, and every link cell
-/// ends at or before 97, never at the bar column (98).
+/// rule line spans 97 columns instead of the inner 98, and every link
+/// cell's exclusive `end` is at most 97 (the narrowed value), never 98.
 #[test]
 fn base_scrollbar_narrows_the_table_one_column() {
     let dir = TempDir::new("ui-base-bar-narrow");
@@ -1403,10 +1403,14 @@ fn base_scrollbar_narrows_the_table_one_column() {
     // columns. It cannot prove the narrowing itself: `draw_scrollbar` runs
     // after the table and overwrites column 98 at every row, so an
     // un-narrowed table also reads 97. The region assert below carries the
-    // not-narrowed case — a cell ending at the bar column means no
-    // narrowing.
+    // not-narrowed case: `BaseLinkRegion::end` is exclusive (`col < r.end`),
+    // so a cell with `end == 98` reaches column 97 and fails, while the
+    // narrowed cells pass with `end == 97`.
     let rule_dashes = (1..99).filter(|&x| buffer[(x, 2)].symbol() == "─").count();
-    assert_eq!(rule_dashes, 97, "the table is one column narrower");
+    assert_eq!(
+        rule_dashes, 97,
+        "the rule spans 97 columns (losing two would read 96; the region assert catches not-narrowed)"
+    );
     let base = app.base.as_ref().unwrap();
     assert!(!base.regions.is_empty(), "the table has link cells");
     // The cell invariant is that no text runs under the bar; how the fitter
@@ -1674,6 +1678,7 @@ fn help_scrollbar_thumb_ends_track_the_scroll_position() {
     let buffer = terminal.backend().buffer();
     let HelpPopup {
         rect: popup,
+        grid: _,
         total,
         visible: body_height,
     } = help_popup(buffer.area);
