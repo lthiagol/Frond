@@ -107,6 +107,18 @@ error (`unresolved link: <target>`), never a guess.
   argument wins over the restore). `frond --config-show` prints a
   commented default config file; `--help`/`--version` print usage/version.
 
+## Scrollbars
+
+- A scrollable pane shows a one-column scrollbar on its right edge: the note
+  pane, the sidebar tree, the tag list, the backlinks panel and the help
+  popup. It is drawn only while the content overflows the pane, and the text
+  area is narrowed by that one column while it is drawn.
+- The thumb is proportional to the visible fraction of the content (±1 row
+  of rounding) and its ends track the scroll position: at the top it starts
+  at the first track row, at the bottom it ends at the last track row. The
+  scrollbar's content length is the scroll *range* — the total number of
+  lines less the visible rows — not the number of lines.
+
 ## Keybindings (v1)
 
 From leaf, the app inherited scroll keys, the mouse wheel, and the `?` help

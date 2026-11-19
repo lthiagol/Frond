@@ -14,6 +14,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   navigation stack, `Esc` closes.
 
 ### Fixed
+- The scrollbar thumb is proportional to the visible part of the content and
+  reaches the end of the track: the note pane, the sidebar tree, the tag list,
+  the backlinks panel and the help popup were fed the number of lines where
+  the scroll range belongs, so the thumb was too short and stopped short of
+  the bottom.
 - The mouse-wheel smoke check compares the whole body text instead of a single
   row, so a scroll is no longer missed when the sampled row happens to be a
   blank gap.

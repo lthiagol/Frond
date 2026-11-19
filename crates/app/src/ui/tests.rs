@@ -1164,6 +1164,56 @@ fn help_scroll_j_moves_and_k_returns() {
     assert!(app.viewer.help_scroll < usize::MAX, "clamped at draw");
 }
 
+/// The help popup builds its own scrollbar state: its thumb must end on the
+/// last track row at the bottom too, and span the visible fraction of the
+/// body.
+#[test]
+fn help_scrollbar_thumb_ends_track_the_scroll_position() {
+    let file = ui_viewer("ui-bar-help-ends.md", "x\n");
+    let mut app = app_for(&file, None);
+    app.viewer.help_open = true;
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+
+    // The popup is the only scrollbar at 100x30 (the note is one line): find
+    // its begin arrow, then read the bar's column below it.
+    let buffer = terminal.backend().buffer();
+    let (x, top) = (0..buffer.area.width)
+        .find_map(|x| {
+            (0..buffer.area.height).find_map(|y| (buffer[(x, y)].symbol() == "▲").then_some((x, y)))
+        })
+        .expect("help scrollbar drawn");
+    let track = scrollbar_track_rows(buffer, x, top..buffer.area.height);
+    let thumb = scrollbar_thumb_rows(buffer, x, top..buffer.area.height);
+    assert_eq!(
+        thumb.first(),
+        track.first(),
+        "at the top the thumb starts at the first track row"
+    );
+    // The bar area is the body rows (two arrow heads included).
+    let body_height = track.len() + 2;
+    let total = help_grid(buffer.area.height).rows;
+    let expected = proportional_thumb_len(total, body_height, track.len());
+    assert!(
+        (thumb.len() as f64 - expected).abs() <= 1.0,
+        "thumb length {} is within 1 row of the proportional {expected:.1}",
+        thumb.len()
+    );
+
+    // `G` clamps the scroll to the body's end at draw time.
+    app.viewer.help_scroll = usize::MAX;
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let track = scrollbar_track_rows(buffer, x, top..buffer.area.height);
+    let thumb = scrollbar_thumb_rows(buffer, x, top..buffer.area.height);
+    assert_eq!(
+        thumb.last(),
+        track.last(),
+        "at the bottom the thumb ends at the last track row"
+    );
+}
+
 // --- scrollbars (markdown viewer, sidebar tree, tag list) -------------
 
 /// Buffer symbols of a whole row, left to right.
@@ -1171,6 +1221,36 @@ fn row_symbols(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
     (0..buffer.area.width)
         .map(|x| buffer[(x, y)].symbol().to_string())
         .collect()
+}
+
+/// Rows of column `x` drawn as the scrollbar's track or thumb, arrow heads
+/// excluded: the extent a proportional thumb has to span. The default
+/// symbols are `║` (track), `█` (thumb), `▲`/`▼` (heads).
+fn scrollbar_track_rows(
+    buffer: &ratatui::buffer::Buffer,
+    x: u16,
+    ys: std::ops::Range<u16>,
+) -> Vec<u16> {
+    ys.into_iter()
+        .filter(|&y| matches!(buffer[(x, y)].symbol(), "║" | "█"))
+        .collect()
+}
+
+/// Rows of column `x` drawn as the scrollbar thumb.
+fn scrollbar_thumb_rows(
+    buffer: &ratatui::buffer::Buffer,
+    x: u16,
+    ys: std::ops::Range<u16>,
+) -> Vec<u16> {
+    ys.into_iter()
+        .filter(|&y| buffer[(x, y)].symbol() == "█")
+        .collect()
+}
+
+/// Length a proportional thumb should have on a `track_len` track: the
+/// visible fraction of the content.
+fn proportional_thumb_len(total: usize, visible: usize, track_len: usize) -> f64 {
+    visible as f64 / total as f64 * track_len as f64
 }
 
 /// Whether a scrollbar glyph (track or thumb) sits in column `x` of rows
@@ -1260,6 +1340,44 @@ fn note_scrollbar_position_tracks_the_drawn_scroll() {
     assert!(b[0] > t[0], "thumb moved down with the scroll");
 }
 
+/// The thumb's ends track the scroll position: the first track row at the
+/// top, the *last* track row at the bottom (the bug this pins stopped it
+/// two rows short), and its length is the visible fraction of the note.
+#[test]
+fn note_scrollbar_thumb_ends_track_the_scroll_position() {
+    let file = ui_viewer("ui-bar-ends.md", &long_note(200));
+    let mut app = app_for(&file, None);
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let track = scrollbar_track_rows(buffer, 99, 0..23);
+    let thumb = scrollbar_thumb_rows(buffer, 99, 0..23);
+    assert_eq!(
+        thumb.first(),
+        track.first(),
+        "at the top the thumb starts at the first track row"
+    );
+    // The bar spans 23 rows here (2 arrow heads), the note 200 lines.
+    let expected = proportional_thumb_len(200, 23, track.len());
+    assert!(
+        (thumb.len() as f64 - expected).abs() <= 1.0,
+        "thumb length {} is within 1 row of the proportional {expected:.1}",
+        thumb.len()
+    );
+
+    app.viewer.scroll_bottom();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let track = scrollbar_track_rows(buffer, 99, 0..23);
+    let thumb = scrollbar_thumb_rows(buffer, 99, 0..23);
+    assert_eq!(
+        thumb.last(),
+        track.last(),
+        "at the bottom the thumb ends at the last track row"
+    );
+}
+
 #[test]
 fn note_scrollbar_click_mapping_matches_the_narrowed_viewport() {
     let file = ui_viewer("ui-bar-click.md", &long_note(200));
@@ -1316,6 +1434,55 @@ fn sidebar_scrollbar_absent_when_all_rows_fit() {
     assert!(
         !column_has_bar(buffer, bar_x, 1..23),
         "no bar when rows fit"
+    );
+}
+
+/// The list panels share the helper, so the sidebar tree stands in for the
+/// tag list and backlinks: the thumb reaches the last track row at the
+/// bottom of a long list, and spans the visible fraction of it.
+#[test]
+fn sidebar_scrollbar_thumb_ends_track_the_scroll_position() {
+    let vault_dir = TempDir::new("ui-bar-side-ends");
+    for i in 0..40 {
+        std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
+    }
+    let file = ui_viewer("ui-bar-side-ends.md", "x\n");
+    let mut app = app_for(&file, Some(vault_dir.path()));
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+
+    let bar_x = sidebar_width(100) - 2;
+    let sidebar_area = app.layout.sidebar_area.expect("sidebar visible");
+    let inner = sidebar_area.y + 1..sidebar_area.bottom() - 1;
+    let rows_total = app.sidebar.as_ref().expect("sidebar").row_count();
+    let inner_height = sidebar_area.height.saturating_sub(2) as usize;
+
+    let buffer = terminal.backend().buffer();
+    let track = scrollbar_track_rows(buffer, bar_x, inner.clone());
+    let thumb = scrollbar_thumb_rows(buffer, bar_x, inner.clone());
+    assert_eq!(
+        thumb.first(),
+        track.first(),
+        "at the top the thumb starts at the first track row"
+    );
+    let expected = proportional_thumb_len(rows_total, inner_height, track.len());
+    assert!(
+        (thumb.len() as f64 - expected).abs() <= 1.0,
+        "thumb length {} is within 1 row of the proportional {expected:.1}",
+        thumb.len()
+    );
+
+    // Select the last row: the list scrolls to its end.
+    app.sidebar.as_mut().expect("sidebar").move_down(rows_total);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let track = scrollbar_track_rows(buffer, bar_x, inner.clone());
+    let thumb = scrollbar_thumb_rows(buffer, bar_x, inner);
+    assert_eq!(
+        thumb.last(),
+        track.last(),
+        "at the bottom the thumb ends at the last track row"
     );
 }
 
