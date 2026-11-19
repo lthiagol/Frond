@@ -41,10 +41,13 @@ fn draw_scrollbar(
     // ratatui wants the scroll *range* here, not the line count: its
     // denominator is `content_length - 1 + viewport`, so feeding it the
     // line count shrinks the thumb and stops it short of the track end.
-    // Leaving `viewport_content_length` unset makes ratatui use the track
-    // height, which is what the classic formula assumes.
+    // The viewport is passed explicitly because the track is taller than
+    // the text viewport whenever the pane has a vertical margin; the thumb
+    // must stay proportional to the visible fraction of the content.
     let range = total.saturating_sub(viewport);
-    let mut state = ScrollbarState::new(range).position(position);
+    let mut state = ScrollbarState::new(range)
+        .position(position)
+        .viewport_content_length(viewport);
     // Leaf's symbols: a thin track and a solid thumb, no arrow heads, so the
     // track spans the whole bar column (the heads used to eat two rows).
     f.render_stateful_widget(
@@ -129,9 +132,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             height: view_height - panel_height,
             ..content_area
         };
-        // The viewer's viewport helper subtracts the 1-line status bar itself,
-        // so pass the note rows plus that status line.
-        let note_rows = note_full.height as usize;
 
         // The engine pre-wraps at the render width, so it must match the real
         // text width (re-parses on change, e.g. sidebar toggled or resize).
@@ -140,16 +140,20 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // re-wraps one column narrower. Narrowing only ever adds lines, so
         // an overflowing note keeps overflowing and the bar stays consistent.
         // The text sits inside a symmetric margin (config `margin`, blank
-        // columns on each side). The scrollbar, when shown, takes the last
-        // column, so the right side is the margin plus that column.
+        // columns on each side, and `margin_y`, blank rows above and below).
+        // The scrollbar, when shown, takes the last column, so the right
+        // side is the margin plus that column.
         let margin = app.note_margin;
+        let margin_y = app.note_margin_y;
         let text_full = Rect {
             x: note_full.x + margin,
+            y: note_full.y + margin_y,
             width: note_full.width.saturating_sub(2 * margin),
-            ..note_full
+            height: note_full.height.saturating_sub(margin_y.saturating_mul(2)),
         };
+        let text_rows = text_full.height as usize;
         let full_width = text_full.width as usize;
-        let bar_shown = app.viewer.line_count_at(full_width) > note_rows && note_full.width > 3;
+        let bar_shown = app.viewer.line_count_at(full_width) > text_rows && note_full.width > 3;
         let wrap_width = if bar_shown {
             full_width.saturating_sub(1).max(1)
         } else {
@@ -165,10 +169,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             text_full
         };
         app.layout.note_viewport = note_area;
-        app.viewer.on_viewport_height(note_full.height + 1);
+        // The viewer subtracts the status line itself, so pass the text rows
+        // plus that line: the visible rows decide the scroll range.
+        app.viewer.on_viewport_height(text_full.height + 1);
 
-        // The text widget paints only its own cells, so the margin columns
-        // would keep the terminal background: paint the whole note area first.
+        // The text widget paints only its own cells, so the margin cell rows
+        // and columns would keep the terminal background: paint the whole note
+        // area first.
         f.buffer_mut()
             .set_style(note_full, Style::new().bg(ui.content_bg));
         // Lines are pre-wrapped (one row each), so only the visible window is
@@ -192,7 +199,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 bar,
                 app.viewer.lines.len(),
                 app.viewer.scroll as usize,
-                note_rows,
+                text_rows,
                 ui.popup_dimmed_fg,
                 ui.content_bg,
             );

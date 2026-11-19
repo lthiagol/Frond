@@ -99,6 +99,13 @@ error (`unresolved link: <target>`), never a guess.
   `backlinks (N)`; `no notes link here` is its empty state; click/Enter
   opens a listed note). Opening it moves the focus to the panel, closing
   it returns the focus to the content pane.
+- The note text sits inside a margin on all four sides: `margin` blank
+  columns on each side and `margin_y` blank rows above and below. The
+  visible text rows are the pane's height less twice the vertical margin,
+  and the scroll range follows them. The text viewport ends `margin_y`
+  rows above the status bar. A click in the padding does nothing. The
+  vertical margin applies to the note only — a `.base` table fills its
+  pane, as it ignores the horizontal margin too.
 - Session memory (XDG state dir — `XDG_STATE_HOME/frond`, else
   `~/.local/state/frond`; `FROND_SESSION` overrides it; one file per
   vault, named after a hash of the vault root): the last open note
@@ -126,6 +133,11 @@ error (`unresolved link: <target>`), never a guess.
   at the first track row, at the bottom it ends at the last track row. The
   scrollbar's content length is the scroll *range* — the total number of
   lines less the visible rows — not the number of lines.
+- The thumb's length is computed against the **text viewport** (the rows of
+  text the pane shows), not against the height of the bar column: the two
+  are equal only when the pane has no vertical margin. With a vertical
+  margin the bar column is taller than the text, and the thumb still
+  shows the visible fraction of the content.
 
 ## Keybindings (v1)
 
@@ -214,7 +226,8 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
   on; off = the note's frontmatter block does not render),
   `theme_rotation` (`all` | `light` | `dark`, default `all`: the group
   `Shift+T` starts in), `margin` (blank columns on each side of the note,
-  0–10, default 2), `icons` (`nerd` | `unicode`, default `nerd`: the note
+  0–10, default 2), `margin_y` (blank rows above and below the note, 0–5,
+  default 1), `icons` (`nerd` | `unicode`, default `nerd`: the note
   and base icons on the status bar; `nerd` needs a Nerd Font in the terminal).
   Read at
   startup; `--vault`/`--theme`/`--watch`/`--mouse` override. Missing file =
