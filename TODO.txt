@@ -7,10 +7,18 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 9 is closed and committed. The next unit is 10 (the watch-reload
-  render-time test); nothing is in flight.
+  Units 1–10 are closed and committed. **0.6.2 is tagged** (`v0.6.2`).
+  Nothing is in flight: the follow-ups are done. What is left is a
+  product decision (the outline/TOC panel) and the parked list.
 
 DONE
+  - Unit 10 — the watch reload refreshes the render time: the existing
+    `vault_watcher_reindexes_and_reparses` now asserts that
+    `viewer.last_reload` is set again by the poll. Both reviewers traced
+    every write to the field and confirmed the assertion pins
+    `reload()` specifically; the mutation probe (removing the assignment)
+    fails on the new assertion. Reviewed clean on both axes (round 1: 0
+    blocking, 0 low).
   - Unit 9 — the help popup's geometry, finished: `HelpPopup` carries the
     grid so `help_grid` is called once, the narrowing test's comment names
     the exclusive end value, and its assert message says what the rule
@@ -108,13 +116,6 @@ OPEN
       the assert message "the table is one column narrower" claims more
       than the count proves — an un-narrowed table also reads 97 dashes,
       because the bar overwrites column 98 at the rule row (L3).
-  - Unit 10: a test that a watch reload refreshes `viewer.last_reload`:
-      dropping the seconds from the render time left the smoke script
-      unable to prove that the render segment follows a reload, and nothing
-      else pins it (unit 3, L1). `viewer.reload()` sets it
-      (`crates/app/src/viewer.rs:571`); the existing
-      `vault_watcher_reindexes_and_reparses` forces `last_reload = None`
-      and asserts only the index.
   - Unit 11 (feature, when wanted): the outline/TOC panel. Its key is
       decided with the human — **plain `o`** (`Ctrl+O` stays
       forward-navigation, and leaf's `t` is taken by the sidebar mode).
@@ -125,6 +126,7 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 10 — the watch-reload `last_reload` test.
+  1. Push `main` (12+ commits ahead of `origin/main`; the push is the
+     human's call).
   2. Unit 11 — the outline/TOC panel, when wanted.
-  3. Then push `main` and open the next cycle (the parked list).
+  3. Then the parked list.
