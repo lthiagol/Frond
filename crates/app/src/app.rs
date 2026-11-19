@@ -617,14 +617,10 @@ impl App {
 
     /// Enter on an outline row (or a click): scroll the note to the selected
     /// heading and hand the focus to the content pane. Empty lists and open
-    /// `.base` tables have nothing to jump to.
+    /// `.base` tables have nothing to jump to — the rows come from
+    /// [`outline_rows`], the one place that decides.
     fn jump_to_outline_heading(&mut self) {
-        if self.base.is_some() {
-            return;
-        }
-        let Some(line) = self
-            .viewer
-            .toc
+        let Some(line) = outline_rows(&self.base, &self.viewer)
             .get(self.outline.selected)
             .map(|entry| entry.line as u32)
         else {
