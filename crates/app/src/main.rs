@@ -217,6 +217,15 @@ fn effective_mouse(flag: Option<bool>, config: Option<bool>) -> bool {
     flag.or(config).unwrap_or(true)
 }
 
+/// Effective vertical note margin: the config `margin_y` value, clamped to
+/// the same 0–`MAX_MARGIN_Y` range the horizontal margin uses, or the
+/// default when the key is absent.
+fn effective_margin_y(config: Option<u16>) -> u16 {
+    config
+        .unwrap_or(config::DEFAULT_MARGIN_Y)
+        .min(config::MAX_MARGIN_Y)
+}
+
 /// Checks that `input` names an existing directory and returns its absolute
 /// form. Empty input is an error (the prompt has no default).
 fn validate_vault_dir(input: &str) -> Result<PathBuf, String> {
@@ -440,6 +449,9 @@ fn main() {
                 .margin
                 .unwrap_or(config::DEFAULT_MARGIN)
                 .min(config::MAX_MARGIN);
+            // Vertical note margin (config `margin_y`, blank rows above and
+            // below the note text).
+            app.note_margin_y = effective_margin_y(config.margin_y);
             // Mouse capture default (config/flag): the App field drives the
             // runtime toggle (`m`); setup_terminal already applied the
             // startup state.
@@ -680,6 +692,15 @@ mod tests {
         assert!(effective_mouse(Some(true), Some(false)), "flag wins");
         assert!(!effective_mouse(None, Some(false)), "config next");
         assert!(effective_mouse(None, None), "default on");
+    }
+
+    #[test]
+    fn vertical_margin_defaults_to_one_and_clamps_to_five() {
+        assert_eq!(effective_margin_y(None), 1, "absent key: default");
+        assert_eq!(effective_margin_y(Some(0)), 0);
+        assert_eq!(effective_margin_y(Some(3)), 3);
+        assert_eq!(effective_margin_y(Some(5)), 5);
+        assert_eq!(effective_margin_y(Some(6)), 5, "over the max: clamped");
     }
 
     #[test]

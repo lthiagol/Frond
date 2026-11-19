@@ -40,6 +40,8 @@ fn note_text_starts_after_the_configured_margin() {
     let file = ui_viewer("ui-margin.md", "first line here\n");
     let mut app = app_for(&file, None);
     app.note_margin = 3;
+    // This test pins the horizontal axis: no vertical inset to shift rows.
+    app.note_margin_y = 0;
     app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -59,6 +61,173 @@ fn note_text_starts_after_the_configured_margin() {
     assert_eq!(buffer[(3, 0)].symbol(), "f", "text starts at the margin");
     assert_eq!(app.layout.note_viewport.x, 3);
     assert_eq!(app.layout.note_viewport.width, 94, "100 less 3 per side");
+}
+
+/// The vertical margin insets the text rows the same way: blank painted
+/// rows above and below, and the viewport the mouse and the scroll use.
+#[test]
+fn note_text_starts_after_the_configured_vertical_margin() {
+    let file = ui_viewer("ui-margin-y.md", "first line here\nsecond line here\n");
+    let mut app = app_for(&file, None);
+    app.note_margin_y = 2;
+    app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    // The pane is rows 0..23 (row 23 is the status bar).
+    for y in 0..2 {
+        assert_eq!(buffer[(5, y)].symbol(), " ", "top margin row {y} is blank");
+        assert_eq!(
+            buffer[(5, y)].bg,
+            Color::Rgb(9, 9, 9),
+            "top margin row {y} painted"
+        );
+    }
+    for y in 21..23 {
+        assert_eq!(
+            buffer[(5, y)].symbol(),
+            " ",
+            "bottom margin row {y} is blank"
+        );
+        assert_eq!(
+            buffer[(5, y)].bg,
+            Color::Rgb(9, 9, 9),
+            "bottom margin row {y} painted"
+        );
+    }
+    assert_eq!(
+        buffer[(app.note_margin, 2)].symbol(),
+        "f",
+        "text starts two rows below the pane top"
+    );
+    assert_eq!(app.layout.note_viewport.y, 2);
+    assert_eq!(
+        app.layout.note_viewport.height, 19,
+        "pane 23 rows less 2 per side"
+    );
+}
+
+/// `margin_y = 0` restores the pre-margin layout exactly.
+#[test]
+fn vertical_margin_zero_restores_the_old_layout() {
+    let file = ui_viewer("ui-margin-y-zero.md", "first line here\n");
+    let mut app = app_for(&file, None);
+    app.note_margin_y = 0;
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(app.layout.note_viewport.y, 0, "text starts at the pane top");
+    assert_eq!(app.layout.note_viewport.height, 23, "the whole note pane");
+    assert_eq!(app.viewer.viewport_height, 23, "the whole pane scrolls");
+    assert_eq!(buffer[(app.note_margin, 0)].symbol(), "f");
+}
+
+/// Scrolled to the end, the note's last line lands on the last text row (the
+/// pane bottom less the bottom margin row), and the margin row below it is
+/// blank.
+#[test]
+fn note_bottom_line_sits_above_the_bottom_margin() {
+    let body: Vec<String> = (0..60).map(|i| format!("row-{i:03}")).collect();
+    let file = ui_viewer("ui-margin-y-bottom.md", &body.join("\n"));
+    let mut app = app_for(&file, None);
+    render(&mut app);
+    app.viewer.scroll_bottom();
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let vp = app.layout.note_viewport;
+    assert_eq!(vp.y, 1, "one default margin row above the text");
+    assert_eq!(vp.height, 21, "pane less two margin rows");
+    let last_text_row = vp.y + vp.height - 1;
+    // The renderer emits a final blank line after the content, so the last
+    // numbered line sits one text row above the bottom margin row.
+    assert!(
+        row_symbols(buffer, last_text_row - 1).contains("row-059"),
+        "the last content line sits just above the final blank line"
+    );
+    for y in [last_text_row, last_text_row + 1] {
+        let symbols = row_symbols(buffer, y);
+        assert!(
+            !symbols.chars().any(|c| c.is_ascii_alphanumeric()),
+            "row {y} carries no text: {symbols:?}"
+        );
+    }
+}
+
+/// The scroll range is computed from the text rows, not the pane rows: 22
+/// lines overflow the 21 visible rows of a default 100x24 frame, while a
+/// short note still fits and never scrolls.
+#[test]
+fn scroll_range_follows_the_text_rows_not_the_pane() {
+    let short = ui_viewer("ui-margin-y-short.md", &long_note(10));
+    let mut app = app_for(&short, None);
+    render(&mut app);
+    assert_eq!(
+        app.viewer.max_scroll(),
+        0,
+        "a note that fits does not scroll"
+    );
+
+    let file = ui_viewer("ui-margin-y-range.md", &long_note(21));
+    let mut app = app_for(&file, None);
+    render(&mut app);
+    let total = app.viewer.lines.len();
+    assert_eq!(total, 22, "21 fixture lines plus the final blank one");
+    assert_eq!(app.viewer.viewport_height, 21, "pane less two margin rows");
+    assert_eq!(app.viewer.max_scroll(), 1, "22 lines in 21 visible rows");
+
+    // Without the vertical margin the same note fits the 23-row pane.
+    app.note_margin_y = 0;
+    render(&mut app);
+    assert_eq!(app.viewer.viewport_height, 23);
+    assert_eq!(
+        app.viewer.max_scroll(),
+        0,
+        "fits the pane without the margin"
+    );
+}
+
+/// The margin rows are outside the text viewport, so a click in the
+/// padding is a no-op; the same click on the text still reaches a
+/// checkbox.
+#[test]
+fn click_in_the_vertical_padding_is_a_no_op() {
+    let file = ui_viewer("ui-margin-y-click.md", "- [ ] alpha\n");
+    let mut app = app_for(&file, None);
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let task = app.viewer.tasks[0];
+    let vp = app.layout.note_viewport;
+    let col = vp.x + task.start as u16;
+    let row = vp.y + task.line as u16;
+    assert_eq!(vp.y, 1, "one default margin row above the text");
+
+    app.focus = crate::app::Focus::Sidebar;
+    app.handle_click(col, vp.y - 1);
+    assert_eq!(
+        app.focus,
+        crate::app::Focus::Sidebar,
+        "padding click does not focus the note"
+    );
+    assert!(
+        std::fs::read_to_string(file.path())
+            .unwrap()
+            .contains("- [ ] alpha"),
+        "padding click does not toggle the checkbox"
+    );
+
+    app.handle_click(col, row);
+    assert_eq!(app.focus, crate::app::Focus::Content, "text click focuses");
+    assert!(
+        std::fs::read_to_string(file.path())
+            .unwrap()
+            .contains("- [~] alpha"),
+        "text click still toggles the checkbox"
+    );
 }
 
 /// Scrolling to the bottom of an overflowing note must land on the
@@ -90,11 +259,11 @@ fn bottom_scroll_survives_the_scrollbar_rewrap() {
     let note_rows = &rows[..rows.len() - 1];
     let marker_row = note_rows.iter().rposition(|r| r.contains("LAST MARKER"));
     // Only the note's final paragraph break follows the last text line,
-    // so it sits on the row just above the bottom.
+    // and it sits above the bottom margin row.
     assert_eq!(
         marker_row,
-        Some(note_rows.len() - 2),
-        "last line above the paragraph break"
+        Some(note_rows.len() - 3),
+        "last line above the paragraph break and the bottom margin"
     );
 }
 
@@ -558,15 +727,16 @@ fn help_popup_renders_and_covers_content() {
 }
 
 /// The viewer's viewport height must be fed from the frame area, not
-/// kept independently: after draw, it equals area - status bar.
+/// kept independently: after draw, it equals area - status bar minus the
+/// two vertical margin rows.
 #[test]
 fn draw_feeds_frame_height_into_viewer() {
     let file = ui_viewer("ui-height.md", "x\n");
     let mut app = app_for(&file, None);
     app.viewer.viewport_height = 3;
     let screen = render(&mut app);
-    // TestBackend 100x24 → viewport = 24 - 1 status line.
-    assert_eq!(app.viewer.viewport_height, 23);
+    // TestBackend 100x24 → 24 - 1 status line - 2 × default margin_y.
+    assert_eq!(app.viewer.viewport_height, 21);
     assert!(screen.contains("watch on"));
     app.viewer.scroll_bottom();
     assert_eq!(app.viewer.scroll, app.viewer.max_scroll());
@@ -2003,8 +2173,8 @@ fn note_scrollbar_present_only_when_overflowing_and_text_stops_before_it() {
             "text under the bar at row {y}: {sym:?}"
         );
     }
-    // Text is still visible in the narrowed area.
-    assert!(row_symbols(buffer, 0).contains("line-000"));
+    // Text is still visible in the narrowed area (below the top margin row).
+    assert!(row_symbols(buffer, 1).contains("line-000"));
 }
 
 #[test]
@@ -2019,10 +2189,10 @@ fn note_scrollbar_position_tracks_the_drawn_scroll() {
     app.viewer.scroll_bottom();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let bottom = terminal.backend().buffer().clone();
-    // The paragraph and the bar both moved: the first row differs and the
-    // bar thumb is no longer in the same place.
-    assert!(row_symbols(&top, 0).contains("line-000"));
-    assert!(!row_symbols(&bottom, 0).contains("line-000"));
+    // The paragraph and the bar both moved: the first text row differs and
+    // the bar thumb is no longer in the same place.
+    assert!(row_symbols(&top, 1).contains("line-000"));
+    assert!(!row_symbols(&bottom, 1).contains("line-000"));
     let thumb_rows = |b: &ratatui::buffer::Buffer| -> Vec<u16> {
         (0..23).filter(|&y| b[(99, y)].symbol() == "█").collect()
     };
@@ -2033,7 +2203,9 @@ fn note_scrollbar_position_tracks_the_drawn_scroll() {
 
 /// The thumb's ends track the scroll position: the first track row at the
 /// top, the *last* track row at the bottom (the bug this pins stopped it
-/// two rows short), and its length is the visible fraction of the note.
+/// two rows short), and its length is the visible fraction of the note
+/// measured against the text viewport, which is shorter than the track
+/// whenever the note has a vertical margin.
 #[test]
 fn note_scrollbar_thumb_ends_track_the_scroll_position() {
     let file = ui_viewer("ui-bar-ends.md", &long_note(200));
@@ -2042,22 +2214,23 @@ fn note_scrollbar_thumb_ends_track_the_scroll_position() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
-    // The viewport is the note area, independent of the bar's own rect.
-    let note_rows = app.layout.note_viewport.height as usize;
+    // The track spans the pane; the text viewport is the note area, shorter
+    // than the track by the two vertical margin rows.
+    let text_rows = app.layout.note_viewport.height as usize;
     let total = app.viewer.lines.len();
     let track = scrollbar_track_rows(buffer, 99, 0..23);
     let thumb = scrollbar_thumb_rows(buffer, 99, 0..23);
+    assert_eq!(track.len(), 23, "the track spans the pane, no arrow heads");
     assert_eq!(
-        track.len(),
-        note_rows,
-        "the track spans the full note viewport, no arrow heads"
+        text_rows, 21,
+        "the text viewport is the pane less two margin rows"
     );
     assert_eq!(
         thumb.first(),
         track.first(),
         "at the top the thumb starts at the first track row"
     );
-    let expected = proportional_thumb_len(total, note_rows, track.len());
+    let expected = proportional_thumb_len(total, text_rows, track.len());
     assert!(
         (thumb.len() as f64 - expected).abs() <= 1.0,
         "thumb length {} is within 1 row of the proportional {expected:.1}",
@@ -2073,6 +2246,42 @@ fn note_scrollbar_thumb_ends_track_the_scroll_position() {
         thumb.last(),
         track.last(),
         "at the bottom the thumb ends at the last track row"
+    );
+}
+
+/// With a real vertical margin the bar's track is much taller than the text
+/// viewport, so the fallback (track height) would draw a visibly longer
+/// thumb. The ±1 rule must still hold against the *text* rows.
+#[test]
+fn note_scrollbar_thumb_uses_the_text_viewport_with_a_vertical_margin() {
+    let file = ui_viewer("ui-bar-thumb-margin.md", &long_note(60));
+    let mut app = app_for(&file, None);
+    app.note_margin_y = 5;
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let text_rows = app.layout.note_viewport.height as usize;
+    let total = app.viewer.lines.len();
+    let track = scrollbar_track_rows(buffer, 99, 0..23);
+    let thumb = scrollbar_thumb_rows(buffer, 99, 0..23);
+    assert_eq!(text_rows, 13, "pane 23 rows less 5 per side");
+    assert_eq!(track.len(), 23, "the track still spans the pane");
+    let expected = proportional_thumb_len(total, text_rows, track.len());
+    let fallback = proportional_thumb_len(total, track.len(), track.len());
+    assert!(
+        (expected - fallback).abs() > 1.0,
+        "the fixture distinguishes the text viewport from the track height"
+    );
+    assert!(
+        (thumb.len() as f64 - expected).abs() <= 1.0,
+        "thumb length {} is within 1 row of the proportional {expected:.1}",
+        thumb.len()
+    );
+    assert_eq!(
+        thumb.first(),
+        track.first(),
+        "at the top the thumb still starts at the first track row"
     );
 }
 

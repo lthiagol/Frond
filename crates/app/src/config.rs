@@ -32,6 +32,8 @@ pub struct Config {
     pub theme_rotation: Option<String>,
     /// Blank columns on each side of the note text (0–`MAX_MARGIN`).
     pub margin: Option<u16>,
+    /// Blank rows above and below the note text (0–`MAX_MARGIN_Y`).
+    pub margin_y: Option<u16>,
     /// Status-bar icon set: "nerd" or "unicode".
     pub icons: Option<String>,
 }
@@ -85,6 +87,10 @@ impl IconSet {
 pub const MAX_MARGIN: u16 = 10;
 /// Note margin when the config does not set one, per side, in columns.
 pub const DEFAULT_MARGIN: u16 = 2;
+/// Tallest vertical note margin a config may ask for, per side, in rows.
+pub const MAX_MARGIN_Y: u16 = 5;
+/// Vertical note margin when the config does not set one, per side, in rows.
+pub const DEFAULT_MARGIN_Y: u16 = 1;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -97,6 +103,7 @@ struct ConfigRaw {
     metadata: Option<bool>,
     theme_rotation: Option<String>,
     margin: Option<u16>,
+    margin_y: Option<u16>,
     icons: Option<String>,
     /// Keys outside our vocabulary — captured so they can be reported.
     #[serde(flatten)]
@@ -166,6 +173,9 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # Blank columns on each side of the note text, 0-10. Default: 2.
 # margin = 2
 
+# Blank rows above and below the note text, 0-5. Default: 1.
+# margin_y = 1
+
 # Status-bar icons beside the note name: "nerd" needs a Nerd Font in the
 # terminal; "unicode" uses only standard glyphs. Default: "nerd".
 # icons = "nerd"
@@ -210,6 +220,7 @@ fn load_status(path: &Path) -> (Config, Vec<String>, bool) {
                     metadata: raw.metadata,
                     theme_rotation: raw.theme_rotation,
                     margin: raw.margin,
+                    margin_y: raw.margin_y,
                     icons: raw.icons,
                 },
                 warnings,
@@ -399,13 +410,14 @@ mod tests {
         let dir = TempDir::new("config-rotation");
         std::fs::write(
             dir.path().join("config.toml"),
-            "theme_rotation = \"dark\"\nmargin = 4\n",
+            "theme_rotation = \"dark\"\nmargin = 4\nmargin_y = 3\n",
         )
         .unwrap();
         let (config, warnings) = load_at(&dir, "config.toml");
         assert!(warnings.is_empty());
         assert_eq!(config.theme_rotation.as_deref(), Some("dark"));
         assert_eq!(config.margin, Some(4));
+        assert_eq!(config.margin_y, Some(3));
     }
 
     #[test]
@@ -444,6 +456,7 @@ mod tests {
         assert_eq!(config.sidebar_width, Some(40));
         assert_eq!(config.mouse, Some(true));
         assert_eq!(config.metadata, Some(true));
+        assert_eq!(config.margin_y, Some(1));
     }
 
     #[test]

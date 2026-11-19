@@ -197,6 +197,8 @@ pub struct App {
     pub theme_rotation: ThemeRotation,
     /// Blank columns on each side of the note text (config `margin`).
     pub note_margin: u16,
+    /// Blank rows above and below the note text (config `margin_y`).
+    pub note_margin_y: u16,
     /// Status-bar icon set (config `icons`).
     pub icons: crate::config::IconSet,
     /// Discovered custom theme files (name → path), reused by config
@@ -282,6 +284,7 @@ impl App {
             theme_choices: ThemeChoices::default(),
             theme_rotation: ThemeRotation::default(),
             note_margin: crate::config::DEFAULT_MARGIN,
+            note_margin_y: crate::config::DEFAULT_MARGIN_Y,
             icons: crate::config::IconSet::default(),
             discovered_themes: BTreeMap::new(),
             config_watch: None,

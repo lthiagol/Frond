@@ -280,7 +280,7 @@ check(
 send("\r")  # Enter jumps to it
 pump(0.5)
 check(
-    "Second Section" in row(0),
+    "Second Section" in row(1),  # the default margin_y = 1: text starts here
     "Enter scrolled the note to the selected heading",
 )
 

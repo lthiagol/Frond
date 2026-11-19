@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- **Vertical note margin (`margin_y`)**: the note's text now sits inside a
+  margin on all four sides — `margin` blank columns on each side and
+  `margin_y` blank rows above and below (0–5, default 1). The scroll
+  range and the scrollbar's thumb follow the shorter text viewport.
 - **Outline (`o`)**: the sidebar can show the open note's headings instead
   of the vault tree. `o` switches it on, `o` again returns to the tree.
   The rows are indented by heading level and follow the open note; `j`/`k`
