@@ -15,6 +15,7 @@ use vault::{GitStatus, SearchResults};
 use crate::config::ConfigWatch;
 use crate::links::{LinkState, RenderedLink};
 use crate::nav::Nav;
+use crate::outline::Outline;
 use crate::search::{SearchMode, SearchState};
 use crate::sidebar::{NodeKind, Sidebar};
 use crate::tags::TagList;
@@ -81,11 +82,13 @@ pub enum Focus {
     Backlinks,
 }
 
-/// What the sidebar shows: the folder tree or the tag list (`t` toggles).
+/// What the sidebar shows: the folder tree, the tag list (`t` toggles) or
+/// the open note's outline (`o` toggles over the other two).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarMode {
     Tree,
     Tags,
+    Outline,
 }
 
 /// A still-ambiguous wikilink awaiting the user's pick (shown as a popup;
@@ -133,6 +136,11 @@ pub struct App {
     pub sidebar: Option<Sidebar>,
     pub sidebar_visible: bool,
     pub sidebar_mode: SidebarMode,
+    /// The tree or tag view the outline (`o`) overlays; `o` again restores
+    /// it. Only ever `Tree` or `Tags`.
+    outline_prev: SidebarMode,
+    /// Outline view state (used when `sidebar_mode == Outline`).
+    pub outline: Outline,
     /// Tag view state (used when `sidebar_mode == Tags`).
     pub tags: TagList,
     /// Vault index (booted from `--vault`, or from the cwd when no
@@ -245,6 +253,8 @@ impl App {
             // one there is nothing to show.
             sidebar_visible: has_vault,
             sidebar_mode: SidebarMode::Tree,
+            outline_prev: SidebarMode::Tree,
+            outline: Outline::new(),
             tags: TagList::new(),
             index,
             focus: Focus::Content,
@@ -599,6 +609,36 @@ impl App {
         }
     }
 
+    /// The outline's row count: the open note's heading table. A `.base`
+    /// table in the content pane is not a note, so it has no outline (the
+    /// viewer's last note is hidden behind the table).
+    fn outline_len(&self) -> usize {
+        if self.base.is_some() {
+            0
+        } else {
+            self.viewer.toc.len()
+        }
+    }
+
+    /// Enter on an outline row (or a click): scroll the note to the selected
+    /// heading and hand the focus to the content pane. Empty lists and open
+    /// `.base` tables have nothing to jump to.
+    fn jump_to_outline_heading(&mut self) {
+        if self.base.is_some() {
+            return;
+        }
+        let Some(line) = self
+            .viewer
+            .toc
+            .get(self.outline.selected)
+            .map(|entry| entry.line as u32)
+        else {
+            return;
+        };
+        self.viewer.set_scroll(line);
+        self.focus = Focus::Content;
+    }
+
     /// Re-reads the backlinks of the open note from the index.
     pub fn refresh_backlinks(&mut self) {
         self.backlinks = match &self.index {
@@ -686,6 +726,10 @@ impl App {
             sidebar.reveal(path);
         }
         self.refresh_backlinks();
+        // The outline lists the note in the content pane: keep its cursor
+        // valid against the new heading table right away (the next draw
+        // would sync it too, but a key can arrive before that).
+        self.outline.sync(self.outline_len());
         // Debounce-gated ("rate-limited trivially"): skipped entirely when
         // the last spawn is recent — the status cannot have gone stale in
         // that window through anything this app did not already see.
@@ -1097,6 +1141,19 @@ impl App {
                 };
                 self.open_sidebar_path(clicked)
             }
+            SidebarMode::Outline => {
+                let len = self.outline_len();
+                let Some(index) = crate::sidebar::list_row_at(row, area, self.outline.scroll, len)
+                else {
+                    return false; // border row or past the last heading
+                };
+                self.outline.select(index, len);
+                self.jump_to_outline_heading();
+                // A row click jumps like Enter, so the reader's context
+                // moves to the content pane (handle_click only keeps the
+                // sidebar focused when this returns false).
+                self.focus == Focus::Content
+            }
         }
     }
 
@@ -1275,14 +1332,18 @@ impl App {
         }
     }
 
-    /// Opens a note selected in the sidebar (tree or tag mode); on read
-    /// failure the error is surfaced in the status bar and the current
-    /// note stays put (with the sidebar still focused). On success the
-    /// focus moves to the content pane.
+    /// Enter on the sidebar (tree, tag or outline row); on read failure the
+    /// error is surfaced in the status bar and the current note stays put
+    /// (with the sidebar still focused). On success the focus moves to the
+    /// content pane; the outline jumps to the selected heading instead.
     fn open_from_sidebar(&mut self) {
         let path = match self.sidebar_mode {
             SidebarMode::Tree => self.sidebar.as_mut().and_then(|sb| sb.activate()),
             SidebarMode::Tags => self.tags.activate(),
+            SidebarMode::Outline => {
+                self.jump_to_outline_heading();
+                return;
+            }
         };
         let Some(path) = path else {
             return;
@@ -1503,6 +1564,7 @@ impl App {
             }
             KeyCode::Tab if plain => self.toggle_sidebar(),
             KeyCode::Char('t') if plain && self.sidebar.is_some() => self.toggle_sidebar_mode(),
+            KeyCode::Char('o') if plain && self.sidebar.is_some() => self.toggle_outline(),
             KeyCode::Char('m') if plain => self.toggle_mouse_capture(),
             KeyCode::Char('f') if plain => self.viewer.toggle_metadata(),
             KeyCode::Char('>') if plain => self.widen_sidebar(),
@@ -1808,6 +1870,8 @@ impl App {
     }
 
     /// `t`: the sidebar switches between the folder tree and the tag list.
+    /// From the outline it toggles the pair underneath and leaves the
+    /// outline (the outline remembers which of the two it was showing).
     fn toggle_sidebar_mode(&mut self) {
         if self.sidebar.is_none() {
             return;
@@ -1815,9 +1879,31 @@ impl App {
         self.sidebar_mode = match self.sidebar_mode {
             SidebarMode::Tree => SidebarMode::Tags,
             SidebarMode::Tags => SidebarMode::Tree,
+            SidebarMode::Outline => match self.outline_prev {
+                SidebarMode::Tree => SidebarMode::Tags,
+                _ => SidebarMode::Tree,
+            },
         };
         if self.sidebar_mode == SidebarMode::Tags {
             self.refresh_tags();
+        }
+        self.outline_prev = self.sidebar_mode;
+    }
+
+    /// `o`: shows the open note's outline over the tree/tag view; `o` again
+    /// restores whichever of the two was last shown. A no-op without a
+    /// sidebar, like `t`.
+    fn toggle_outline(&mut self) {
+        if self.sidebar.is_none() {
+            return;
+        }
+        match self.sidebar_mode {
+            SidebarMode::Outline => self.sidebar_mode = self.outline_prev,
+            mode => {
+                self.outline_prev = mode;
+                self.sidebar_mode = SidebarMode::Outline;
+                self.outline.sync(self.outline_len());
+            }
         }
     }
 
@@ -1890,6 +1976,12 @@ impl App {
                 match self.sidebar_mode {
                     SidebarMode::Tree => "tree",
                     SidebarMode::Tags => "tags",
+                    // The outline is a temporary overlay: persist the view
+                    // it was drawn over, so a restore lands on tree/tags.
+                    SidebarMode::Outline => match self.outline_prev {
+                        SidebarMode::Tags => "tags",
+                        _ => "tree",
+                    },
                 }
                 .to_string(),
             ),
@@ -1951,6 +2043,7 @@ impl App {
         match state.mode.as_deref() {
             Some("tags") if self.sidebar.is_some() => {
                 self.sidebar_mode = SidebarMode::Tags;
+                self.outline_prev = SidebarMode::Tags;
                 self.refresh_tags();
             }
             _ => {}
@@ -1985,6 +2078,8 @@ impl App {
                     }
                 }
                 SidebarMode::Tags => self.tags.collapse_or_parent(),
+                // A heading list has no hierarchy to collapse.
+                SidebarMode::Outline => {}
             },
         }
     }
@@ -2016,6 +2111,7 @@ impl App {
                     self.focus = Focus::Content;
                 }
             }
+            SidebarMode::Outline => self.focus = Focus::Content,
         }
     }
 
@@ -2035,6 +2131,14 @@ impl App {
                     self.tags.move_down(delta as usize);
                 } else {
                     self.tags.move_up((-delta) as usize);
+                }
+            }
+            SidebarMode::Outline => {
+                let len = self.outline_len();
+                if delta >= 0 {
+                    self.outline.move_down(delta as usize, len);
+                } else {
+                    self.outline.move_up((-delta) as usize, len);
                 }
             }
         }

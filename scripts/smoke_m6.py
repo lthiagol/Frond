@@ -89,7 +89,11 @@ os.makedirs(VAULT, exist_ok=True)
 NOTES = {
     "index.md": (
         "---\nstatus: complete\n---\n\n"
-        "# Smoke Heading\n\nA body paragraph for the heading color check.\n"
+        "# Smoke Heading\n\nA body paragraph for the heading color check.\n\n"
+        + "Filler paragraph for the scroll target.\n\n" * 20
+        + "## Second Section\n\nJump target.\n\n"
+        "### Third Section\n\nDeeper heading for the indentation check.\n\n"
+        + "Tail paragraph after the jump target.\n\n" * 25
     ),
     "alpha.md": "---\ntype: task\nstatus: active\n---\n\n# Alpha\n\nalpha body\n",
     "beta.md": "---\ntype: task\nstatus: draft\n---\n\n# Beta\n\nbeta body\n",
@@ -247,6 +251,48 @@ check(
     "\ue73e" not in status_line(),
     "the nerd-font note glyph (U+E73E) is not used in unicode mode",
 )
+
+# --- the outline (o) -------------------------------------------------------
+send("h")  # focus the sidebar (tree view)
+pump(0.3)
+send("o")
+pump(0.4)
+check("outline" in body_text(), "o switches the sidebar to the outline")
+check(
+    sidebar_row("Smoke Heading") is not None,
+    "the open note's first heading is listed",
+)
+check(
+    sidebar_row("Second Section") is not None,
+    "every heading is listed in document order",
+)
+check(
+    sidebar_row("alpha.md") is None,
+    "tree rows are gone in outline mode",
+)
+
+send("j")  # select the second heading
+pump(0.3)
+check(
+    "Second Section" in status_line(),
+    "the status bar shows the selected heading",
+)
+send("\r")  # Enter jumps to it
+pump(0.5)
+check(
+    "Second Section" in row(0),
+    "Enter scrolled the note to the selected heading",
+)
+
+send("o")  # outline off: back to the view it was over (the tree)
+pump(0.4)
+check(
+    sidebar_row("alpha.md") is not None,
+    "o again returns to the tree",
+)
+check("outline" not in body_text(), "the outline panel is gone")
+send("g")  # back to the top of the note for the theme color checks
+pump(0.3)
 
 # --- theme groups (Ctrl+T) -------------------------------------------------
 OCEAN_HEADING = heading_fg()

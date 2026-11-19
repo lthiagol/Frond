@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- **Outline (`o`)**: the sidebar can show the open note's headings instead
+  of the vault tree. `o` switches it on, `o` again returns to the tree.
+  The rows are indented by heading level and follow the open note; `j`/`k`
+  move the selection and `Enter` (or a click) scrolls the note to the
+  selected heading.
 - The `.base` table shows a scrollbar while it overflows, like the other
   panes: the bar sits in the table's last inner column, and the table is
   rendered one column narrower while the bar is drawn.

@@ -7,11 +7,17 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Units 1–10 are closed and committed. **0.6.2 is tagged** (`v0.6.2`).
-  Nothing is in flight: the follow-ups are done. What is left is a
-  product decision (the outline/TOC panel) and the parked list.
+  Unit 11 is closed and committed. The next unit is 12 (the outline's two
+  follow-ups); nothing is in flight.
 
 DONE
+  - Unit 11 — the outline (`o`): the sidebar's third view over the tree
+    and the tags, listing the open note's headings indented by level,
+    with `j`/`k`, an `Enter`/click jump to the heading, the `no headings`
+    empty state and the heading as the status-bar label. The tree and tag
+    views are untouched. Reviewed clean on both axes (round 1: 0 blocking,
+    5 low — three of them gaps in the orchestrator's own spec wording,
+    fixed in the same commit).
   - Unit 10 — the watch reload refreshes the render time: the existing
     `vault_watcher_reindexes_and_reparses` now asserts that
     `viewer.last_reload` is set again by the poll. Both reviewers traced
@@ -95,30 +101,14 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 7: the assertion fixes (all in `crates/app/src/ui/tests.rs`):
-      the "border intact" assertions now compare the same `│` glyph as the
-      track, so they cannot tell the border from the track — decided with
-      the human: check the **thumb** instead (the border column holds no
-      `█`, the inner column does). There are **three** instances now: the
-      backlinks panel, the tag list, and the new `.base` table test
-      (unit 6, L1). Also relax the over-pinned `assert_eq!(last_end, 97)`
-      in the base-table narrowing test to the unit invariant
-      (`all(r.end <= 97)`) — it pins the column fitter, not the scrollbar
-      (unit 6, L2).
-  - Unit 9: the help popup's geometry, finished. The refactor left
-      `draw_help` calling `help_grid(area.height)` a second time for
-      `help_body` — the work does not matter, but the drift risk undercuts
-      the "single source" the unit was about: `HelpPopup` should carry the
-      `HelpGrid` (unit 8, L1). It also carries the two comment/message
-      corrections: the narrowing test's comment says "a cell ending at the
-      bar column", but `BaseLinkRegion::end` is exclusive, so the failing
-      value is `end == 98` and `end == 97` is the passing case (L2); and
-      the assert message "the table is one column narrower" claims more
-      than the count proves — an un-narrowed table also reads 97 dashes,
-      because the bar overwrites column 98 at the rule row (L3).
-  - Unit 11 (feature, when wanted): the outline/TOC panel. Its key is
-      decided with the human — **plain `o`** (`Ctrl+O` stays
-      forward-navigation, and leaf's `t` is taken by the sidebar mode).
+  - Unit 12: the outline's two follow-ups. The rule "a `.base` table in
+      the pane means no outline rows" is written out three times in two
+      modules (`app.rs` `outline_len`, `ui.rs` twice) — `outline_len()`
+      could feed the `ui.rs` sites, so a future change to the rule (outlines
+      for tables) cannot leave the panel, the click routing and the status
+      label apart (unit 11, C1). And the session save-side mapping —
+      quitting in the outline persists the tree/tags view — has no
+      round-trip test: `session.rs` covers only "tags" (unit 11, C2).
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
       recommendation is to drop it: the sidebar's scroll is a selection
@@ -126,7 +116,7 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Push `main` (12+ commits ahead of `origin/main`; the push is the
+  1. Unit 12 — the outline's follow-ups.
+  2. Push `main` (18+ commits ahead of `origin/main`; the push is the
      human's call).
-  2. Unit 11 — the outline/TOC panel, when wanted.
   3. Then the parked list.

@@ -102,7 +102,9 @@ error (`unresolved link: <target>`), never a guess.
 - Session memory (XDG state dir — `XDG_STATE_HOME/frond`, else
   `~/.local/state/frond`; `FROND_SESSION` overrides it; one file per
   vault, named after a hash of the vault root): the last open note
-  with its scroll, plus the sidebar's mode, selection and folder expansion,
+  with its scroll, plus the sidebar's mode (the tree or the tag view —
+  the outline is never persisted, so quitting in the outline restores the
+  view it came from), selection and folder expansion,
   are saved on clean quit and restored on the next start (an explicit note
   argument wins over the restore). `frond --config-show` prints a
   commented default config file; `--help`/`--version` print usage/version.
@@ -143,6 +145,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a popup row selects it (a second click on the selected row opens it) |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
+| `o` | Sidebar mode: the open note's headings (the outline); `o` again returns to the tree |
 | `<` / `>` | Narrow / widen the sidebar (2-column steps, clamped) |
 | `h` / `l` (or ← / →) | Focus sidebar / content (`l` expands a folder, `l` on a note row moves the focus to the content; `h` collapses a folder, `h` on a note row collapses to its parent); from the backlinks panel `h` returns to the content |
 | `x` / `X` | Focus next/previous link **or checkbox** (document order) |
@@ -294,6 +297,36 @@ the switcher matches note *paths*.
 - The popup is modal: typed characters go into the query and never reach
   the app (a typed `q` is a query character, not a quit). `Ctrl+C` still
   quits.
+
+## Outline (`o`)
+
+The sidebar can show the **open note's headings** instead of the vault
+tree: `o` switches it on, `o` again returns to the tree. The tree and tag
+views (`t`) are untouched, and `o` returns to whichever of the two was
+last shown.
+
+- The list is the open note's heading table (`viewer.toc`), in document
+  order, each row indented by its heading level (the shallowest level in
+  the note is flush left, each deeper level one step in).
+- While a `.base` table is open in the content pane the outline is empty:
+  a table is not a note, and the note hidden behind it would list headings
+  that are stale and cannot be jumped to.
+- `o` switches the mode like `t` does — including while the sidebar is
+  hidden, where the mode changes and shows when the sidebar is revealed
+  again.
+- The outline follows the open note: it is the note currently in the
+  content pane, and it is rebuilt when that note changes.
+- `j`/`k` (and the arrows) move the selection; the panel scrolls the
+  selection into view, like the tree.
+- `Enter` scrolls the note to the selected heading and moves the focus to
+  the content pane. A click on a row does the same.
+- `l` moves the focus to the content pane; `h` does nothing (a heading
+  list has no hierarchy to collapse).
+- With no note open, or a note with no headings, the panel shows the
+  empty state `no headings`.
+- While the sidebar is focused, the status bar shows the selected
+  heading's title as the sidebar's label (the tree shows the focused
+  row's name, the tag view `#tag`).
 
 ## Guarded writes (post-v1 loop 4)
 
