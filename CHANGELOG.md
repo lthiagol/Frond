@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- **Scroll position in the status bar**: the content pane's scroll offset as
+  a percentage, right after the size segment (`¶ index.md · 12 lines · 42% ·
+  watch on · …`). It reads `0%` at the top, `100%` at the bottom and `100%`
+  when the content fits; a `.base` table shows its own offset.
 - **Quick switcher (`Ctrl+P`)**: a modal popup that fuzzy-matches the typed
   query against the vault's notes and opens the selected one. The query
   filters live (no Enter needed); the match is a case-insensitive

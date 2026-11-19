@@ -1049,6 +1049,28 @@ fn file_label(app: &App, path: &Path) -> String {
     }
 }
 
+/// The content pane's scroll offset and scroll range. `None` when no
+/// document is open: the viewer always holds a path in a running app, so an
+/// empty path is the sentinel (only tests reach it).
+fn content_scroll(app: &App) -> Option<(u32, u32)> {
+    if let Some(base) = &app.base {
+        return Some((base.scroll as u32, base.max_scroll() as u32));
+    }
+    if app.viewer.path.as_os_str().is_empty() {
+        return None;
+    }
+    Some((app.viewer.scroll, app.viewer.max_scroll()))
+}
+
+/// The scroll offset as a percentage of the scroll range: `0` at the top,
+/// `100` at the bottom, and `100` when the content fits (range `0`).
+fn scroll_percent(scroll: u32, max_scroll: u32) -> u16 {
+    if max_scroll == 0 {
+        return 100;
+    }
+    (u64::from(scroll.min(max_scroll)) * 100 / u64::from(max_scroll)).min(100) as u16
+}
+
 fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
     // Sidebar focused → show the focused tree/tag entry's full path (the
     // note itself may not be open); content focused → the open note's path.
@@ -1089,12 +1111,23 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             height: 1,
         })
     };
+    // Scroll position: the content pane's offset, whichever pane has the
+    // focus. An empty viewer path is the no-document sentinel (the app
+    // refuses to start without a file), and then the segment is omitted.
+    let scroll = content_scroll(app);
     let mut spans = vec![
         Span::styled(path, path_style),
         Span::raw(" · "),
         Span::raw(count),
-        Span::raw(" · "),
     ];
+    if let Some((offset, max_scroll)) = scroll {
+        spans.push(Span::raw(" · "));
+        spans.push(Span::raw(format!(
+            "{}%",
+            scroll_percent(offset, max_scroll)
+        )));
+    }
+    spans.push(Span::raw(" · "));
     if app.viewer.watch {
         spans.push(Span::styled(
             "watch on",

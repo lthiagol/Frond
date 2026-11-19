@@ -221,12 +221,23 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 
 ## Status bar
 
-`¶ index.md · 12 lines · watch on · rendered 09:30 · ✓`
+`¶ index.md · 12 lines · 42% · watch on · rendered 09:30 · ✓`
 
 - Segments, in order: the name label, the size (`N lines`, or `N rows ·
-  view X/Y: <name>` while a `.base` table is open), the watch indicator
-  (`watch on` / `watch off`), the last render time (`rendered HH:MM:SS`),
-  the git segment and — last — an error or info message.
+  view X/Y: <name>` while a `.base` table is open), the scroll position, the
+  watch indicator (`watch on` / `watch off`), the last render time
+  (`rendered HH:MM:SS`), the git segment and — last — an error or info
+  message.
+- Scroll position: the content pane's scroll **offset** as a percentage,
+  immediately after the size segment (`12 lines · 42%`). It reads `0%` at
+  the top, `100%` at the bottom, and `100%` when the content fits in the
+  pane; it is omitted when no document is open. It describes the content
+  pane — the open note, or the `.base` table when one is open — whichever
+  pane has the focus. It is styled like the size segment next to it, not
+  dimmed, and it does not change the hints' rule: they stay flush right and
+  are hidden only while a message is shown or when they do not fit. The
+  segment shares the left run's columns, so on a narrow terminal the hints
+  can stop fitting a few columns earlier than before.
 - Git segment: `✓` clean / `●` dirty / `↓n ↑n` behind/ahead; refreshed on open, watch events, and `u`.
 - The frontmatter `status:` badge is **not** on the status bar: the status
   glyph (`●`, `◐`, …) sits next to the note in the sidebar tree, and the

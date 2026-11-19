@@ -289,6 +289,76 @@ fn status_message_is_neutral_and_error_wins() {
 }
 
 #[test]
+fn scroll_percent_reads_the_offset() {
+    assert_eq!(scroll_percent(0, 100), 0, "top");
+    assert_eq!(scroll_percent(50, 100), 50, "half way");
+    assert_eq!(scroll_percent(100, 100), 100, "bottom");
+    assert_eq!(scroll_percent(0, 0), 100, "content fits entirely");
+    assert_eq!(scroll_percent(7, 0), 100, "no range: always 100");
+    assert_eq!(scroll_percent(120, 100), 100, "offset clamped to the range");
+}
+
+#[test]
+fn status_bar_shows_the_scroll_percentage() {
+    // The paragraphs and the tail overflow the pane; half way up the range
+    // (rounded) is 50%.
+    let body: String = (0..123)
+        .map(|i| format!("line {i}\n\n"))
+        .chain(std::iter::once("tail\n".to_string()))
+        .collect();
+    let file = ui_viewer("ui-percent.md", &body);
+    let mut app = app_for(&file, None);
+    let top = render(&mut app);
+    assert!(
+        status_row(&top).contains("lines · 0% · watch on"),
+        "top reads 0% right after the size: {}",
+        status_row(&top)
+    );
+    let max = app.viewer.max_scroll();
+    assert!(max > 0, "fixture must overflow");
+    app.viewer.scroll = max.div_ceil(2);
+    let middle = render(&mut app);
+    assert!(
+        status_row(&middle).contains("· 50% ·"),
+        "half way reads 50%: {}",
+        status_row(&middle)
+    );
+    app.viewer.scroll_bottom();
+    let bottom = render(&mut app);
+    assert!(
+        status_row(&bottom).contains("· 100% ·"),
+        "bottom reads 100%: {}",
+        status_row(&bottom)
+    );
+}
+
+#[test]
+fn status_bar_scroll_percentage_is_100_when_the_note_fits() {
+    let file = ui_viewer("ui-percent-fits.md", "# Hi\n\nbody\n");
+    let mut app = app_for(&file, None);
+    let screen = render(&mut app);
+    assert!(
+        status_row(&screen).contains("lines · 100% · watch on"),
+        "a note that fits reads 100%: {}",
+        status_row(&screen)
+    );
+}
+
+#[test]
+fn status_bar_omits_the_scroll_percentage_without_a_document() {
+    let file = ui_viewer("ui-percent-none.md", "x\n");
+    let mut app = app_for(&file, None);
+    // The running app always has a note; an empty path is the sentinel.
+    app.viewer.path = std::path::PathBuf::new();
+    let screen = render(&mut app);
+    assert!(
+        !status_row(&screen).contains('%'),
+        "no document, no segment: {}",
+        status_row(&screen)
+    );
+}
+
+#[test]
 fn status_bar_shows_path_lines_watch_timestamp() {
     let file = ui_viewer("ui.md", "# Hi\n\nbody\n");
     let mut app = app_for(&file, None);
@@ -957,6 +1027,45 @@ fn base_table_renders_borders_header_rows_and_status_glyphs() {
         buffer[(50, 20)].bg,
         Color::Rgb(9, 9, 9),
         "blank base-table inner area painted with content_bg"
+    );
+}
+
+#[test]
+fn base_table_status_bar_shows_the_tables_scroll_percentage() {
+    let vault_dir = TempDir::new("ui-base-percent");
+    for i in 0..40 {
+        std::fs::write(
+            vault_dir.path().join(format!("note{i:02}.md")),
+            "---\ntype: task\n---\nbody\n",
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        vault_dir.path().join("many.base"),
+        "views:\n  - type: table\n    name: All\n    order:\n      - file.name\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-base-pct.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_base_at(&vault_dir.path().join("many.base"), 0)
+        .unwrap();
+    app.sidebar_visible = false;
+    let top = render(&mut app);
+    assert!(
+        status_row(&top).contains("rows · view 1/1: All · 0% · watch on"),
+        "table at the top reads 0% after its size segment: {}",
+        status_row(&top)
+    );
+    assert!(
+        app.base.as_ref().unwrap().max_scroll() > 0,
+        "table overflows"
+    );
+    app.base.as_mut().unwrap().scroll_bottom();
+    let bottom = render(&mut app);
+    assert!(
+        status_row(&bottom).contains("rows · view 1/1: All · 100% · watch on"),
+        "the table's own offset (the viewer stays at 0): {}",
+        status_row(&bottom)
     );
 }
 
