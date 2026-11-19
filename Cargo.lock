@@ -377,7 +377,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "engine"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "mmdflux",
  "pulldown-cmark",
@@ -477,7 +477,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "frond"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "chrono",
  "crossterm",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "vault"
-version = "0.6.2"
+version = "0.6.3"
 
 [[package]]
 name = "version_check"

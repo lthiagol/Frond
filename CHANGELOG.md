@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+
+### Fixed
+
+### Changed
+
+## [0.6.3] — 2026-11-19
+
+### Added
 - **Vertical note margin (`margin_y`)**: the note's text now sits inside a
   margin on all four sides — `margin` blank columns on each side and
   `margin_y` blank rows above and below (0–5, default 1). The scroll
