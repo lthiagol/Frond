@@ -221,6 +221,23 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 app.focus == Focus::Sidebar,
                 index.as_deref(),
             );
+        } else if app.sidebar_mode == SidebarMode::Outline {
+            // A `.base` table in the content pane is not a note: there is
+            // no outline for it (the viewer's last note is hidden).
+            let entries: &[engine::TocEntry] = if app.base.is_some() {
+                &[]
+            } else {
+                &app.viewer.toc
+            };
+            app.outline.sync(entries.len());
+            draw_outline(
+                f,
+                sidebar_rect,
+                &mut app.outline,
+                entries,
+                ui,
+                app.focus == Focus::Sidebar,
+            );
         } else if let Some(sidebar) = &mut app.sidebar {
             draw_sidebar(
                 f,
@@ -576,6 +593,77 @@ fn sidebar_line(
     if changed {
         spans.push(Span::styled(" *", Style::new().fg(ui.changed_marker_fg)));
     }
+    if selected {
+        highlight_selection(&mut spans, ui);
+    }
+    Line::from(spans)
+}
+
+/// The outline panel (`o`): the open note's headings, indented relative to
+/// its shallowest heading level. The empty state covers both no note and a
+/// note without headings.
+fn draw_outline(
+    f: &mut Frame,
+    area: Rect,
+    outline: &mut crate::outline::Outline,
+    entries: &[engine::TocEntry],
+    ui: UiTheme,
+    focused: bool,
+) {
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let rows_total = entries.len();
+    outline.on_viewport_height(inner_height.max(1), rows_total);
+
+    let overflow = rows_total > inner_height;
+    let text_area = list_text_area(area, overflow);
+    let inner_width = text_area.width as usize;
+
+    let rows = crate::outline::rows(entries);
+    let window: Vec<Line<'static>> = if rows.is_empty() {
+        vec![Line::from(Span::styled(
+            "no headings",
+            Style::new().fg(ui.dimmed_fg),
+        ))]
+    } else {
+        rows.iter()
+            .enumerate()
+            .skip(outline.scroll)
+            .take(inner_height)
+            .map(|(i, row)| outline_line(row, i == outline.selected, inner_width, ui))
+            .collect()
+    };
+
+    render_list_panel(
+        f,
+        ListPanel {
+            area,
+            text_area,
+            title: " outline ".into(),
+            focused,
+            scroll: outline.scroll,
+            rows_total,
+            overflow,
+        },
+        window,
+        ui,
+    );
+}
+
+/// One outline row: the heading indented by its depth relative to the
+/// note's shallowest level, truncated to the list width.
+fn outline_line(
+    row: &crate::outline::Row<'_>,
+    selected: bool,
+    inner_width: usize,
+    ui: UiTheme,
+) -> Line<'static> {
+    let indent = "  ".repeat(row.depth);
+    let title = truncate_ellipsis(&row.entry.title, inner_width.saturating_sub(indent.width()));
+    let mut spans = Vec::with_capacity(2);
+    if !indent.is_empty() {
+        spans.push(Span::raw(indent));
+    }
+    spans.push(Span::raw(title));
     if selected {
         highlight_selection(&mut spans, ui);
     }
@@ -1061,6 +1149,19 @@ fn status_path_label(app: &App, sidebar_focused: bool) -> String {
                 "(no tags)".to_string()
             }
         }
+        SidebarMode::Outline => {
+            // The selected heading's title; a `.base` table in the content
+            // pane has no outline.
+            let entries = if app.base.is_some() {
+                &[][..]
+            } else {
+                &app.viewer.toc[..]
+            };
+            entries
+                .get(app.outline.selected)
+                .map(|entry| entry.title.clone())
+                .unwrap_or_else(|| "(no headings)".to_string())
+        }
     }
 }
 
@@ -1332,7 +1433,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
     (
         "Sidebar",
         &[
-            ("t", "sidebar mode: tree ⇄ tags"),
+            ("t / o", "sidebar mode: tree ⇄ tags / outline"),
             ("j/k Enter", "move / open (l expands, h collapses)"),
             ("< / >", "narrow / widen the sidebar"),
             ("sidebar *", "changed since last sync (git status)"),

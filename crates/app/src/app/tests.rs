@@ -1481,6 +1481,148 @@ fn tag_view_without_vault_is_noop() {
     assert_eq!(app.sidebar_mode, SidebarMode::Tree);
 }
 
+// --- unit 11: the outline ----------------------------------------
+
+/// A vault whose `a.md` has two headings (`# One`, `## Two`) separated by
+/// enough body to make the second heading a real scroll target; `b.md` has
+/// one heading and `c.md` none.
+fn outline_vault() -> TempDir {
+    let dir = TempDir::new("app-outline");
+    let mut a = String::from("# One\n\n");
+    for i in 0..40 {
+        a.push_str(&format!("line {i}\n\n"));
+    }
+    a.push_str("## Two\n\n");
+    for i in 0..40 {
+        a.push_str(&format!("tail {i}\n\n"));
+    }
+    std::fs::write(dir.path().join("a.md"), a).unwrap();
+    std::fs::write(dir.path().join("b.md"), "# Bee\n\nbody\n").unwrap();
+    std::fs::write(dir.path().join("c.md"), "plain body, no headings\n").unwrap();
+    dir
+}
+
+#[test]
+fn o_toggles_the_outline_and_returns_to_the_last_view() {
+    let vault_dir = outline_vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Outline);
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Tree, "back to the tree");
+
+    // Over the tag view: `o` returns there, not to the tree.
+    app.handle_key(key(KeyCode::Char('t')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Tags);
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Outline);
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Tags);
+
+    // `t` still toggles the tree ⇄ tags pair; from the outline it leaves
+    // to the other member of the pair.
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('t')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Tree);
+}
+
+#[test]
+fn outline_without_vault_is_noop() {
+    let file = TempFile::new("solo-outline.md", "x\n");
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let mut app = App::new(viewer, None, None).unwrap();
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Tree);
+}
+
+#[test]
+fn outline_enter_jumps_to_the_heading_and_focuses_content() {
+    let vault_dir = outline_vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    // A small viewport keeps the second heading inside the scroll range.
+    app.viewer.on_viewport_height(10);
+
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.focus, Focus::Sidebar, "h focuses the sidebar");
+    app.handle_key(key(KeyCode::Char('j')));
+    assert_eq!(app.outline.selected, 1, "j moved to the second heading");
+    let line = app.viewer.toc[1].line as u32;
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.viewer.scroll, line, "the note scrolled to the heading");
+    assert_eq!(
+        app.focus,
+        Focus::Content,
+        "Enter hands over the content pane"
+    );
+}
+
+#[test]
+fn outline_click_jumps_to_the_clicked_heading() {
+    let vault_dir = outline_vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.viewer.on_viewport_height(10);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 10));
+
+    app.handle_click(5, 2); // the second inner row: `## Two`
+    assert_eq!(app.outline.selected, 1);
+    assert_eq!(app.viewer.scroll, app.viewer.toc[1].line as u32);
+    assert_eq!(app.focus, Focus::Content, "a row click jumps like Enter");
+}
+
+#[test]
+fn outline_l_moves_to_content_and_h_does_nothing() {
+    let vault_dir = outline_vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.focus, Focus::Sidebar);
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.focus, Focus::Sidebar, "h has no hierarchy to collapse");
+    assert_eq!(app.sidebar_mode, SidebarMode::Outline);
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.focus, Focus::Content, "l moves to the content pane");
+}
+
+#[test]
+fn outline_follows_the_open_note_and_clamps_the_selection() {
+    let vault_dir = outline_vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('o')));
+    app.outline.select(1, app.viewer.toc.len());
+    assert_eq!(app.outline.selected, 1);
+
+    // b.md has one heading: the cursor must stay valid.
+    app.open_note(&vault_dir.path().join("b.md")).unwrap();
+    assert_eq!(app.viewer.toc.len(), 1);
+    assert_eq!(app.outline.selected, 0, "selection clamped to the new list");
+    assert_eq!(app.sidebar_mode, SidebarMode::Outline, "the view stays on");
+}
+
+#[test]
+fn outline_with_no_headings_has_an_empty_selection() {
+    let vault_dir = outline_vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("c.md")).unwrap();
+    assert!(app.viewer.toc.is_empty(), "precondition: no headings");
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Outline);
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.focus, Focus::Sidebar);
+    app.handle_key(key(KeyCode::Char('j'))); // must not panic
+    app.handle_key(key(KeyCode::Enter)); // nothing to jump to
+    assert_eq!(app.focus, Focus::Sidebar, "Enter stays on an empty list");
+    app.handle_key(key(KeyCode::Char('l')));
+    assert_eq!(app.focus, Focus::Content, "l still hands over the content");
+}
+
 // --- M3: status glyphs -------------------------------------------
 
 #[test]

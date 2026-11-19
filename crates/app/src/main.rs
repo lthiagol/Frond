@@ -32,6 +32,7 @@ mod clipboard;
 mod config;
 mod links;
 mod nav;
+mod outline;
 mod quick;
 mod search;
 mod session;

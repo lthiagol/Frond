@@ -914,6 +914,141 @@ fn tag_sidebar_renders_and_counts() {
 }
 
 #[test]
+fn outline_sidebar_renders_headings_indented_by_level() {
+    let vault_dir = TempDir::new("ui-outline");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    // Levels 1 and 3: the shallowest is flush left, level 3 is two steps in.
+    let file = ui_viewer("ui-outline.md", "# Top\n\nbody\n\n### Deep\n\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let screen = render(&mut app);
+    assert!(
+        screen.contains("outline"),
+        "sidebar title switches to outline"
+    );
+    assert!(
+        !screen.contains("other.md"),
+        "tree rows are gone in outline mode"
+    );
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let row = |y: u16| -> String {
+        (area.x + 1..area.right() - 1)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    };
+    assert!(
+        row(area.y).contains("outline"),
+        "the panel is titled outline: {:?}",
+        row(area.y)
+    );
+    let top = row(area.y + 1);
+    let deep = row(area.y + 2);
+    assert_eq!(top.trim_end(), "Top", "the level-1 heading is flush left");
+    assert_eq!(
+        deep.find("Deep"),
+        Some(4),
+        "the level-3 heading is two 2-cell steps in: {deep:?}"
+    );
+}
+
+#[test]
+fn outline_empty_state_when_the_note_has_no_headings() {
+    let vault_dir = TempDir::new("ui-outline-empty");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-outline-empty.md", "just a body\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let screen = render(&mut app);
+    assert!(screen.contains("outline"), "outline panel drawn");
+    assert!(screen.contains("no headings"), "empty state: {screen}");
+}
+
+#[test]
+fn outline_status_bar_shows_the_selected_heading() {
+    let vault_dir = TempDir::new("ui-outline-status");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-outline-status.md", "# Top\n\nbody\n\n## Deep\n\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h')));
+    let screen = render(&mut app);
+    assert!(
+        status_row(&screen).contains("Top"),
+        "the selected heading labels the sidebar: {}",
+        status_row(&screen)
+    );
+    app.handle_key(key(KeyCode::Char('j')));
+    let screen = render(&mut app);
+    assert!(
+        status_row(&screen).contains("Deep"),
+        "the label follows the selection: {}",
+        status_row(&screen)
+    );
+    assert!(
+        !status_row(&screen).contains("ui-outline-status.md"),
+        "the note name is replaced by the heading"
+    );
+}
+
+#[test]
+fn outline_follows_the_open_note() {
+    let vault_dir = TempDir::new("ui-outline-follow");
+    std::fs::write(vault_dir.path().join("other.md"), "# Other\n\nbody\n").unwrap();
+    let file = ui_viewer("ui-outline-follow.md", "# First\n\nbody\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let screen = render(&mut app);
+    assert!(
+        screen.contains("First"),
+        "the open note's heading is listed"
+    );
+
+    app.open_note(&vault_dir.path().join("other.md")).unwrap();
+    let screen = render(&mut app);
+    assert!(
+        !screen.contains("First"),
+        "the outline followed the new note (the old heading is gone)"
+    );
+    assert!(screen.contains("Other"), "the new note's heading is listed");
+}
+
+#[test]
+fn outline_scrollbar_only_when_the_headings_overflow() {
+    let vault_dir = TempDir::new("ui-outline-bar");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let mut body = String::new();
+    for i in 0..40 {
+        body.push_str(&format!("# Heading {i}\n\n"));
+    }
+    let file = ui_viewer("ui-outline-bar.md", &body);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let bar_x = sidebar_width(100) - 2;
+    assert!(column_has_bar(buffer, bar_x, 1..22), "outline bar drawn");
+    assert!(
+        scrollbar_thumb_rows(buffer, sidebar_width(100) - 1, 1..22).is_empty(),
+        "the border column holds no thumb"
+    );
+    assert!(
+        !scrollbar_thumb_rows(buffer, bar_x, 1..22).is_empty(),
+        "the bar column holds the thumb"
+    );
+    assert!(
+        border_drawn(buffer, sidebar_width(100) - 1, 1..22),
+        "the border is drawn"
+    );
+}
+
+#[test]
 fn disambiguation_popup_renders_candidates() {
     let vault_dir = TempDir::new("ui-disamb");
     std::fs::create_dir_all(vault_dir.path().join("x")).unwrap();
