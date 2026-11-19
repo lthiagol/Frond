@@ -1496,6 +1496,14 @@ fn vault_watcher_reindexes_and_reparses() {
     .unwrap();
     app.viewer.last_reload = None; // force a poll delta
     app.poll();
+    // The status clock is HH:MM, so two reloads inside one minute look
+    // identical through the pty: only this field can prove the render
+    // time follows a watch reload.
+    let reloaded_at = app.viewer.last_reload;
+    assert!(
+        reloaded_at.is_some(),
+        "the watch reload (not the test) refreshed the render time"
+    );
     let index = app.index.as_ref().unwrap().borrow();
     assert_eq!(
         index
