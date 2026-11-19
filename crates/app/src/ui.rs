@@ -26,7 +26,7 @@ pub fn sidebar_width(total: u16) -> u16 {
     (u32::from(total) * 3 / 10).clamp(24, 60) as u16
 }
 
-/// Right-edge vertical scrollbar (the `draw_base_table` / help pattern).
+/// Right-edge vertical scrollbar shared by the note, list and help paths.
 /// Drawn into a single-column `bar_area`; callers only invoke it when the
 /// content overflows, and shrink their text area by that one column.
 fn draw_scrollbar(
@@ -45,8 +45,15 @@ fn draw_scrollbar(
     // height, which is what the classic formula assumes.
     let range = total.saturating_sub(viewport);
     let mut state = ScrollbarState::new(range).position(position);
+    // Leaf's symbols: a thin track and a solid thumb, no arrow heads, so the
+    // track spans the whole bar column (the heads used to eat two rows).
     f.render_stateful_widget(
-        Scrollbar::new(ScrollbarOrientation::VerticalRight).style(Style::new().fg(fg).bg(bg)),
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::new().fg(fg).bg(bg))
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(Some("│"))
+            .thumb_symbol("█"),
         bar_area,
         &mut state,
     );
@@ -1530,15 +1537,14 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             width: 1,
             height: body_height,
         };
-        // Same as `draw_scrollbar`: the content length is the scroll range,
-        // and the track height is the viewport.
-        let mut state =
-            ScrollbarState::new(total.saturating_sub(body_height as usize)).position(scroll);
-        f.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .style(Style::new().fg(ui.popup_dimmed_fg).bg(ui.content_bg)),
+        draw_scrollbar(
+            f,
             bar_area,
-            &mut state,
+            total,
+            scroll,
+            body_height as usize,
+            ui.popup_dimmed_fg,
+            ui.content_bg,
         );
     }
 

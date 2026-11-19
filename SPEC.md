@@ -113,6 +113,10 @@ error (`unresolved link: <target>`), never a guess.
   pane, the sidebar tree, the tag list, the backlinks panel and the help
   popup. It is drawn only while the content overflows the pane, and the text
   area is narrowed by that one column while it is drawn.
+- The bar is drawn as a thin `│` track with a solid `█` thumb and **no
+  arrow heads**: the track spans the full height of the bar column, so at
+  the top of the content the thumb's first row is the column's first row,
+  and at the bottom its last row is the column's last row.
 - The thumb is proportional to the visible fraction of the content (±1 row
   of rounding) and its ends track the scroll position: at the top it starts
   at the first track row, at the bottom it ends at the last track row. The

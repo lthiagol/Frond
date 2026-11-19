@@ -1075,8 +1075,7 @@ fn click_on_backlinks_scrollbar_column_is_bounded_out() {
     assert_eq!(bar_col, 98, "bar column is inside the panel, border at 99");
     let buffer = term.backend().buffer();
     assert!(
-        (hit.y + 1..hit.bottom() - 1)
-            .any(|y| { matches!(buffer[(bar_col, y)].symbol(), "█" | "░" | "▲" | "▼") }),
+        (hit.y + 1..hit.bottom() - 1).any(|y| matches!(buffer[(bar_col, y)].symbol(), "│" | "█")),
         "precondition: the bar is drawn on the click column"
     );
 
