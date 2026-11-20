@@ -117,6 +117,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             ..content_area
         };
         app.layout.note_viewport = note_area;
+        app.layout.note_scrollbar_area = None;
         app.layout.backlinks_area = None;
         draw_base_table(f, note_area, app, ui);
     } else {
@@ -199,6 +200,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 width: 1,
                 ..note_full
             };
+            app.layout.note_scrollbar_area = Some(bar);
             draw_scrollbar(
                 f,
                 bar,
@@ -208,6 +210,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 ui.popup_dimmed_fg,
                 ui.content_bg,
             );
+        } else {
+            app.layout.note_scrollbar_area = None;
         }
 
         // Geometry for click routing (focus on click), fresh every frame.

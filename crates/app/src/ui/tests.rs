@@ -2426,6 +2426,13 @@ fn note_scrollbar_absent_when_content_fits() {
         !column_has_bar(buffer, 99, 0..23),
         "no bar when content fits"
     );
+    assert!(
+        app.layout.note_scrollbar_area.is_none(),
+        "no bar column recorded without a drawn bar"
+    );
+    // Nothing to press: a press on the (absent) bar column is inert.
+    app.handle_press(99, 5);
+    assert_eq!(app.viewer.scroll, 0);
     assert_eq!(
         app.layout.note_viewport.width, 96,
         "text width less the margins"
@@ -2612,22 +2619,130 @@ fn pane_shorter_than_twice_the_margin_draws_no_scrollbar() {
 }
 
 #[test]
-fn note_scrollbar_click_mapping_matches_the_narrowed_viewport() {
+fn note_scrollbar_press_jumps_to_the_mapped_track_row() {
     let file = ui_viewer("ui-bar-click.md", &long_note(200));
     let mut app = app_for(&file, None);
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
-    // The viewport recorded for clicks is exactly the drawn text area.
+    let bar = app
+        .layout
+        .note_scrollbar_area
+        .expect("an overflowing note draws its bar");
+    // The track is the last column of the note pane and spans the pane, not
+    // the text viewport (which the vertical margin insets by one row).
+    assert_eq!(bar, Rect::new(99, 0, 1, 23));
+    let max = app.viewer.max_scroll();
+    assert!(max > 0, "the fixture overflows");
+
+    app.focus = Focus::Sidebar;
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.viewer.scroll, 0, "the track's first row is the top");
+    assert_eq!(app.focus, Focus::Sidebar, "the press does not move focus");
+
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(app.viewer.scroll, max, "the track's last row is the bottom");
+
+    // Row 11 of the 22 row offsets is exactly half the range.
+    app.handle_press(bar.x, bar.y + 11);
+    assert_eq!(
+        app.viewer.scroll,
+        max / 2,
+        "a middle row names that fraction of the range"
+    );
+}
+
+/// A drag follows the pointer row even after the column is left, and the
+/// release that ends it is consumed: the link under the pointer must not
+/// open. The control release at the same cells (no drag) does open it.
+#[test]
+fn note_scrollbar_drag_follows_the_pointer_and_its_release_is_not_a_click() {
+    let vault_dir = TempDir::new("ui-bar-drag");
+    std::fs::write(vault_dir.path().join("target.md"), "target\n").unwrap();
+    let start = vault_dir.path().join("start.md");
+    std::fs::write(
+        &start,
+        format!("# Start\n\nSee [[target]].\n\n{}", "body\n\n".repeat(100)),
+    )
+    .unwrap();
+    let file = ui_viewer("ui-bar-drag-main.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_note(&start).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+
     let vp = app.layout.note_viewport;
-    assert_eq!(vp.width, 95, "100 columns less the margins and the bar");
-    assert_eq!(vp.x, app.note_margin);
-    // A click on the bar column is outside the note viewport: no-op.
-    let before = app.viewer.scroll;
-    let focus_before = app.focus;
-    app.handle_click(99, 5);
-    assert_eq!(app.viewer.scroll, before);
-    assert_eq!(app.focus, focus_before, "bar click does not change focus");
+    let max = app.viewer.max_scroll();
+    assert!(max > 0, "the fixture overflows");
+    let link_cells = |app: &App, vp: Rect| {
+        let link = app
+            .viewer
+            .links
+            .iter()
+            .find(|l| l.wikilink.as_ref().is_some_and(|w| w.target == "target"))
+            .expect("the link is rendered")
+            .clone();
+        let region = link.regions[0];
+        (vp.x + region.start as u16, vp.y + region.line as u16)
+    };
+    let (link_col, link_row) = link_cells(&app, vp);
+    assert_eq!(app.viewer.scroll, 0, "the note opens at the top");
+
+    // Control: without a drag the release at those cells is a click.
+    app.handle_release(link_col, link_row);
+    assert_eq!(app.viewer.path, vault_dir.path().join("target.md"));
+
+    // Back to the start note for the drag: the bar is the content edge,
+    // outside the text viewport.
+    app.open_note(&start).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .note_scrollbar_area
+        .expect("the overflowing note draws its bar");
+    let vp = app.layout.note_viewport;
+    let (link_col, link_row) = link_cells(&app, vp);
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.viewer.scroll, 0, "the press jumped to the top");
+    // The pointer leaves the bar column; only its row drives the scroll.
+    app.handle_drag(10, bar.y + 11);
+    assert_eq!(app.viewer.scroll, max / 2, "the drag follows the pointer");
+    app.handle_drag(10, bar.y);
+    assert_eq!(app.viewer.scroll, 0);
+
+    app.handle_release(link_col, link_row);
+    assert_eq!(
+        app.viewer.path, start,
+        "the release that ends a drag must not open the link under it"
+    );
+}
+
+/// The note bar column is cleared while a `.base` table fills the content
+/// pane: a stale note-bar rect would scroll the hidden note and swallow a
+/// table click.
+#[test]
+fn note_scrollbar_area_is_cleared_while_a_base_table_is_open() {
+    let dir = TempDir::new("ui-bar-base-clear");
+    std::fs::write(dir.path().join("a.md"), "a\n").unwrap();
+    std::fs::write(
+        dir.path().join("many.base"),
+        "views:\n  - type: table\n    name: All\n    order:\n      - file.name\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-bar-base-clear.md", &long_note(200));
+    let mut app = app_with_index(&file, &dir);
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert!(app.layout.note_scrollbar_area.is_some(), "note bar drawn");
+
+    app.open_base_at(&dir.path().join("many.base"), 0).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert!(
+        app.layout.note_scrollbar_area.is_none(),
+        "a table has no note position control"
+    );
 }
 
 #[test]

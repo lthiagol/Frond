@@ -154,6 +154,16 @@ frontmatter at all — the whole file is body.
   are equal only when the pane has no vertical margin. With a vertical
   margin the bar column is taller than the text, and the thumb still
   shows the visible fraction of the content.
+- The **note pane's bar is a position control**: a press on the bar column
+  jumps the note, and a drag keeps the note following the pointer until
+  the button is released. The mapping is linear over the track's rows: the
+  track's first row is the document's top and its last row the document's
+  bottom, so the pressed row names that fraction of the scroll range. The
+  press does not move the keyboard focus, and the release that ends a drag
+  is not a click (it must not open a link under the pointer). Mouse capture
+  off (`m`) disables it, like every other mouse action. The bar column of
+  the list panels, the `.base` table and the help popup is not interactive
+  yet.
 
 ## Keybindings (v1)
 
@@ -170,6 +180,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | PgUp / PgDn | Half page (content pane) |
 | `g` / `G`, Home / End | Top / bottom (content pane) |
 | Mouse wheel | Scroll the content pane; over the sidebar, the backlinks panel or a popup it moves that pane's selection instead |
+| Press / drag on the note pane's scrollbar | Jump the note to that position; a drag follows the pointer until the button is released |
 | Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a row of the search or quick-switcher popup selects it (a second click on the selected row opens it), while the disambiguation popup takes no clicks at all; a click on a popup's chrome — its borders, the quick switcher's prompt, its footer — does nothing |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |

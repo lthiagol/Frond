@@ -611,8 +611,18 @@ fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::
                         MouseEventKind::ScrollUp => {
                             app.handle_wheel_at(mouse.column, mouse.row, false)
                         }
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            app.handle_press(mouse.column, mouse.row)
+                        }
+                        MouseEventKind::Drag(MouseButton::Left) => {
+                            app.handle_drag(mouse.column, mouse.row)
+                        }
                         MouseEventKind::Up(MouseButton::Left) => {
-                            app.handle_click(mouse.column, mouse.row);
+                            // A release that ends a scrollbar drag is not a
+                            // click (it must not open a link under the
+                            // pointer); the App decides, the loop just
+                            // flushes any copy the click requested.
+                            app.handle_release(mouse.column, mouse.row);
                             app.flush_clipboard(&mut io::stdout());
                         }
                         _ => {}
