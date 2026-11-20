@@ -203,6 +203,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // The viewer subtracts the status line itself, so pass the text rows
         // plus that line: the visible rows decide the scroll range.
         app.viewer.on_viewport_height(text_full.height + 1);
+        // Re-evaluate the hover from this frame's geometry: a pointer that
+        // stayed still must still name what is under it after a scroll or a
+        // popup opened/closed since the last pointer event.
+        app.sync_link_hover();
 
         // The text widget paints only its own cells, so the margin cell rows
         // and columns would keep the terminal background: paint the whole note
@@ -1193,9 +1197,12 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<
     let popup = app.layout.search_area.unwrap_or_else(|| {
         crate::search::popup_geometry(area, app.search.mode, app.search.hits.len())
     });
-    let footer = match app.search.mode {
-        SearchMode::Input => "Enter search · Esc cancel",
-        SearchMode::Results => "j/k move · Enter open · Esc close",
+    let footer = match app.search.error.as_deref() {
+        Some(error) => error.to_string(),
+        None => match app.search.mode {
+            SearchMode::Input => "Enter search · Esc cancel".to_string(),
+            SearchMode::Results => "j/k move · Enter open · Esc close".to_string(),
+        },
     };
     let inner_width = popup.width.saturating_sub(2) as usize;
 

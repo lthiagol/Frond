@@ -340,15 +340,14 @@ impl VaultIndex {
                         } else {
                             line_end
                         };
-                    hits.push(SearchHit {
+                    let hit = SearchHit {
                         path: path.clone(),
                         line: line_idx,
                         text: raw.text[line_start..content_end].to_string(),
                         start: pos - line_start,
                         end: pos - line_start + needle.len(),
-                    });
-                    if hits.len() > SEARCH_RESULT_CAP {
-                        hits.truncate(SEARCH_RESULT_CAP);
+                    };
+                    if push_hit(&mut hits, hit) {
                         return SearchResults { hits, capped: true };
                     }
                     from = line_end + 1;
@@ -384,17 +383,14 @@ impl VaultIndex {
                         ceil_char_boundary(line, pos + needle.len()),
                     )
                 };
-                hits.push(SearchHit {
+                let hit = SearchHit {
                     path: path.clone(),
                     line: index,
                     text: line.to_string(),
                     start,
                     end,
-                });
-                if hits.len() > SEARCH_RESULT_CAP {
-                    // One match past the cap: truncate to exactly the cap
-                    // and mark the result as truncated.
-                    hits.truncate(SEARCH_RESULT_CAP);
+                };
+                if push_hit(&mut hits, hit) {
                     return SearchResults { hits, capped: true };
                 }
             }
@@ -403,6 +399,42 @@ impl VaultIndex {
             hits,
             capped: false,
         }
+    }
+
+    /// Case-insensitive regular-expression search over the same cached raw
+    /// lines as [`Self::search`], matched line by line: one hit per
+    /// matching line (the first match on it), in path order then line
+    /// order, with the same cap and [`SearchHit`] offsets. An invalid
+    /// pattern is returned as an error and nothing is scanned.
+    pub fn search_regex(&self, pattern: &str) -> Result<SearchResults, regex::Error> {
+        if pattern.is_empty() {
+            return Ok(SearchResults::default());
+        }
+        let regex = regex::RegexBuilder::new(pattern)
+            .case_insensitive(true)
+            .build()?;
+        let mut hits = Vec::new();
+        for (path, raw) in &self.raw_lines {
+            for (index, line) in raw.text.lines().enumerate() {
+                let Some(found) = regex.find(line) else {
+                    continue;
+                };
+                let hit = SearchHit {
+                    path: path.clone(),
+                    line: index,
+                    text: line.to_string(),
+                    start: found.start(),
+                    end: found.end(),
+                };
+                if push_hit(&mut hits, hit) {
+                    return Ok(SearchResults { hits, capped: true });
+                }
+            }
+        }
+        Ok(SearchResults {
+            hits,
+            capped: false,
+        })
     }
 
     /// Resolves a wikilink target per the vault rule: bare filename
@@ -784,6 +816,18 @@ fn disambiguate_by_proximity(source: &Path, candidates: Vec<PathBuf>) -> Resolut
     }
 }
 
+/// Pushes one search hit, keeping at most [`SEARCH_RESULT_CAP`] and
+/// reporting whether the cap was exceeded (the caller stops the scan).
+/// The one home of the cap rule: both search paths use it.
+fn push_hit(hits: &mut Vec<SearchHit>, hit: SearchHit) -> bool {
+    hits.push(hit);
+    if hits.len() > SEARCH_RESULT_CAP {
+        hits.truncate(SEARCH_RESULT_CAP);
+        return true;
+    }
+    false
+}
+
 /// Largest index `<= i` that is a char boundary of `s`.
 fn floor_char_boundary(s: &str, mut i: usize) -> usize {
     while i > 0 && !s.is_char_boundary(i) {
@@ -909,6 +953,89 @@ mod tests {
         let results = index.search("hit");
         assert_eq!(results.hits.len(), SEARCH_RESULT_CAP);
         assert!(!results.capped, "exactly the cap: nothing truncated");
+    }
+
+    // --- unit 28: regex search -----------------------------------------
+
+    #[test]
+    fn regex_search_matches_a_shape_case_insensitively_in_path_order() {
+        let vault = TempDir::new("vk-regex-shape");
+        write(
+            &vault.path().join("b.md"),
+            "Invoice INV-2024 here\nnothing\n",
+        );
+        write(
+            &vault.path().join("a.md"),
+            "alpha 123\nBeta 456\na 7 only\n",
+        );
+        let index = VaultIndex::build(vault.path()).unwrap();
+
+        // A shape, not a literal: three digits, case-insensitive letters.
+        let hits = index.search_regex(r"inv-\d+").unwrap().hits;
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0].path, vault.path().join("b.md"));
+        assert_eq!(hits[0].line, 0);
+        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "INV-2024");
+
+        let hits = index.search_regex(r"[a-z]+ \d{3}").unwrap().hits;
+        assert_eq!(hits.len(), 2, "a.md's first two lines match: {hits:?}");
+        assert_eq!(hits[0].path, vault.path().join("a.md"), "path order");
+        assert_eq!(hits[0].line, 0);
+        assert_eq!(hits[1].line, 1);
+        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "alpha 123");
+    }
+
+    #[test]
+    fn regex_search_is_line_by_line_and_case_insensitive() {
+        let vault = TempDir::new("vk-regex-lines");
+        write(&vault.path().join("a.md"), "Alpha\nBeta\n");
+        let index = VaultIndex::build(vault.path()).unwrap();
+
+        let hits = index.search_regex("beta").unwrap().hits;
+        assert_eq!(hits.len(), 1, "case-insensitive match");
+        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "Beta");
+
+        assert!(
+            index.search_regex("Alpha\nBeta").unwrap().hits.is_empty(),
+            "a pattern spanning a line break never matches across lines"
+        );
+        assert!(
+            index.search_regex("gamma").unwrap().hits.is_empty(),
+            "a pattern that matches nothing is an empty result, not an error"
+        );
+        assert!(
+            index.search_regex("").unwrap().hits.is_empty(),
+            "an empty pattern searches nothing, like an empty query"
+        );
+    }
+
+    #[test]
+    fn regex_search_rejects_an_invalid_pattern() {
+        let vault = TempDir::new("vk-regex-invalid");
+        write(&vault.path().join("a.md"), "anything\n");
+        let index = VaultIndex::build(vault.path()).unwrap();
+        assert!(
+            index.search_regex("(").is_err(),
+            "an unbalanced group is reported as an error"
+        );
+        assert!(index.search_regex("[a-").is_err());
+    }
+
+    #[test]
+    fn regex_search_caps_like_the_substring_search() {
+        let vault = TempDir::new("vk-regex-cap");
+        let body: String = (0..SEARCH_RESULT_CAP + 100).map(|_| "hit 1\n").collect();
+        write(&vault.path().join("big.md"), &body);
+        let index = VaultIndex::build(vault.path()).unwrap();
+        let results = index.search_regex(r"hit \d").unwrap();
+        assert_eq!(results.hits.len(), SEARCH_RESULT_CAP, "capped at 1000");
+        assert!(results.capped);
+        assert_eq!(results.hits[0].line, 0);
+        assert_eq!(
+            results.hits[SEARCH_RESULT_CAP - 1].line,
+            SEARCH_RESULT_CAP - 1,
+            "the FIRST hits are kept"
+        );
     }
 
     #[test]

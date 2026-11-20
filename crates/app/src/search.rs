@@ -25,6 +25,24 @@ pub enum SearchMode {
     Results,
 }
 
+/// A parsed query: `re:` selects the regular-expression engine and is
+/// stripped; every other query is the literal substring search. The popup
+/// owns this split so the vault's two search paths stay separate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchQuery<'a> {
+    Literal(&'a str),
+    Regex(&'a str),
+}
+
+impl<'a> SearchQuery<'a> {
+    pub fn parse(query: &'a str) -> Self {
+        match query.strip_prefix("re:") {
+            Some(pattern) => Self::Regex(pattern),
+            None => Self::Literal(query),
+        }
+    }
+}
+
 pub struct SearchState {
     pub open: bool,
     pub mode: SearchMode,
@@ -34,6 +52,9 @@ pub struct SearchState {
     /// ([`vault::SEARCH_RESULT_CAP`]) — the popup title shows "N+".
     pub capped: bool,
     pub selected: usize,
+    /// Why the last query could not run (an invalid regular expression).
+    /// Shown in the popup footer while the popup stays in the input mode.
+    pub error: Option<String>,
 }
 
 impl Default for SearchState {
@@ -45,6 +66,7 @@ impl Default for SearchState {
             hits: Vec::new(),
             capped: false,
             selected: 0,
+            error: None,
         }
     }
 }
@@ -58,23 +80,51 @@ impl SearchState {
         self.hits.clear();
         self.capped = false;
         self.selected = 0;
+        self.error = None;
     }
 
     pub fn close(&mut self) {
         self.open = false;
     }
 
+    /// Appends one typed character and drops a stale error message: the
+    /// footer describes the last attempted query, not the one being typed.
+    pub fn push_char(&mut self, c: char) {
+        self.query.push(c);
+        self.error = None;
+    }
+
+    /// Edits the query with Backspace, dropping a stale error message.
+    pub fn backspace(&mut self) {
+        self.query.pop();
+        self.error = None;
+    }
+
     /// Enter in input mode: runs the query against the index and switches
     /// to results mode. An empty query is a no-op (nothing to search for).
-    pub fn run(&mut self, search: impl FnOnce(&str) -> SearchResults) {
+    /// A query starting with `re:` is matched as a regular expression; an
+    /// invalid pattern is reported in `error`, nothing is searched, and
+    /// the popup stays in the input mode with the query intact.
+    pub fn run(&mut self, search: impl FnOnce(SearchQuery<'_>) -> Result<SearchResults, String>) {
         if self.query.trim().is_empty() {
             return;
         }
-        let results = search(&self.query);
-        self.hits = results.hits;
-        self.capped = results.capped;
-        self.mode = SearchMode::Results;
-        self.selected = 0;
+        match search(SearchQuery::parse(&self.query)) {
+            Ok(results) => {
+                self.hits = results.hits;
+                self.capped = results.capped;
+                self.mode = SearchMode::Results;
+                self.selected = 0;
+                self.error = None;
+            }
+            Err(message) => {
+                self.hits.clear();
+                self.capped = false;
+                self.selected = 0;
+                self.mode = SearchMode::Input;
+                self.error = Some(message);
+            }
+        }
     }
 
     pub fn move_selection(&mut self, delta: isize) {
@@ -246,12 +296,14 @@ mod tests {
             end: 1,
         }];
         s.selected = 1;
+        s.error = Some("old".into());
         s.open_input();
         assert!(s.open);
         assert_eq!(s.mode, SearchMode::Input);
         assert!(s.query.is_empty());
         assert!(s.hits.is_empty());
         assert_eq!(s.selected, 0);
+        assert_eq!(s.error, None, "a fresh popup has no stale error");
     }
 
     #[test]
@@ -264,8 +316,8 @@ mod tests {
 
         s.query = "needle".into();
         s.run(|q| {
-            assert_eq!(q, "needle");
-            SearchResults {
+            assert_eq!(q, SearchQuery::Literal("needle"));
+            Ok(SearchResults {
                 hits: (0..5)
                     .map(|i| SearchHit {
                         path: format!("f{i}").into(),
@@ -276,7 +328,7 @@ mod tests {
                     })
                     .collect(),
                 capped: false,
-            }
+            })
         });
         assert_eq!(s.mode, SearchMode::Results);
         assert_eq!(s.hits.len(), 5);
@@ -293,13 +345,52 @@ mod tests {
         let mut s = SearchState::default();
         s.open_input();
         s.query = "x".into();
-        s.run(|_| SearchResults {
-            hits: Vec::new(),
-            capped: true,
+        s.run(|_| {
+            Ok(SearchResults {
+                hits: Vec::new(),
+                capped: true,
+            })
         });
         assert!(s.capped, "capping is propagated from the index");
         s.open_input();
         assert!(!s.capped, "a fresh popup starts uncapped");
+    }
+
+    #[test]
+    fn the_regex_prefix_selects_the_regex_path_and_is_stripped() {
+        assert_eq!(SearchQuery::parse("needle"), SearchQuery::Literal("needle"));
+        assert_eq!(SearchQuery::parse("re:\\d+"), SearchQuery::Regex("\\d+"));
+        assert_eq!(
+            SearchQuery::parse("RE:upper"),
+            SearchQuery::Literal("RE:upper"),
+            "the prefix is lowercase, like the documented query"
+        );
+    }
+
+    #[test]
+    fn invalid_regex_reports_the_error_and_keeps_the_input_mode() {
+        let mut s = SearchState::default();
+        s.open_input();
+        s.query = "re:(".into();
+        s.run(|query| {
+            assert_eq!(query, SearchQuery::Regex("("));
+            Err("invalid regex: unclosed group".to_string())
+        });
+        assert_eq!(s.mode, SearchMode::Input, "nothing was searched");
+        assert_eq!(s.query, "re:(", "the query stays intact");
+        assert_eq!(
+            s.error.as_deref(),
+            Some("invalid regex: unclosed group"),
+            "the footer gets the reason"
+        );
+        assert!(s.hits.is_empty());
+
+        // Editing drops the stale error; a successful run clears it too.
+        s.push_char(')');
+        assert_eq!(s.error, None);
+        s.run(|_| Ok(SearchResults::default()));
+        assert_eq!(s.mode, SearchMode::Results);
+        assert_eq!(s.error, None);
     }
 
     #[test]
