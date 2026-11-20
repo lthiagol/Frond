@@ -82,6 +82,11 @@ pub struct Viewer {
     /// Focused link for the `x`/`X` keyboard navigation, as an index into
     /// `links`.
     pub focus_link: Option<usize>,
+    /// The link under the mouse pointer, as an index into `links`. A
+    /// colour-only highlight: it never moves `focus_link` and a click still
+    /// uses the cell under the pointer. Cleared whenever the note, the
+    /// scroll or the pointer changes (see [`Viewer::set_hover_link`]).
+    pub hover_link: Option<usize>,
     /// Scroll offsets are `u32`/`usize`: files can render to more than
     /// `u16::MAX` lines. Narrowing happens only at the ratatui
     /// `Paragraph::scroll` boundary (see `ui::draw`).
@@ -138,6 +143,7 @@ impl Viewer {
             focus_task: None,
             source_line_map: Vec::new(),
             focus_link: None,
+            hover_link: None,
             scroll: 0,
             viewport_height: 24,
             render_width,
@@ -250,6 +256,9 @@ impl Viewer {
             };
         }
         self.base_lines = result.lines;
+        // A reparse replaces the link list and the rendered lines: an old
+        // hover index no longer names the link under the pointer.
+        self.hover_link = None;
         self.restyle_links();
     }
 
@@ -426,6 +435,24 @@ impl Viewer {
         }
     }
 
+    /// Sets (or clears) the hovered link. A no-op when the index is the one
+    /// already highlighted, so a pointer that stays over one link never
+    /// costs a re-render. Out-of-range indices clear the hover.
+    pub fn set_hover_link(&mut self, index: Option<usize>) {
+        let index = index.filter(|&i| i < self.links.len());
+        if self.hover_link == index {
+            return;
+        }
+        self.hover_link = index;
+        self.restyle_links();
+    }
+
+    /// Drops the hover highlight (pointer left the note, a popup opened, the
+    /// note changed).
+    pub fn clear_hover_link(&mut self) {
+        self.set_hover_link(None);
+    }
+
     /// Focuses a checkbox (index into `tasks`); clears the link focus so
     /// only one item is ever focused. The checkbox is scrolled into view.
     pub fn set_focus_task(&mut self, index: Option<usize>) {
@@ -442,12 +469,14 @@ impl Viewer {
         if let Some(i) = index {
             let line = self.tasks[i].line as u32;
             let viewport = self.viewport_height;
-            if line < self.scroll {
-                self.scroll = line;
+            let target = if line < self.scroll {
+                line
             } else if line >= self.scroll + viewport {
-                self.scroll = (line + 1).saturating_sub(viewport);
-            }
-            self.clamp_scroll();
+                (line + 1).saturating_sub(viewport)
+            } else {
+                self.scroll
+            };
+            self.commit_scroll(target);
         }
     }
 
@@ -457,6 +486,17 @@ impl Viewer {
         self.tasks
             .iter()
             .position(|t| t.line == line && col >= t.start && col < t.end)
+    }
+
+    /// The link whose regions cover a rendered-line/column position, if any.
+    /// One link may wrap over several regions; the first covering region
+    /// wins. Shared by the click hit-test and the hover mapping.
+    pub fn link_at(&self, line: usize, col: usize) -> Option<usize> {
+        self.links.iter().position(|link| {
+            link.regions
+                .iter()
+                .any(|r| r.line == line && col >= r.start && col < r.end)
+        })
     }
 
     /// True when the file on disk still has the mtime+size it had when
@@ -484,6 +524,8 @@ impl Viewer {
             &mut self.lines,
             &self.links,
             self.focus_link,
+            self.hover_link,
+            self.theme.link_hover,
             self.link_colors,
         );
         apply_task_styles(
@@ -504,12 +546,14 @@ impl Viewer {
         };
         let line = line as u32;
         let viewport = self.viewport_height;
-        if line < self.scroll {
-            self.scroll = line;
+        let target = if line < self.scroll {
+            line
         } else if line >= self.scroll + viewport {
-            self.scroll = (line + 1).saturating_sub(viewport);
-        }
-        self.clamp_scroll();
+            (line + 1).saturating_sub(viewport)
+        } else {
+            self.scroll
+        };
+        self.commit_scroll(target);
     }
 
     /// The focused link, if any.
@@ -630,15 +674,30 @@ impl Viewer {
     }
 
     fn clamp_scroll(&mut self) {
-        self.scroll = self.scroll.min(self.max_scroll());
+        let max = self.max_scroll();
+        self.commit_scroll(self.scroll.min(max));
+    }
+
+    /// Moves the scroll position and drops the hover highlight when the
+    /// content under the pointer moved with it: the cell the pointer rests
+    /// on no longer names the link the hover was found from. A scroll that
+    /// changes nothing keeps the highlight (pressing `k` at the top must
+    /// not extinguish a hover).
+    fn commit_scroll(&mut self, value: u32) {
+        if value == self.scroll {
+            return;
+        }
+        self.scroll = value;
+        self.set_hover_link(None);
     }
 
     pub fn scroll_down(&mut self, n: u32) {
-        self.scroll = self.scroll.saturating_add(n).min(self.max_scroll());
+        let max = self.max_scroll();
+        self.commit_scroll(self.scroll.saturating_add(n).min(max));
     }
 
     pub fn scroll_up(&mut self, n: u32) {
-        self.scroll = self.scroll.saturating_sub(n);
+        self.commit_scroll(self.scroll.saturating_sub(n));
     }
 
     /// Half-page step used by PgUp/PgDn.
@@ -647,17 +706,19 @@ impl Viewer {
     }
 
     pub fn scroll_top(&mut self) {
-        self.scroll = 0;
+        self.commit_scroll(0);
     }
 
     pub fn scroll_bottom(&mut self) {
-        self.scroll = self.max_scroll();
+        let max = self.max_scroll();
+        self.commit_scroll(max);
     }
 
     /// Sets the scroll position (clamped), used when restoring history
     /// entries whose file may have changed since it was saved.
     pub fn set_scroll(&mut self, value: u32) {
-        self.scroll = value.min(self.max_scroll());
+        let max = self.max_scroll();
+        self.commit_scroll(value.min(max));
     }
 
     pub fn toggle_watch(&mut self) {

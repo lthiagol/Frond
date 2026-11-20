@@ -303,29 +303,38 @@ fn state_style(state: &LinkState, base: Style, colors: LinkColors) -> Style {
     }
 }
 
-/// Restyles the parsed lines for every link: per-state base styling, plus
-/// the focus highlight on `focused` (an index into `links`).
+/// Restyles the parsed lines for every link: per-state base styling, the
+/// hover highlight on `hovered` (an index into `links`), plus the focus
+/// highlight on `focused`. The focus wins when both name the same link:
+/// the hover is a colour, and the inverse-video focus must stay exactly as
+/// it is without a pointer.
 pub fn apply_link_styles(
     lines: &mut [Line<'static>],
     links: &[RenderedLink],
     focused: Option<usize>,
+    hovered: Option<usize>,
+    hover_fg: Color,
     colors: LinkColors,
 ) {
     for (index, link) in links.iter().enumerate() {
         let focused = focused == Some(index);
+        let hovered = hovered == Some(index);
         for region in &link.regions {
             let Some(line) = lines.get_mut(region.line) else {
                 continue;
             };
             restyle_region(line, region.start, region.end, |style| {
-                let mut style = match &link.wikilink {
+                let style = match &link.wikilink {
                     Some(w) => state_style(&w.state, style, colors),
                     None => style,
                 };
                 if focused {
-                    style = colors.focus(style);
+                    colors.focus(style)
+                } else if hovered {
+                    style.fg(hover_fg)
+                } else {
+                    style
                 }
-                style
             });
         }
     }
@@ -533,7 +542,14 @@ mod tests {
                 state: LinkState::NotFound,
             }),
         }];
-        apply_link_styles(std::slice::from_mut(&mut line), &links, None, colors);
+        apply_link_styles(
+            std::slice::from_mut(&mut line),
+            &links,
+            None,
+            None,
+            Color::Red,
+            colors,
+        );
         let style = span_style(&line, 1);
         assert!(style.add_modifier.contains(Modifier::CROSSED_OUT));
         assert!(style.add_modifier.contains(Modifier::DIM));
@@ -560,15 +576,129 @@ mod tests {
         // engine output in the viewer; here we assert each application
         // against a fresh copy.)
         let mut line = pristine.clone();
-        apply_link_styles(std::slice::from_mut(&mut line), &links, Some(0), colors);
+        apply_link_styles(
+            std::slice::from_mut(&mut line),
+            &links,
+            Some(0),
+            None,
+            Color::Red,
+            colors,
+        );
         let focused = span_style(&line, 1);
         assert_eq!(focused.fg, Some(colors.focus_fg), "inverse video text");
         assert!(focused.bg.is_some(), "own colour becomes the background");
         // Unfocused: plain engine style.
         let mut line = pristine.clone();
-        apply_link_styles(std::slice::from_mut(&mut line), &links, None, colors);
+        apply_link_styles(
+            std::slice::from_mut(&mut line),
+            &links,
+            None,
+            None,
+            Color::Red,
+            colors,
+        );
         assert_eq!(span_style(&line, 1).bg, None);
         // The untouched neighbor spans stay raw.
         assert_eq!(span_style(&line, 0).bg, None);
+    }
+
+    /// The hover is a colour only: the link's own colour changes, its
+    /// modifiers and its neighbours do not. And the focus highlight wins
+    /// when the pointer is over the focused link, leaving the inverse-video
+    /// style exactly as it is without a hover.
+    #[test]
+    fn hover_recolours_the_link_and_loses_to_the_focus_highlight() {
+        let colors = LinkColors::default();
+        let pristine = line_of("link");
+        let links = vec![RenderedLink {
+            url: "vault://0/x".into(),
+            regions: vec![LinkRegion {
+                line: 0,
+                start: 4,
+                end: 8,
+            }],
+            wikilink: Some(WikilinkTarget {
+                target: "x".into(),
+                heading: None,
+                state: LinkState::Resolved(PathBuf::from("/v/x.md")),
+            }),
+        }];
+        let hover = Color::Rgb(1, 2, 3);
+
+        let mut line = pristine.clone();
+        apply_link_styles(
+            std::slice::from_mut(&mut line),
+            &links,
+            None,
+            Some(0),
+            hover,
+            colors,
+        );
+        assert_eq!(span_style(&line, 1).fg, Some(hover), "hover colour");
+        assert_eq!(span_style(&line, 1).bg, None, "hover is a foreground only");
+        assert_eq!(span_style(&line, 0).fg, pristine.spans[0].style.fg);
+        assert_eq!(span_style(&line, 2).fg, pristine.spans[2].style.fg);
+
+        let focused_only = {
+            let mut line = pristine.clone();
+            apply_link_styles(
+                std::slice::from_mut(&mut line),
+                &links,
+                Some(0),
+                None,
+                hover,
+                colors,
+            );
+            span_style(&line, 1)
+        };
+        let mut line = pristine.clone();
+        apply_link_styles(
+            std::slice::from_mut(&mut line),
+            &links,
+            Some(0),
+            Some(0),
+            hover,
+            colors,
+        );
+        assert_eq!(
+            span_style(&line, 1),
+            focused_only,
+            "the focus highlight wins over a hover on the same link"
+        );
+    }
+
+    /// A wrapped link is one link: every region it renders into is
+    /// recoloured by the same hover.
+    #[test]
+    fn hover_covers_every_region_of_a_wrapped_link() {
+        let colors = LinkColors::default();
+        let mut lines = vec![
+            line_of("link"),
+            Line::from(vec![
+                Span::raw("see "),
+                Span::raw("link"),
+                Span::raw(" end"),
+            ]),
+        ];
+        let links = vec![RenderedLink {
+            url: "vault://0/x".into(),
+            regions: vec![
+                LinkRegion {
+                    line: 0,
+                    start: 4,
+                    end: 8,
+                },
+                LinkRegion {
+                    line: 1,
+                    start: 4,
+                    end: 8,
+                },
+            ],
+            wikilink: None,
+        }];
+        let hover = Color::Rgb(1, 2, 3);
+        apply_link_styles(&mut lines, &links, None, Some(0), hover, colors);
+        assert_eq!(span_style(&lines[0], 1).fg, Some(hover));
+        assert_eq!(span_style(&lines[1], 1).fg, Some(hover));
     }
 }

@@ -120,6 +120,12 @@ frontmatter at all — the whole file is body.
   rows above the status bar. A click in the padding does nothing. The
   vertical margin applies to the note only — a `.base` table fills its
   pane, as it ignores the horizontal margin too.
+- The **link under the mouse is highlighted**: while the pointer is over a
+  link in the note pane, that link is painted in the markdown theme's
+  `link_hover` colour (the role every theme already sets). The highlight
+  is only a colour: it does not move the link focus (`x` / `X`), and
+  clicking the link still opens it. Mouse capture off (`m`) disables it,
+  like every other mouse action.
 - Session memory (XDG state dir — `XDG_STATE_HOME/frond`, else
   `~/.local/state/frond`; `FROND_SESSION` overrides it; one file per
   vault, named after a hash of the vault root): the last open note
@@ -195,6 +201,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | Mouse wheel | Scroll the content pane; over the sidebar, the backlinks panel or a popup it moves that pane's selection instead |
 | Press / drag on the note pane's scrollbar | Jump the note to that position; a drag follows the pointer until the button is released |
 | Press / drag on a list panel's scrollbar | Move that panel's selection to that position; a drag follows the pointer until the button is released |
+| Hover over a link (note pane) | Highlights the link in the theme's `link_hover` colour; the link focus does not move |
 | Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a row of the search or quick-switcher popup selects it (a second click on the selected row opens it), while the disambiguation popup takes no clicks at all; a click on a popup's chrome — its borders, the quick switcher's prompt, its footer — does nothing |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |

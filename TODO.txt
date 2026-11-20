@@ -7,24 +7,21 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 26 is in flight: a scrollbar's thumb highlights under the mouse
-  (the theme's accent, a new theme role `scrollbar_hover_fg`). It is the
-  last piece of the parked list's interactive scrollbar (TODO.md 5.8):
-  unit 24 (committed) did the note pane's bar, unit 25 (committed) the
-  list panels'. Three coverage findings from unit 25's review are folded
-  into this unit (the drag arm is pinned only for the tree, the scroll end
-  position after a bar press is not asserted, the bare release on a bar
-  column has no test).
+  Unit 27 is in flight: the link under the mouse is highlighted in the
+  markdown theme's `link_hover` colour (leaf's hover - a highlight, not a
+  preview popup; the colour already exists in every theme). It is the
+  parked list's link hover. Two coverage findings from unit 26's review
+  are folded into unit 28 (the tag list's and the outline's scrollbar
+  hover have no test, and the capture-off hover test can pass vacuously).
 
-  The spec lines are written (SPEC.md, section Scrollbars and the theme
-  key list), with `docs/COLORS.md` and the changelog's Unreleased section.
-  The builder's brief is at `/tmp/opencode/frond/unit-26-kickoff.md` (plus
-  three more files).
+  The spec line is written (SPEC.md, section Layout, plus a key-table
+  row), with the changelog's Unreleased section. The builder's brief is at
+  `/tmp/opencode/frond/unit-27-kickoff.md` (plus three more files).
 
-  Before this unit: unit 25 (the list panels' scrollbars position their
-  selection) is committed. Round 1 was clean on both axes (0 blocking, 4
-  low); the merged findings are at
-  `/tmp/opencode/frond/review3/round1-findings.md`.
+  Before this unit: unit 26 (the scrollbar's thumb highlights under the
+  mouse, with the new theme role `scrollbar_hover_fg`) is committed. Round
+  1 was clean on both axes (0 blocking, 3 low); the merged findings are at
+  `/tmp/opencode/frond/review4/round1-findings.md`.
 
   Before that: unit 23 (the selection bar) is committed - the selected
   row of every list panel is one full-width bar, and its text is painted in
