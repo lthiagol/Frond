@@ -822,6 +822,50 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
     );
 }
 
+/// The list window inside a popup: the popup's border and its chrome rows
+/// (the quick switcher's prompt above the list, the footer below it) are
+/// never item rows. Both the renderers and the click mappers take the
+/// window from here, so the drawn rows and the clickable rows cannot
+/// drift apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopupList {
+    /// The first screen row of the list.
+    pub first_row: u16,
+    /// The index of the first visible item (the anchor).
+    pub start: usize,
+    /// How many item rows the list shows.
+    pub rows: usize,
+    /// The item count: rows past the last item map to nothing.
+    len: usize,
+}
+
+impl PopupList {
+    /// `popup` includes its one-cell border; `above` and `below` count the
+    /// chrome rows inside that border above and below the list (the quick
+    /// switcher's prompt row; every popup's footer row). The window ends
+    /// at the selection, so the selection is always visible.
+    pub fn new(popup: Rect, above: u16, below: u16, selected: usize, len: usize) -> Self {
+        let rows = popup.height.saturating_sub(2 + above + below).max(1) as usize;
+        Self {
+            first_row: popup.y + 1 + above,
+            start: selected.saturating_sub(rows.saturating_sub(1)),
+            rows,
+            len,
+        }
+    }
+
+    /// The item index at screen row `row`; `None` for the chrome rows (the
+    /// borders, the rows above the list, the footer) and for rows past the
+    /// last item.
+    pub fn index_at(&self, row: u16) -> Option<usize> {
+        if row < self.first_row || row >= self.first_row.saturating_add(self.rows as u16) {
+            return None;
+        }
+        let index = self.start + (row - self.first_row) as usize;
+        (index < self.len).then_some(index)
+    }
+}
+
 /// Disambiguation popup for a wikilink the folder hint could not narrow.
 /// When more candidates exist than fit the terminal, the list scrolls and
 /// the selection is kept visible.
@@ -838,19 +882,16 @@ fn draw_disambiguation(
         .min(area.height.saturating_sub(2))
         .max(1);
     let popup = centered(area, width, height);
-    // Inner rows available for candidates: popup height minus the two
-    // border rows and the one footer row.
-    let list_rows = height.saturating_sub(3).max(1) as usize;
-    // Stateless scroll window: the last `list_rows` candidates ending at
-    // (or containing) the selection, so the selection is always visible.
-    let start = d.selected.saturating_sub(list_rows.saturating_sub(1));
+    // Stateless scroll window over the candidates: no chrome above the
+    // list, one footer row below it.
+    let list = PopupList::new(popup, 0, 1, d.selected, d.candidates.len());
 
     let mut lines: Vec<Line<'static>> = d
         .candidates
         .iter()
         .enumerate()
-        .skip(start)
-        .take(list_rows)
+        .skip(list.start)
+        .take(list.rows)
         .map(|(i, path)| {
             let selected = i == d.selected;
             let mut line = Line::from(Span::raw(truncate_ellipsis(
@@ -887,15 +928,15 @@ fn draw_disambiguation(
 /// stateless scroll window keeps the selection visible when there are more
 /// matches than rows. The popup rectangle was recorded into
 /// `app.layout.quick_area` by `draw` (the mouse handlers map clicks/wheels
-/// through it, using the same row math as below).
+/// through it and the shared [`PopupList`] geometry).
 fn draw_quick(f: &mut Frame, area: Rect, app: &App, ui: UiTheme) {
     let popup = app
         .layout
         .quick_area
         .unwrap_or_else(|| crate::quick::popup_geometry(area, app.quick.items.len()));
     let inner_width = popup.width.saturating_sub(2) as usize;
-    // borders (2) + prompt (1) + footer (1).
-    let list_rows = popup.height.saturating_sub(4).max(1) as usize;
+    // The prompt is the chrome row above the list; the footer is below.
+    let list = PopupList::new(popup, 1, 1, app.quick.selected, app.quick.items.len());
 
     let mut lines: Vec<Line<'static>> =
         vec![Line::from(Span::raw(format!(">{}▏", app.quick.query)))];
@@ -906,17 +947,13 @@ fn draw_quick(f: &mut Frame, area: Rect, app: &App, ui: UiTheme) {
         )));
     } else {
         // Stateless scroll window: the selection always visible.
-        let start = app
-            .quick
-            .selected
-            .saturating_sub(list_rows.saturating_sub(1));
         lines.extend(
             app.quick
                 .items
                 .iter()
                 .enumerate()
-                .skip(start)
-                .take(list_rows)
+                .skip(list.start)
+                .take(list.rows)
                 .map(|(i, item)| {
                     let selected = i == app.quick.selected;
                     quick_item_line(item, inner_width, selected, ui)
@@ -1005,7 +1042,7 @@ fn quick_item_line(
 /// the match highlighted; a stateless scroll window keeps the selection
 /// visible when there are more hits than rows. The popup rectangle was
 /// recorded into `app.layout.search_area` by `draw` (the mouse handlers map
-/// clicks/wheels through it, using the same row math as below).
+/// clicks/wheels through it and the shared [`PopupList`] geometry).
 fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<&VaultIndex>) {
     let popup = app.layout.search_area.unwrap_or_else(|| {
         crate::search::popup_geometry(area, app.search.mode, app.search.hits.len())
@@ -1014,10 +1051,7 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<
         SearchMode::Input => "Enter search · Esc cancel",
         SearchMode::Results => "j/k move · Enter open · Esc close",
     };
-    let width = popup.width;
-    let height = popup.height;
-    let inner_width = width.saturating_sub(2) as usize;
-    let list_rows = height.saturating_sub(3).max(1) as usize;
+    let inner_width = popup.width.saturating_sub(2) as usize;
 
     let mut lines: Vec<Line<'static>> = match app.search.mode {
         SearchMode::Input => {
@@ -1031,16 +1065,14 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<
                 ))]
             } else {
                 // Stateless scroll window: the selection always visible.
-                let start = app
-                    .search
-                    .selected
-                    .saturating_sub(list_rows.saturating_sub(1));
+                // Results mode has no prompt row above the list.
+                let list = PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len());
                 app.search
                     .hits
                     .iter()
                     .enumerate()
-                    .skip(start)
-                    .take(list_rows)
+                    .skip(list.start)
+                    .take(list.rows)
                     .map(|(i, hit)| {
                         let selected = i == app.search.selected;
                         search_hit_line(hit, index, inner_width, selected, ui)

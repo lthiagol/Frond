@@ -7,11 +7,24 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Units 1–16 are closed and committed. **0.6.2 and 0.6.3 are tagged and
-  pushed** (`v0.6.2`, `v0.6.3`), and CI is green on both pushes. Nothing
-  is in flight: the follow-ups are done and the release is cut.
+  Unit 17 is closed and committed. The audit rounds that remain are the
+  app crate's small findings (unit 18) and the vault crate's (units 19
+  and 20).
 
 DONE
+  - Unit 17 — one popup list geometry: `ui::PopupList` holds the window
+    (the first screen row, the anchor, the rows) and the screen-row →
+    item mapping that rejects the chrome rows, used by the three
+    renderers and the two click mappers. The search popup's footer click no
+    longer selects an invisible hit when the results overflow — the
+    regression test was verified to fail against the old mapper. Reviewed
+    clean on both axes (round 1: 0 blocking, 3 low).
+  - Round S — the audit's documentation findings, in the orchestrator's own
+    files: the status bar's segment list names `mouse off` and
+    `metadata off`, the keybindings section lists the modal popups' keys,
+    the content-pane keys are marked, the icon examples say they show the
+    unicode set, README's index.md claim is qualified, and COLORS.md
+    records the scrollbar's colour role. Reviewed clean (0 blocking).
   - Unit 16 — 0.6.3 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
     released as `## [0.6.3] — 2026-11-19` with a fresh empty
     `## [Unreleased]` above it, and the `v0.6.3` tag. Reviewed clean on
@@ -131,6 +144,36 @@ HAPPENED
     rustup's default location.
 
 OPEN
+  - Unit 18: the app crate's remaining audit findings. A *successful*
+      checkbox write is reported through `viewer.last_error`, so it renders
+      red like a refusal and never expires, against SPEC's neutral-colour,
+      3 s-TTL info contract (APP-3). The quick switcher's empty state
+      clips its footer — `popup_geometry` gives 2 inner rows for 0 items
+      while `draw_quick` renders 3 lines, so the only `Enter`/`Esc` hint is
+      dropped exactly when there are no matches (APP-4). `config.rs`'s
+      module header names six config keys where the loader, the template,
+      SPEC and README all carry ten (SPEC-6). Plus unit 17's two lows: the
+      degenerate height-4 quick popup, where `rows.max(1)` invents a
+      phantom row on the clipped footer, and the chrome row counts still
+      being written twice (the height sizing in `quick.rs`/`search.rs`
+      versus the `above`/`below` arguments).
+  - Unit 19: the vault crate's write path. A `~`-prefixed changed path is
+      dropped by `absolutize_path` (`crates/vault/src/git.rs:182`), so a
+      dirty tree reports clean — and the guarded write's git guard passes on
+      it, breaking SPEC's rule that the repository must be clean (audit
+      B2). And the checkbox toggle path is quadratic: `updated_field_line`
+      (`crates/vault/src/tasks.rs:341-362`) calls `line_range` once per
+      line, each starting at byte 0 — 100k lines take 96 s and the
+      single-threaded event loop hangs (audit B3).
+  - Unit 20: the vault crate's index, frontmatter and walk. The `.md`/
+      `.base` suffix stripping is case-sensitive while the surrounding
+      matching is case-insensitive, so an `X.MD` note is indexed but
+      `[[X.MD]]` never resolves (VAULT-3). Frontmatter block-list items
+      are joined with `", "` and re-split on every comma, so a tag
+      containing a comma becomes two tags (VAULT-4). An unreadable
+      subdirectory is dropped from the walk with no `IndexWarning`, while
+      an unreadable *file* warns — notes vanish silently (VAULT-5).
+
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
       recommendation is to drop it: the sidebar's scroll is a selection
@@ -138,6 +181,7 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. The parked list, in my order of value: the interactive scrollbar,
-     the link hover preview, the regex search, the line-number gutter.
-  2. Or cut 0.6.4 with whichever of them land.
+  1. Unit 18 — the app crate's remaining audit findings.
+  2. Unit 19 — the vault crate's write path (both blocking audit findings).
+  3. Unit 20 — the vault crate's index, frontmatter and walk.
+  4. Then push and cut 0.6.4 with the audit fixes.

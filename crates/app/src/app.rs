@@ -1055,21 +1055,10 @@ impl App {
         if !point_in_rect(col, row, popup) {
             return;
         }
-        // The prompt occupies the first inner row; the footer the last.
-        let first_row = popup.y + 2;
-        let last_row = popup.y + popup.height.saturating_sub(2);
-        if row < first_row || row >= last_row {
+        let list = ui::PopupList::new(popup, 1, 1, self.quick.selected, self.quick.items.len());
+        let Some(index) = list.index_at(row) else {
             return;
-        }
-        let list_rows = popup.height.saturating_sub(4).max(1) as usize;
-        let start = self
-            .quick
-            .selected
-            .saturating_sub(list_rows.saturating_sub(1));
-        let index = start + (row - first_row) as usize;
-        if index >= self.quick.items.len() {
-            return;
-        }
+        };
         if index == self.quick.selected {
             self.open_quick_selection();
         } else {
@@ -1085,26 +1074,16 @@ impl App {
         let Some(popup) = self.layout.search_area else {
             return;
         };
-        if !point_in_rect(col, row, popup) || row <= popup.y {
+        if !point_in_rect(col, row, popup) {
             return;
         }
         if self.search.mode != SearchMode::Results {
             return;
         }
-        if self.search.hits.is_empty() {
+        let list = ui::PopupList::new(popup, 0, 1, self.search.selected, self.search.hits.len());
+        let Some(index) = list.index_at(row) else {
             return;
-        }
-        // Same geometry the renderer used (list rows = popup height minus
-        // the two borders and the footer row).
-        let list_rows = popup.height.saturating_sub(3).max(1) as usize;
-        let start = self
-            .search
-            .selected
-            .saturating_sub(list_rows.saturating_sub(1));
-        let index = start + (row - popup.y - 1) as usize;
-        if index >= self.search.hits.len() {
-            return; // footer row or below the list
-        }
+        };
         if index == self.search.selected {
             self.open_search_hit();
         } else {
