@@ -2300,6 +2300,44 @@ fn search_selected_row_is_a_full_width_bar_and_keeps_the_match_highlight() {
 }
 
 #[test]
+fn search_selected_bar_reaches_the_edge_with_wide_snippet_chars() {
+    let vault_dir = TempDir::new("ui-search-wide-band");
+    // The wide characters on both sides of the match put a two-cell
+    // character at the snippet window's edge.
+    let wide = format!("top {}needles{}", "漢".repeat(50), "漢".repeat(50));
+    std::fs::write(vault_dir.path().join("hay.md"), format!("top\n{wide}\n")).unwrap();
+    let file = ui_viewer("ui-search-wide-band.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    app.handle_key(key(KeyCode::Char('s')));
+    for ch in "needle".chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.search.hits.len(), 1, "{:?}", app.search.hits);
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = crate::search::popup_geometry(
+        Rect::new(0, 0, 100, 24),
+        app.search.mode,
+        app.search.hits.len(),
+    );
+    let y = popup.y + 1;
+    let row: String = (popup.x + 1..popup.right() - 1)
+        .map(|x| buffer[(x, y)].symbol())
+        .collect();
+    assert_eq!(
+        buffer[(popup.right() - 2, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "search bar reaches the popup's inner right edge: {row:?}"
+    );
+}
+
+#[test]
 fn search_title_shows_plus_when_results_were_capped() {
     let vault_dir = TempDir::new("ui-search-cap");
     std::fs::write(vault_dir.path().join("hay.md"), "needle\n").unwrap();
