@@ -2389,6 +2389,19 @@ fn scrollbar_thumb_rows(
         .collect()
 }
 
+/// The thumb's cells in column `x` over `ys`, as `(row, foreground)`: the
+/// hover rule changes the thumb's colour, never its rows.
+fn thumb_cells(
+    buffer: &ratatui::buffer::Buffer,
+    x: u16,
+    ys: std::ops::Range<u16>,
+) -> Vec<(u16, Color)> {
+    ys.into_iter()
+        .filter(|&y| buffer[(x, y)].symbol() == "█")
+        .map(|y| (y, buffer[(x, y)].fg))
+        .collect()
+}
+
 /// Length a proportional thumb should have on a `track_len` track: the
 /// visible fraction of the content.
 fn proportional_thumb_len(total: usize, visible: usize, track_len: usize) -> f64 {
@@ -3241,6 +3254,518 @@ fn mouse_capture_off_disables_the_bar_position_controls() {
         app.sidebar.as_ref().unwrap().selected,
         selected,
         "the sidebar bar is inert with capture off"
+    );
+}
+
+/// A press on a row, then a bare release on a bar column, opens nothing:
+/// the release alone is not a row click (unit 25's review had pinned only
+/// the release that *ends* a drag).
+#[test]
+fn bare_release_on_a_bar_column_opens_nothing() {
+    // The note pane: a press in the text starts no drag, so the release on
+    // the bar column must not act as a click either (the bar is not the
+    // viewport, so it neither scrolls nor follows a link).
+    let file = ui_viewer("ui-bar-bare-release.md", &long_note(200));
+    let mut app = app_for(&file, None);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let vp = app.layout.note_viewport;
+    let bar = app.layout.note_scrollbar_area.expect("bar drawn");
+    app.handle_press(vp.x, vp.y);
+    app.handle_release(bar.x, bar.y);
+    assert_eq!(app.viewer.scroll, 0, "the bare bar release does not scroll");
+    assert_eq!(app.viewer.path, file.path(), "and it opens nothing");
+
+    // The sidebar tree: a press on a row, release on the bar column.
+    let vault_dir = TempDir::new("ui-bar-bare-release-side");
+    for i in 0..40 {
+        std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
+    }
+    let file = ui_viewer("ui-bar-bare-release-side.md", "x\n");
+    let mut app = app_for(&file, Some(vault_dir.path()));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let opened = app.viewer.path.clone();
+    app.handle_press(area.x + 1, area.y + 1);
+    app.handle_release(bar.x, bar.y);
+    assert_eq!(
+        app.viewer.path, opened,
+        "the sidebar bar release is not a row click"
+    );
+    assert_eq!(
+        app.focus,
+        Focus::Content,
+        "and it does not move the keyboard focus"
+    );
+
+    // The backlinks panel: same shape, its bar release opens no backlink.
+    let vault_dir = TempDir::new("ui-bar-bare-release-back");
+    std::fs::write(vault_dir.path().join("target.md"), "target\n").unwrap();
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("src{i:02}.md")),
+            "[[target]]\n",
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-bare-release-back.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_note(&vault_dir.path().join("target.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('b')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let panel = app.layout.backlinks_area.expect("panel open");
+    let bar = app
+        .layout
+        .backlinks_scrollbar_area
+        .expect("an overflowing panel draws its bar");
+    let opened = app.viewer.path.clone();
+    app.handle_press(panel.x + 1, panel.y + 1);
+    app.handle_release(bar.x, bar.y);
+    assert_eq!(
+        app.viewer.path, opened,
+        "the backlinks bar release opens no link"
+    );
+    assert_eq!(app.backlink_sel, 0, "and it selects nothing");
+}
+
+/// A bar press at the track's last row lands every list's window at its
+/// **end**: the selected row sits on the last inner row, so the scroll is
+/// `len - inner_height` (unit 25's review: only "it moved" was asserted).
+#[test]
+fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
+    // The sidebar tree.
+    let vault_dir = TempDir::new("ui-bar-end-tree");
+    for i in 0..40 {
+        std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
+    }
+    let file = ui_viewer("ui-bar-end-tree.md", "x\n");
+    let mut app = app_for(&file, Some(vault_dir.path()));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let inner_height = area.height as usize - 2;
+    app.handle_press(bar.x, bar.bottom() - 1);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let sidebar = app.sidebar.as_ref().expect("sidebar");
+    let len = sidebar.row_count();
+    assert_eq!(
+        sidebar.selected.as_deref(),
+        Some(sidebar.rows()[len - 1].node.path.as_path()),
+        "the last track row is the last row"
+    );
+    assert_eq!(
+        sidebar.scroll,
+        len - inner_height,
+        "the tree window ends on its last row"
+    );
+    assert!(
+        row_symbols(buffer, area.bottom() - 2).contains("n39"),
+        "the last row is drawn on the last inner row"
+    );
+
+    // The tag list.
+    let vault_dir = TempDir::new("ui-bar-end-tags");
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("t{i:02}.md")),
+            format!("---\ntags: [tag{i:02}]\n---\nx\n"),
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-end-tags.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('t')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let inner_height = area.height as usize - 2;
+    app.handle_press(bar.x, bar.bottom() - 1);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let len = app.tags.rows().len();
+    assert_eq!(app.tags.selection_index(), Some(len - 1));
+    assert_eq!(
+        app.tags.scroll,
+        len - inner_height,
+        "the tag window ends on its last row"
+    );
+    assert!(
+        row_symbols(buffer, area.bottom() - 2).contains("tag29"),
+        "the last tag is drawn on the last inner row"
+    );
+
+    // The outline.
+    let headings: String = (0..30)
+        .map(|i| format!("## heading {i}\n\nbody\n\n"))
+        .collect();
+    let vault_dir = TempDir::new("ui-bar-end-outline");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-bar-end-outline.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let inner_height = area.height as usize - 2;
+    app.handle_press(bar.x, bar.bottom() - 1);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let len = crate::app::outline_rows(&app.base, &app.viewer).len();
+    assert_eq!(app.outline.selected, len - 1);
+    assert_eq!(
+        app.outline.scroll,
+        len - inner_height,
+        "the outline window ends on its last row"
+    );
+    assert!(
+        row_symbols(buffer, area.bottom() - 2).contains("heading 29"),
+        "the last heading is drawn on the last inner row"
+    );
+
+    // The backlinks panel.
+    let vault_dir = TempDir::new("ui-bar-end-backlinks");
+    std::fs::write(vault_dir.path().join("target.md"), "target\n").unwrap();
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("src{i:02}.md")),
+            "[[target]]\n",
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-end-backlinks.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_note(&vault_dir.path().join("target.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('b')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let panel = app.layout.backlinks_area.expect("panel open");
+    let bar = app
+        .layout
+        .backlinks_scrollbar_area
+        .expect("an overflowing panel draws its bar");
+    let inner_height = panel.height as usize - 2;
+    app.handle_press(bar.x, bar.bottom() - 1);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let len = app.backlinks.len();
+    assert_eq!(app.backlink_sel, len - 1);
+    assert_eq!(
+        app.backlink_scroll,
+        len - inner_height,
+        "the backlinks window ends on its last row"
+    );
+    assert!(
+        row_symbols(buffer, panel.bottom() - 2).contains("src29"),
+        "the last backlink is drawn on the last inner row"
+    );
+}
+
+/// The tag list's bar drags its selection too, not just the tree's (unit
+/// 25's review: the drag arm was pinned only for the tree).
+#[test]
+fn tag_list_bar_drag_follows_the_pointer() {
+    let vault_dir = TempDir::new("ui-bar-tags-drag");
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("t{i:02}.md")),
+            format!("---\ntags: [tag{i:02}]\n---\nx\n"),
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-tags-drag.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('t')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let len = app.tags.rows().len();
+    assert_eq!(len, 30);
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.tags.selection_index(), Some(0));
+    // The pointer leaves the bar column; only its row drives the selection.
+    app.handle_drag(1, bar.bottom() - 1);
+    assert_eq!(
+        app.tags.selection_index(),
+        Some(len - 1),
+        "the drag follows the pointer past the bar column"
+    );
+    app.handle_drag(1, bar.y);
+    assert_eq!(app.tags.selection_index(), Some(0));
+}
+
+/// The outline's bar drags its cursor without jumping the note.
+#[test]
+fn outline_bar_drag_follows_the_pointer() {
+    let headings: String = (0..30)
+        .map(|i| format!("## heading {i}\n\nbody\n\n"))
+        .collect();
+    let vault_dir = TempDir::new("ui-bar-outline-drag");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-bar-outline-drag.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let len = crate::app::outline_rows(&app.base, &app.viewer).len();
+    assert_eq!(len, 30);
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.outline.selected, 0);
+    app.handle_drag(1, bar.bottom() - 1);
+    assert_eq!(
+        app.outline.selected,
+        len - 1,
+        "the drag follows the pointer past the bar column"
+    );
+    assert_eq!(app.viewer.scroll, 0, "the drag never jumps the note");
+    app.handle_drag(1, bar.y);
+    assert_eq!(app.outline.selected, 0);
+}
+
+/// The backlinks bar drags its selection; the note stays where it was.
+#[test]
+fn backlinks_bar_drag_follows_the_pointer() {
+    let vault_dir = TempDir::new("ui-bar-backlinks-drag");
+    std::fs::write(vault_dir.path().join("target.md"), "target\n").unwrap();
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("src{i:02}.md")),
+            "[[target]]\n",
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-backlinks-drag.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_note(&vault_dir.path().join("target.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('b')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .backlinks_scrollbar_area
+        .expect("an overflowing panel draws its bar");
+    let len = app.backlinks.len();
+    assert_eq!(len, 30);
+    let opened = app.viewer.path.clone();
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.backlink_sel, 0);
+    app.handle_drag(1, bar.bottom() - 1);
+    assert_eq!(
+        app.backlink_sel,
+        len - 1,
+        "the drag follows the pointer past the bar column"
+    );
+    app.handle_drag(1, bar.y);
+    assert_eq!(app.backlink_sel, 0);
+    assert_eq!(app.viewer.path, opened, "a drag never opens a backlink");
+}
+
+/// Draws one frame with the pointer's last cell set through the app's own
+/// tracking (`on_mouse_position`); `None` forgets it, like the first frame.
+fn draw_with_pointer(
+    terminal: &mut Terminal<TestBackend>,
+    app: &mut App,
+    pointer: Option<(u16, u16)>,
+) {
+    match pointer {
+        Some((col, row)) => app.on_mouse_position(col, row),
+        None => app.pointer = None,
+    }
+    terminal.draw(|f| draw(f, app)).unwrap();
+}
+
+/// Pins one bar's hover: with the pointer over the bar column every thumb
+/// cell carries `scrollbar_hover_fg`; without it, and after leaving the
+/// column, every thumb cell keeps `popup_dimmed_fg`. The track never
+/// changes colour and the thumb's rows are identical in every case, so the
+/// hover moves no geometry.
+fn assert_hover_paints_the_thumb(terminal: &mut Terminal<TestBackend>, app: &mut App, bar: Rect) {
+    let ui = app.theme_ui;
+    let ys = bar.y..bar.bottom();
+    let rows = |cells: &[(u16, Color)]| -> Vec<u16> { cells.iter().map(|(row, _)| *row).collect() };
+    assert_ne!(
+        ui.scrollbar_hover_fg, ui.popup_dimmed_fg,
+        "the fixture's theme must separate the accent from the track colour"
+    );
+
+    draw_with_pointer(terminal, app, None);
+    let plain = thumb_cells(terminal.backend().buffer(), bar.x, ys.clone());
+    assert!(!plain.is_empty(), "the fixture's bar draws a thumb");
+    assert!(
+        plain.iter().all(|(_, fg)| *fg == ui.popup_dimmed_fg),
+        "without the pointer the thumb keeps the track colour"
+    );
+
+    draw_with_pointer(terminal, app, Some((bar.x, bar.y + bar.height / 2)));
+    let buffer = terminal.backend().buffer();
+    let lit = thumb_cells(buffer, bar.x, ys.clone());
+    assert_eq!(rows(&lit), rows(&plain), "the hover moves no thumb row");
+    assert!(
+        lit.iter().all(|(_, fg)| *fg == ui.scrollbar_hover_fg),
+        "a hovered thumb is painted in the theme's accent"
+    );
+    for y in ys.clone() {
+        if buffer[(bar.x, y)].symbol() == "│" {
+            assert_eq!(
+                buffer[(bar.x, y)].fg,
+                ui.popup_dimmed_fg,
+                "the track is unchanged"
+            );
+        }
+    }
+
+    draw_with_pointer(terminal, app, Some((bar.x.saturating_sub(1), bar.y)));
+    let after = thumb_cells(terminal.backend().buffer(), bar.x, ys);
+    assert_eq!(
+        rows(&after),
+        rows(&plain),
+        "leaving the bar moves no thumb row"
+    );
+    assert!(
+        after.iter().all(|(_, fg)| *fg == ui.popup_dimmed_fg),
+        "leaving the bar column drops the highlight"
+    );
+}
+
+/// The note pane's bar: the thumb highlights under the pointer (SPEC
+/// "the scrollbar's thumb highlights under the mouse").
+#[test]
+fn note_scrollbar_thumb_highlights_under_the_pointer() {
+    let file = ui_viewer("ui-bar-hover-note.md", &long_note(200));
+    let mut app = app_for(&file, None);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.note_scrollbar_area.expect("bar drawn");
+    assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
+}
+
+/// The `.base` table's bar highlights too (it goes through the shared
+/// helper but has its own call site and colours).
+#[test]
+fn base_table_scrollbar_thumb_highlights_under_the_pointer() {
+    let dir = scrolling_base_vault("ui-bar-hover-base");
+    let file = ui_viewer("ui-bar-hover-base.md", "x\n");
+    let mut app = app_with_index(&file, &dir);
+    app.open_base_at(&dir.path().join("many.base"), 0).unwrap();
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    // The bar is the table's last inner column (x=98 at 100 wide).
+    let bar = Rect::new(98, 1, 1, 21);
+    assert!(
+        column_has_bar(terminal.backend().buffer(), 98, 1..22),
+        "the fixture's table overflows"
+    );
+    assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
+}
+
+/// The sidebar list's bar (tree, tags and outline share the panel) and the
+/// backlinks panel's bar highlight through their own call sites.
+#[test]
+fn list_panel_scrollbars_highlight_their_thumbs_under_the_pointer() {
+    let vault_dir = TempDir::new("ui-bar-hover-side");
+    for i in 0..40 {
+        std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
+    }
+    let file = ui_viewer("ui-bar-hover-side.md", "x\n");
+    let mut app = app_for(&file, Some(vault_dir.path()));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
+
+    let vault_dir = TempDir::new("ui-bar-hover-back");
+    std::fs::write(vault_dir.path().join("target.md"), "target\n").unwrap();
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("src{i:02}.md")),
+            "[[target]]\n",
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-hover-back.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_note(&vault_dir.path().join("target.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('b')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .backlinks_scrollbar_area
+        .expect("an overflowing panel draws its bar");
+    assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
+}
+
+/// The help popup's bar highlights too.
+#[test]
+fn help_scrollbar_thumb_highlights_under_the_pointer() {
+    let file = ui_viewer("ui-bar-hover-help.md", "x\n");
+    let mut app = app_for(&file, None);
+    app.viewer.help_open = true;
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let HelpPopup {
+        rect: popup,
+        visible: body_height,
+        ..
+    } = help_popup(buffer.area);
+    assert!(body_height > 0, "the help body scrolls at 100x30");
+    let bar = Rect::new(
+        popup.x + popup.width - 2,
+        popup.y + 1,
+        1,
+        body_height as u16,
+    );
+    assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
+}
+
+/// Mouse capture off (`m`) forgets the pointer, and no new position is
+/// tracked: the hover needs a live pointer, like every other mouse action.
+#[test]
+fn mouse_capture_off_clears_the_scrollbar_hover() {
+    let file = ui_viewer("ui-bar-hover-capture.md", &long_note(200));
+    let mut app = app_for(&file, None);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.note_scrollbar_area.expect("bar drawn");
+    assert_ne!(
+        app.theme_ui.scrollbar_hover_fg, app.theme_ui.popup_dimmed_fg,
+        "the control needs two distinct colours"
+    );
+    draw_with_pointer(&mut terminal, &mut app, Some((bar.x, bar.y)));
+    let lit = thumb_cells(terminal.backend().buffer(), bar.x, bar.y..bar.bottom());
+    assert!(
+        lit.iter()
+            .all(|(_, fg)| *fg == app.theme_ui.scrollbar_hover_fg),
+        "the control tick: the pointer lights the thumb"
+    );
+
+    app.handle_key(key(KeyCode::Char('m')));
+    assert!(!app.mouse_capture, "m turns capture off");
+    assert!(app.pointer.is_none(), "capture off forgets the pointer");
+    app.on_mouse_position(bar.x, bar.y);
+    assert!(
+        app.pointer.is_none(),
+        "no pointer is tracked while capture is off"
+    );
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let after = thumb_cells(terminal.backend().buffer(), bar.x, bar.y..bar.bottom());
+    assert!(
+        after
+            .iter()
+            .all(|(_, fg)| *fg == app.theme_ui.popup_dimmed_fg),
+        "capture off means no hover"
     );
 }
 

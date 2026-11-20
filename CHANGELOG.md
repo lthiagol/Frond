@@ -14,6 +14,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   bar moves the selection to that row of the list, and a drag keeps the
   selection following the pointer. A press on the bar is not a row click
   any more - it never opens the row it lands on.
+- A scrollbar's thumb highlights in the theme's accent while the mouse is
+  over it, so the bar says it is draggable. The colour is a new theme
+  role, `scrollbar_hover_fg`.
 
 ### Fixed
 

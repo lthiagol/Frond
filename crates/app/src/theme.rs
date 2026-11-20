@@ -63,6 +63,9 @@ pub struct UiTheme {
     pub popup_dimmed_fg: Color,
     pub popup_match_fg: Color,
     pub popup_match_bg: Color,
+    /// A scrollbar's thumb while the pointer is over its bar column (the
+    /// track keeps `popup_dimmed_fg`).
+    pub scrollbar_hover_fg: Color,
 }
 
 /// A fully resolved theme: markdown palette + chrome palette (+ the
@@ -301,6 +304,7 @@ theme_overrides!(UiOverrides for UiTheme {
     popup_dimmed_fg,
     popup_match_fg,
     popup_match_bg,
+    scrollbar_hover_fg,
 });
 
 /// The single list of `MarkdownTheme` fields a theme can set. Invoked with
@@ -415,6 +419,13 @@ fn build_theme(name: &str, raw: ThemeFileRaw) -> Result<(Theme, Vec<String>), St
     raw.markdown.apply_to(&mut markdown);
     let mut ui = ui_by_preset(base);
     raw.ui.apply_to(&mut ui);
+    // A custom file that does not name the hover role takes the theme's
+    // accent: the `toc_accent` value `sidebar_border_focused` carries, so a
+    // file that recolours the accent moves the hover with it instead of
+    // leaving the base preset's colour behind.
+    if raw.ui.scrollbar_hover_fg.is_none() {
+        ui.scrollbar_hover_fg = ui.sidebar_border_focused;
+    }
 
     let mut warnings = Vec::new();
     let unknown = unknown_keys(&raw.ui.unknown);
@@ -466,7 +477,7 @@ pub fn load_theme_file(path: &Path, name: &str) -> Result<(Theme, Vec<String>), 
 /// Chrome palette for a built-in preset, hand-mapped from leaf's preset
 /// `UiTheme` VALUES (`/tmp/leaf/src/theme/presets.rs`): `toc_bg` →
 /// `sidebar_bg`, `status_bg` → `status_bg`, `toc_accent` → the
-/// focused/selection accent, `toc_border` → unfocused/popup borders,
+/// focused/selection/hover accent, `toc_border` → unfocused/popup borders,
 /// `status_*` → the status-bar segments, `status_search_*` → the search
 /// match highlight. Leaf keys with no counterpart here (the rest of the
 /// TOC panel, brand/percent segments) are simply not mapped.
@@ -493,6 +504,7 @@ pub fn ui_by_preset(preset: MarkdownThemePreset) -> UiTheme {
             popup_dimmed_fg: Color::Rgb(98, 116, 134),  // status_shortcut_fg
             popup_match_fg: Color::Rgb(142, 114, 24),   // status_search_fg
             popup_match_bg: Color::Rgb(240, 234, 200),  // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(76, 122, 168), // toc_accent
         },
         // BASE_DARK_UI (leaf presets.rs, values verbatim) — also the
         // default (ocean).
@@ -516,6 +528,7 @@ pub fn ui_by_preset(preset: MarkdownThemePreset) -> UiTheme {
             popup_dimmed_fg: Color::Rgb(58, 68, 98), // status_shortcut_fg
             popup_match_fg: Color::Rgb(240, 210, 95), // status_search_fg
             popup_match_bg: Color::Rgb(36, 32, 16),  // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(123, 109, 255), // toc_accent
         },
         // FOREST_THEME.ui (leaf presets.rs, values verbatim).
         MarkdownThemePreset::Forest => UiTheme {
@@ -538,6 +551,7 @@ pub fn ui_by_preset(preset: MarkdownThemePreset) -> UiTheme {
             popup_dimmed_fg: Color::Rgb(82, 104, 92), // status_shortcut_fg
             popup_match_fg: Color::Rgb(236, 214, 123), // status_search_fg
             popup_match_bg: Color::Rgb(38, 34, 18),  // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(127, 179, 255), // toc_accent
         },
         // SOLARIZED_DARK_THEME.ui (leaf presets.rs, values verbatim).
         MarkdownThemePreset::SolarizedDark => UiTheme {
@@ -560,6 +574,7 @@ pub fn ui_by_preset(preset: MarkdownThemePreset) -> UiTheme {
             popup_dimmed_fg: Color::Rgb(88, 110, 117), // status_shortcut_fg
             popup_match_fg: Color::Rgb(181, 137, 0),   // status_search_fg
             popup_match_bg: Color::Rgb(32, 28, 0),     // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(38, 139, 210), // toc_accent
         },
     }
 }
@@ -1105,6 +1120,73 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    /// The scrollbar hover role exists on every theme and is that theme's
+    /// accent: the value `sidebar_border_focused` already carries (leaf's
+    /// `toc_accent`). A custom file that omits it inherits the base's
+    /// accent; one that names it is accepted (not warned as unknown).
+    #[test]
+    fn every_theme_sets_the_scrollbar_hover_role_to_its_accent() {
+        for preset in [
+            MarkdownThemePreset::Arctic,
+            MarkdownThemePreset::Forest,
+            MarkdownThemePreset::OceanDark,
+            MarkdownThemePreset::SolarizedDark,
+        ] {
+            let ui = ui_by_preset(preset);
+            assert_eq!(
+                ui.scrollbar_hover_fg, ui.sidebar_border_focused,
+                "{preset:?}: the hover is the theme's accent"
+            );
+        }
+        for spec in crate::builtin_themes::BUILTIN_THEMES {
+            assert_eq!(
+                spec.ui.scrollbar_hover_fg, spec.ui.sidebar_border_focused,
+                "{}: the hover is the theme's accent",
+                spec.name
+            );
+        }
+
+        let dir = TempDir::new("theme-hover");
+        let file = dir.path().join("plain.toml");
+        std::fs::write(&file, "base = \"forest\"\nappearance = \"dark\"\n").unwrap();
+        let (theme, warnings) = load_theme_file(&file, "plain").unwrap();
+        assert_eq!(
+            theme.ui.scrollbar_hover_fg,
+            ui_by_preset(MarkdownThemePreset::Forest).scrollbar_hover_fg,
+            "a custom file without the key takes its base's accent"
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+
+        let file = dir.path().join("hover.toml");
+        std::fs::write(
+            &file,
+            "appearance = \"dark\"\n[ui]\nscrollbar_hover_fg = \"#010203\"\n",
+        )
+        .unwrap();
+        let (theme, warnings) = load_theme_file(&file, "hover").unwrap();
+        assert_eq!(theme.ui.scrollbar_hover_fg, rgb(1, 2, 3));
+        assert!(
+            warnings.is_empty(),
+            "the key is part of the [ui] vocabulary: {warnings:?}"
+        );
+
+        // The fallback follows a recoloured accent: the hover role *is* the
+        // accent, so overriding `sidebar_border_focused` moves it too.
+        let file = dir.path().join("accent.toml");
+        std::fs::write(
+            &file,
+            "appearance = \"dark\"\n[ui]\nsidebar_border_focused = \"#040506\"\n",
+        )
+        .unwrap();
+        let (theme, warnings) = load_theme_file(&file, "accent").unwrap();
+        assert_eq!(
+            theme.ui.scrollbar_hover_fg,
+            rgb(4, 5, 6),
+            "an overridden accent carries the hover with it"
+        );
+        assert!(warnings.is_empty(), "the key is known: {warnings:?}");
     }
 
     #[test]

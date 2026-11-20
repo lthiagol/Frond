@@ -604,6 +604,10 @@ fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::
                     if !app.mouse_capture {
                         continue;
                     }
+                    // Every mouse event carries the pointer's cell; the bars'
+                    // hover highlight follows it, so record it before the
+                    // event's own action.
+                    app.on_mouse_position(mouse.column, mouse.row);
                     match mouse.kind {
                         MouseEventKind::ScrollDown => {
                             app.handle_wheel_at(mouse.column, mouse.row, true)

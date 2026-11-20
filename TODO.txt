@@ -7,23 +7,24 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 25 is in flight: the list panels' scrollbars (the sidebar tree, the
-  tag list, the outline, the backlinks panel) position that panel's
-  *selection* - the sidebar's scroll is a selection cursor, not a document
-  position. It continues the parked list's interactive scrollbar (TODO.md
-  5.8): unit 24 (committed) did the note pane's bar. Two lows from unit
-  24's review are folded into this unit: `handle_drag` needs the popup
-  guard `handle_press` has, and no test pins that mouse capture off
-  disables the bar.
+  Unit 26 is in flight: a scrollbar's thumb highlights under the mouse
+  (the theme's accent, a new theme role `scrollbar_hover_fg`). It is the
+  last piece of the parked list's interactive scrollbar (TODO.md 5.8):
+  unit 24 (committed) did the note pane's bar, unit 25 (committed) the
+  list panels'. Three coverage findings from unit 25's review are folded
+  into this unit (the drag arm is pinned only for the tree, the scroll end
+  position after a bar press is not asserted, the bare release on a bar
+  column has no test).
 
-  The spec line is written (SPEC.md, section Scrollbars, plus a key-table
-  row), with the changelog's Unreleased section. The builder's brief is at
-  `/tmp/opencode/frond/unit-25-kickoff.md` (plus three more files).
+  The spec lines are written (SPEC.md, section Scrollbars and the theme
+  key list), with `docs/COLORS.md` and the changelog's Unreleased section.
+  The builder's brief is at `/tmp/opencode/frond/unit-26-kickoff.md` (plus
+  three more files).
 
-  Before this unit: unit 24 (the note pane's scrollbar is a position
-  control) is committed. Round 1 was clean on both axes (0 blocking, 2
+  Before this unit: unit 25 (the list panels' scrollbars position their
+  selection) is committed. Round 1 was clean on both axes (0 blocking, 4
   low); the merged findings are at
-  `/tmp/opencode/frond/review2/round1-findings.md`.
+  `/tmp/opencode/frond/review3/round1-findings.md`.
 
   Before that: unit 23 (the selection bar) is committed - the selected
   row of every list panel is one full-width bar, and its text is painted in
@@ -145,6 +146,9 @@ OPEN
       the fix belongs in `snippet_line`, not in the selection rule. And the
       disambiguation popup's bar has no test pinning its end position (the
       other six panels have one).
+  - From unit 25's review (one low, carried): `crates/app/src/tags.rs`
+      carries the same doc comment twice ("Does this row carry the
+      selection?") — a one-line cleanup, pre-existing.
   - Parked: an interactive scrollbar (click to jump, drag — TODO.md §5.8),
       a link hover preview, regex + match-next in the search popup, a
       line-number gutter. And a scroll position for the sidebar tree — the
