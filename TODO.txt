@@ -7,33 +7,23 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 32 is in flight: the 0.6.5 release cut. This cycle landed the
-  selection bar, the interactive scrollbars, the scrollbar hover, the
-  link hover, the regex search, the match-next, the line-number gutter
-  and the startup warnings - the release carries them.
+  Nothing is in flight. **0.6.5 is tagged** (`v0.6.5`) and committed: this
+  cycle shipped the selection bar, the interactive scrollbars, the
+  scrollbar hover, the link hover, the regex search, the match-next, the
+  line-number gutter and the startup warnings - the release notes cover
+  every one of them.
 
-  The builder's brief is at `/tmp/opencode/frond/unit-32-kickoff.md` (plus
-  one more file).
-
-  Before this unit: unit 31 (the startup warnings reach the user) is
-  committed. Round 1 came back changes-needed (a healed file's warning
-  cleared while the note stayed out of the index); the delta review was
-  clean. The merged findings are at
-  `/tmp/opencode/frond/review9/round1-findings.md` and
-  `/tmp/opencode/frond/review9/round2-findings.md`.
-
-  Before that: unit 23 (the selection bar) is committed - the selected
-  row of every list panel is one full-width bar, and its text is painted in
-  the panel's own background colour. Round 1 was clean on both axes (0
-  blocking, 3 low); the merged findings are at
-  `/tmp/opencode/frond/review1/round1-findings.md`.
+  Every unit went builder -> two fresh-context reviewers (a delta reviewer
+  on the fix round) -> verdict -> commit, and the gate was run by the
+  orchestrator, never taken on trust. The parked list is empty; what is
+  left sits under OPEN.
 
   Before that: the whole-project audit is done and released:
   **0.6.4 is tagged and pushed** (`v0.6.4`), CI is green on the push, and
   `main` is in sync with `origin/main`. The audit's four blocking findings
   and their lows are closed.
 
-  The next cycle starts from the parked list under OPEN. Before starting
+  The next cycle starts from the human's requests. Before starting
   any of it, note that the flow's own rules are what made this session
   work: every unit went builder → two fresh-context reviewers → verdict →
   commit, and the gate was run by the orchestrator, never taken on trust.
@@ -180,7 +170,17 @@ OPEN
       cursor, not a document position.
 
 NEXT
-  1. The parked list, in my order of value: the interactive scrollbar, the
-     link hover preview, regex + match-next, the line-number gutter.
-  2. The open startup-warnings item, whenever a cycle has room for it.
-  3. Cut the next release when a cycle's worth of work has landed.
+  1. The parked list is done (the interactive scrollbar, the link hover,
+     regex + match-next, the line-number gutter) and the open
+     startup-warnings item is closed. What is left is the carried lows
+     under OPEN, in my order of value:
+     - the `snippet_line` width overshoot (the search popup's bar can miss
+       the edge with wide characters);
+     - the disambiguation popup's bar has no end-position test;
+     - a file that becomes unreadable mid-session is recorded but never
+       surfaced;
+     - the index classifies an unreadable path by a message prefix (a
+       `kind` field would make it structural);
+     - the duplicated doc comment in `tags.rs`.
+  2. Cut the next release when a cycle's worth of work has landed.
+  3. Otherwise: the next cycle starts from the human's requests.
