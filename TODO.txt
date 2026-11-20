@@ -7,161 +7,91 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  The audit is done and released: **0.6.4 is tagged and pushed**
-  (`v0.6.4`), and CI is green on the push. The whole-project audit's four
-  blocking findings and their lows are closed; nothing is in flight.
+  Nothing is in flight. The whole-project audit is done and released:
+  **0.6.4 is tagged and pushed** (`v0.6.4`), CI is green on the push, and
+  `main` is in sync with `origin/main`. The audit's four blocking findings
+  and their lows are closed.
+
+  The next cycle starts from the parked list under OPEN. Before starting
+  any of it, note that the flow's own rules are what made this session
+  work: every unit went builder → two fresh-context reviewers → verdict →
+  commit, and the gate was run by the orchestrator, never taken on trust.
 
 DONE
-  - Unit 22 — 0.6.4 cut: `Cargo.toml` + `Cargo.lock` bumped, the
-    changelog released as `## [0.6.4] — 2026-11-19` with a fresh empty
-    `## [Unreleased]` above it, and the `v0.6.4` tag. The notes cover the
-    whole audit, including the documentation corrections. Round 1 came
-    back changes-needed (an audit round had shipped unnoted — the
+  The whole-project audit — three reviewers over the whole project (the
+  `crates/app` TUI, the `crates/vault` crate, and the documentation against
+  the code): **4 blocking and 13 low findings**, all closed.
+
+  - Unit 22 — 0.6.4 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
+    released as `## [0.6.4] — 2026-11-19` with a fresh empty
+    `## [Unreleased]` above it, and the `v0.6.4` tag. Round 1 came back
+    changes-needed (an audit round had shipped unnoted — the
     orchestrator's own changelog); the delta review was clean.
-  - Unit 21 — the two app-crate leftovers: the quick switcher strips the
+  - Unit 21 — the app-crate leftovers: the quick switcher strips the
     extension case-insensitively (through the vault's helper), and the
     watch path reports a directory it cannot read. The warning has its own
     slot: it clears when the condition ends, never replaces a newer real
     error, and sits between the `.base` warnings and the info message.
-    Round 1 came back changes-needed (the warning had borrowed the
-    sticky error slot); the fix round was reviewed clean.
   - Unit 20 — the vault's index, frontmatter and walk: the `.md`/`.base`
-    suffix stripping is case-insensitive everywhere (an `X.MD` note resolves
-    from both the bare and the path-style link), the frontmatter block-list
-    items are kept apart so a tag containing a comma survives as one tag
-    (and `file.hasTag` matches it), an unreadable subdirectory raises an
-    `IndexWarning` like an unreadable file, and the frontmatter fence
-    rules match the parser's exactly (a BOM and a repeated CR). Round 1
-    came back changes-needed (the block items had lost the comment
-    stripping); the fix round was reviewed clean.
+    suffix stripping is case-insensitive everywhere, the frontmatter
+    block-list items are kept apart (a tag containing a comma survives as
+    one tag, and `file.hasTag` matches it), an unreadable subdirectory
+    raises an `IndexWarning`, and the frontmatter fence rules match the
+    parser's exactly (a BOM and a repeated CR).
+  - Unit 19 — the vault's write path: a `~`-prefixed changed path is no
+    longer dropped (it made a dirty tree report clean, so the guarded
+    write proceeded on it), and the `updated:` scan is one forward pass
+    that stops at the frontmatter (it was quadratic — 96 s for a 100k-line
+    note, on the single-threaded event loop).
+  - Unit 18 — the app crate's findings: a successful checkbox write is
+    reported through the neutral info channel, the quick switcher's empty
+    state shows its footer, a degenerate popup invents no list row, the
+    popups' heights and chrome come from one `PopupChrome` per popup, and
+    `config.rs`'s header names every key the loader accepts.
   - Unit 17 — one popup list geometry: `ui::PopupList` holds the window
-    (the first screen row, the anchor, the rows) and the screen-row →
-    item mapping that rejects the chrome rows, used by the three
-    renderers and the two click mappers. The search popup's footer click no
-    longer selects an invisible hit when the results overflow — the
-    regression test was verified to fail against the old mapper. Reviewed
-    clean on both axes (round 1: 0 blocking, 3 low).
+    and the screen-row → item mapping that rejects the chrome rows, so the
+    search popup's footer click can no longer select an invisible hit.
   - Round S — the audit's documentation findings, in the orchestrator's own
-    files: the status bar's segment list names `mouse off` and
-    `metadata off`, the keybindings section lists the modal popups' keys,
-    the content-pane keys are marked, the icon examples say they show the
-    unicode set, README's index.md claim is qualified, and COLORS.md
-    records the scrollbar's colour role. Reviewed clean (0 blocking).
-  - Unit 16 — 0.6.3 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
-    released as `## [0.6.3] — 2026-11-19` with a fresh empty
-    `## [Unreleased]` above it, and the `v0.6.3` tag. Reviewed clean on
-    both axes (round 1: 0 blocking, 1 low) and CI green on the push.
-  - Unit 15 — the vertical margin's two test gaps: a link clicked in a
-    note rendered with a vertical margin now activates through the real
-    geometry, and a pane too short for the margin draws no bar that
-    lies (the guard that suppresses it is now in the spec). Round 1 came
-    back changes-needed (a spec line that did not move with the
-    behaviour — the orchestrator's own); the fix round was reviewed clean.
-  - Unit 14 — the vertical margin (`margin_y`): blank rows above and below
-    the note text (0–5, default 1), the visible rows and the scroll range
-    follow the shorter text viewport, and the scrollbar's thumb is computed
-    against the text viewport so it stays proportional now that the track
-    is taller than the text. Reviewed clean on both axes (round 1: 0
-    blocking, 3 low — one of them a wrong sentence in the orchestrator's
-    spec, fixed in the same commit).
-  - Unit 13 — the outline's last three polish items: the jump takes its
-    rows from `outline_rows` too, so the rule exists in exactly one
-    place; the vacuous tree-side restore assert is dropped with a note
-    saying why; and the click assertion now pins the outline's selection,
-    which is the thing that actually distinguishes the cases. Reviewed
-    clean on both axes (round 1: 0 blocking, 1 low).
-  - Unit 12 — the outline's two follow-ups: the "a `.base` table means no
-    outline rows" rule now lives in `app::outline_rows` and both `ui.rs`
-    sites take their rows from it, and a session saved while the outline
-    was showing is pinned to restore to the tree or the tag view.
-    Reviewed clean on both axes (round 1: 0 blocking, 4 low — one of them
-    a gap in the orchestrator's spec wording, fixed in the same commit).
-  - Unit 11 — the outline (`o`): the sidebar's third view over the tree
-    and the tags, listing the open note's headings indented by level,
-    with `j`/`k`, an `Enter`/click jump to the heading, the `no headings`
-    empty state and the heading as the status-bar label. The tree and tag
-    views are untouched. Reviewed clean on both axes (round 1: 0 blocking,
-    5 low — three of them gaps in the orchestrator's own spec wording,
-    fixed in the same commit).
-  - Unit 10 — the watch reload refreshes the render time: the existing
-    `vault_watcher_reindexes_and_reparses` now asserts that
-    `viewer.last_reload` is set again by the poll. Both reviewers traced
-    every write to the field and confirmed the assertion pins
-    `reload()` specifically; the mutation probe (removing the assignment)
-    fails on the new assertion. Reviewed clean on both axes (round 1: 0
-    blocking, 0 low).
-  - Unit 9 — the help popup's geometry, finished: `HelpPopup` carries the
-    grid so `help_grid` is called once, the narrowing test's comment names
-    the exclusive end value, and its assert message says what the rule
-    count actually proves. Reviewed clean on both axes (round 1: 0
-    blocking, 0 low).
-  - Unit 8 — the help popup's geometry lives in one helper: `help_popup`
-    carries the popup rect, the total and the visible rows, and both
-    `draw_help` and the two help tests use it, so the clamp arithmetic
-    exists once. The popup's layout, scroll range and bar are unchanged.
-    Reviewed clean on both axes (round 1: 0 blocking, 3 low).
-  - Unit 7 — the assertions that stopped testing: all five "border
-    intact" assertions now check the thumb (the border column holds none,
-    the bar column holds one), the border-glyph coverage is restored by a
-    distinct `border_drawn` helper, and the `.base` narrowing test pins
-    the one-column narrowing through the rule line. Round 1 came back
-    changes-needed (a fifth instance my kickoff missed); the fix round was
-    reviewed clean.
-  - Unit 6 — the `.base` table gets a scrollbar: the shared
-    `draw_scrollbar` helper, the bar in the table's last inner column
-    while the table overflows, the table rendered one column narrower so
-    no text runs under it, and four new tests (overflow, narrowing, thumb
-    ends and proportion, bar-column click is a no-op). Reviewed clean on
-    both axes (round 1: 0 blocking, 3 low).
-  - Unit 5 — 0.6.2 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
-    released as `## [0.6.2] — 2026-11-19` with a fresh empty
-    `## [Unreleased]` above it, and the `v0.6.2` tag. Reviewed clean on
-    both axes (round 1: 0 blocking, 0 low) — every release-note entry was
-    traced to a real commit.
-  - Unit 4 — the scrollbar symbols: a thin `│` track and a solid `█` thumb
-    with no arrow heads, so the track spans the full height of the bar
-    column; the help popup draws its bar through the shared
-    `draw_scrollbar`; the test helpers' glyph sets match what is drawn;
-    and the proportionality invariant (bar column height == viewport rows)
-    is pinned in all three draw paths. Reviewed clean on both axes
-    (round 1: 0 blocking, 4 low).
-  - Unit 3 — the status bar does not move while scrolling: the percentage
-    sits in a fixed four-column right-aligned field (`  0%`, ` 50%`,
-    `100%`), the render time is a clock glyph plus `HH:MM` (nerd U+F017,
-    unicode U+25F7, the glyph alone before the first render), and the
-    percentage has its sidebar-focus test. Reviewed clean on both axes
-    (round 1: 0 blocking, 3 low).
-  - Unit 2 — the scroll position in the status bar: the content pane's
-    scroll offset as a percentage, immediately after the size segment
-    (`¶ index.md · 12 lines · 42% · watch on · …`). 0% at the top, 100% at
-    the bottom, 100% when the content fits, omitted with no document; a
-    `.base` table shows its own offset. Reviewed clean on both axes
-    (round 1: 0 blocking, 3 low).
-  - Unit 1 — the scrollbar thumb geometry: all three draw paths feed the
-    scroll range (total - viewport) and drop `viewport_content_length`; the
-    thumb reaches the last track row at the bottom, and three new tests
-    assert the end positions on the note pane, the sidebar tree and the help
-    popup. Reviewed clean on both axes (round 1: 0 blocking, 3 low).
-  - Engine, shell, vault and polish milestones (M1–M4) are shipped.
-  - Theme groups (Ctrl+T), theme appearance, note margin, status-bar icon
-    sets, the quick switcher (Ctrl+P), session memory, guarded checkbox
-    writes, the .base table views.
-  - SPEC.md reconciled with the code; the README's "no vault" wording fixed.
-  - The smoke suite `smoke_m6` covers the 0.6.x features (theme groups,
-    icons, .base opening, the quick switcher).
-  - 0.6.1 released (2026-11-17).
+    files: the status bar's segment list, the keybindings section, the icon
+    examples, README's index.md claim, COLORS.md's scrollbar role.
+
+  Before the audit: the scrollbar's thumb geometry (unit 1), the scroll
+  position in the status bar (unit 2), a status bar that stops moving while
+  you scroll (unit 3), leaf's scrollbar symbols (unit 4), the 0.6.2 cut
+  (unit 5), the `.base` table's scrollbar (unit 6), the assertions that
+  had stopped testing (unit 7), the help popup's geometry (units 8–9), the
+  outline `o` and its polish (units 10–13), the vertical margin `margin_y`
+  (units 14–15), and the 0.6.3 cut (unit 16).
+
+  Shipped earlier: the M1–M4 milestones, the theme groups, the note
+  margin, the status-bar icon sets, the quick switcher, the session memory,
+  the guarded checkbox writes, the `.base` table views, and the `smoke_m6`
+  suite.
 
 HAPPENED
-  - A kickoff that enumerates instances by line number misses instances:
-    unit 7's brief named four "border intact" assertions and missed a
+  - A kickoff that enumerates instances by line number misses instances.
+    Unit 7's brief named four "border intact" assertions and missed a
     fifth, because the line numbers came from a read before the previous
-    diff. Grep the tree for the pattern instead.
-  - The scrollbar bug survived because the test only asserted the thumb
-    moved. A test that asserts "it moved" cannot catch "it stops short" —
-    assert the end positions, not the motion.
+    diff; the audit rounds then found the same class twice more (the third
+    popup, and the app crate's own copies of the vault's rules). Grep the
+    tree for the pattern, and give the rule one home.
+  - A rule written in more than one place drifts — the popup geometry was
+    written out five times and the copies had already diverged enough to
+    hide a real bug for a release.
+  - A background writer in a shared slot clobbers what the user needs to
+    see: the watch warning was written into the sticky error slot, so it
+    never cleared and replaced a refused write within a second. A
+    persistent state needs its own slot and its own precedence.
+  - A test that asserts "it moved" cannot catch "it stops short" — assert
+    the end positions, not the motion. The scrollbar bug survived a
+    release because of it.
   - ratatui's ScrollbarState wants the scroll RANGE as its content length,
     not the line count. The two differ by the viewport, which is why the
     thumb was short and stopped short of the track end.
+  - The release notes are the orchestrator's, and they must cover every
+    user-visible change — the 0.6.4 review caught a whole audit round
+    (the documentation fixes) that had shipped unnoted. Check the notes
+    against the findings list, not against the diff.
   - The Makefile assumed `cargo` was on the PATH. It now falls back to
     rustup's default location.
 
@@ -171,15 +101,14 @@ OPEN
       an unreadable file or directory found at startup is silent — the
       mid-session case was fixed in unit 21, the startup case was not
       (audit, unit 21, SPEC low 2).
-  - Parked: a link hover preview, regex + match-next in the search popup, a
-      line-number gutter, a scroll position for the sidebar tree (the
-      recommendation is to drop it: the sidebar's scroll is a selection
-      cursor, not a document position), an interactive scrollbar (click and
-      drag — TODO.md §5.8).
+  - Parked: an interactive scrollbar (click to jump, drag — TODO.md §5.8),
+      a link hover preview, regex + match-next in the search popup, a
+      line-number gutter. And a scroll position for the sidebar tree — the
+      recommendation is to **drop** it: the sidebar's scroll is a selection
+      cursor, not a document position.
 
 NEXT
-  1. The parked list: an interactive scrollbar (click and drag), a link
-     hover preview, regex + match-next in the search popup, a line-number
-     gutter. And the sidebar scroll position — the recommendation is to
-     drop it.
-  2. The open startup-warnings item, whenever the next cycle has room.
+  1. The parked list, in my order of value: the interactive scrollbar, the
+     link hover preview, regex + match-next, the line-number gutter.
+  2. The open startup-warnings item, whenever a cycle has room for it.
+  3. Cut the next release when a cycle's worth of work has landed.

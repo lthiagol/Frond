@@ -15,6 +15,8 @@ main engine of this project (vendored into `crates/engine`).
 - Wikilink navigation: resolution per Obsidian rules, heading anchors, disambiguation popup, back/forward history with scroll restore
 - Backlinks panel; global vault search with jump-to-line
 - Quick switcher (`Ctrl+P`): fuzzy jump to a note by name
+- Outline (`o`): the sidebar shows the open note's headings, indented by level; `Enter` jumps to one
+- Status bar: the note's size, its scroll position as a percentage, the watch state and the last render time
 - Git sync status (clean/dirty/ahead/behind) and per-note changed markers — read-only
 - `.base` table views (filters, sort, groupBy) with live refresh from the vault watcher
 - Guarded checkbox toggling — the single write feature (git-clean + unchanged-file guards, atomic write)
@@ -84,6 +86,7 @@ Press `?` inside the app for the full key list. The most used keys:
 | `Tab` | Show or hide the sidebar |
 | `<` / `>` | Narrow / widen the sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
+| `o` | Sidebar mode: the open note's headings (the outline) |
 | `f` | Show / hide the note's metadata block |
 | `Enter` | Open the focused link |
 | `Backspace` | Go back |

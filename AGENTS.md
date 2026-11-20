@@ -14,11 +14,18 @@ commits; the orchestrator commits after a clean review.
 ## Read before you touch code
 
 - `SPEC.md` — the product spec. It is normative: a change that alters
-  documented behaviour changes the spec line with it, in the same unit.
+  documented behaviour changes the spec line with it, in the same unit. The
+  spec is the orchestrator's to write; a builder that finds a rule missing
+  reports it instead of editing it.
 - `README.md` — the user-facing description and the config keys.
 - `TODO.txt` — the orchestrator's state file: the unit in flight, the open
   work, the order.
+- `CHANGELOG.md` — the release notes. The `## [Unreleased]` section is the
+  orchestrator's: a release's notes describe what shipped, every
+  user-visible change included.
 - `docs/COLORS.md` — the theme vocabulary (`UiTheme` keys).
+- `crates/engine/VENDORED.md` — the vendored engine's boundary: every
+  intentional deviation from upstream leaf, and what the app may change.
 - `TODO.md` — local planning file (gitignored): past investigations and the
   measurements behind them.
 
@@ -31,6 +38,10 @@ commits; the orchestrator commits after a clean review.
   and they are part of the gate.
 - `crates/engine` is vendored from leaf and keeps its module-wide
   `#![allow(dead_code)]`. Keep that allow; do not tidy the vendored engine.
+- **A rule written in more than one place drifts.** Give it one home, and
+  find the other copies by *grepping for the pattern* — never by line
+  number: a brief that enumerated instances by line number missed one twice
+  in a row, and the review caught both.
 - Match the surrounding code: one concern per module under
   `crates/app/src/`, `ui.rs` for the frame and `ui/tests.rs` for the widget
   tests. Comments explain *why*, not what the line does.
