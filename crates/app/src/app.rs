@@ -235,6 +235,9 @@ pub struct App {
     pub note_margin: u16,
     /// Blank rows above and below the note text (config `margin_y`).
     pub note_margin_y: u16,
+    /// Whether the note pane draws a line-number gutter (config
+    /// `line_numbers`; off = exactly the pre-gutter layout).
+    pub line_numbers: bool,
     /// Status-bar icon set (config `icons`).
     pub icons: crate::config::IconSet,
     /// Discovered custom theme files (name → path), reused by config
@@ -331,6 +334,7 @@ impl App {
             theme_rotation: ThemeRotation::default(),
             note_margin: crate::config::DEFAULT_MARGIN,
             note_margin_y: crate::config::DEFAULT_MARGIN_Y,
+            line_numbers: false,
             icons: crate::config::IconSet::default(),
             discovered_themes: BTreeMap::new(),
             config_watch: None,

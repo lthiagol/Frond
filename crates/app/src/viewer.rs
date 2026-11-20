@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::time::SystemTime;
 
 use engine::{parse_markdown_with_width_opts, MarkdownTheme, ParseResult, SyntaxAssets, TocEntry};
+use ratatui::style::Color;
 use ratatui::text::Line;
 use vault::{Resolution, VaultIndex};
 
@@ -184,6 +185,12 @@ impl Viewer {
     pub fn set_markdown_theme(&mut self, theme: MarkdownTheme) {
         self.theme = theme;
         self.parse_source();
+    }
+
+    /// The active markdown palette's `code_gutter` colour, which paints the
+    /// note pane's line-number gutter (an engine role, not a `UiTheme` key).
+    pub fn code_gutter(&self) -> Color {
+        self.theme.code_gutter
     }
 
     /// Swaps the syntect highlighting theme by name (code-block colors).
