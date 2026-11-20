@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- The note pane's scrollbar is a position control: a press on the bar jumps
+  the note to that point in the document, and a drag keeps the note
+  following the pointer until the button is released. Until now a click on
+  the bar did nothing.
 
 ### Fixed
 

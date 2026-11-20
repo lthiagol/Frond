@@ -7,22 +7,27 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Nothing is in flight. Unit 23 (the selection bar) is committed: the
-  selected row of every list panel is one full-width bar, and its text is
-  painted in the panel's own background colour. The human reported that the
-  sidebar highlight was too bright and too close to the colour of the text
-  it sits on (the accent at full opacity under the terminal default
-  foreground, about 1.1 contrast), and that the bar stopped at the end of
-  the text instead of reaching the other edge of the panel. The human chose
-  the look: the bar keeps the theme accent as its background and the row
-  text is painted in the panel's own background colour (inverse video, the
-  rule the link focus highlight in `crates/app/src/links.rs` already uses),
-  and it applies to every list panel (tree, outline, tags, backlinks, quick
-  switcher, search results, disambiguation), not only the two the report
-  named. Round 1 was clean on both axes (0 blocking, 3 low); the merged
-  findings are at `/tmp/opencode/frond/review1/round1-findings.md`.
+  Unit 24 is in flight: the note pane's scrollbar becomes a position
+  control (a press on the bar jumps the note, a drag follows the pointer).
+  It is the first item of the parked list (TODO.md 5.8, leaf's scrollbar
+  interaction); the human asked for the parked items to be done, one unit
+  each, through this flow. The hover highlight needs a new theme role
+  across 18 theme tables and is a separate unit; the list panels' bars,
+  the `.base` table's bar and the help popup's bar are not interactive yet
+  (a follow-up unit).
 
-  Before this unit: the whole-project audit is done and released:
+  The spec line is written (SPEC.md, section Scrollbars, plus a key-table
+  row), with the changelog's Unreleased section. The builder's brief is at
+  `/tmp/opencode/frond/unit-24-kickoff.md` (plus three more files). Round 1:
+  builder tab `frond-build-unit-24`.
+
+  Before this unit: unit 23 (the selection bar) is committed - the selected
+  row of every list panel is one full-width bar, and its text is painted in
+  the panel's own background colour. Round 1 was clean on both axes (0
+  blocking, 3 low); the merged findings are at
+  `/tmp/opencode/frond/review1/round1-findings.md`.
+
+  Before that: the whole-project audit is done and released:
   **0.6.4 is tagged and pushed** (`v0.6.4`), CI is green on the push, and
   `main` is in sync with `origin/main`. The audit's four blocking findings
   and their lows are closed.

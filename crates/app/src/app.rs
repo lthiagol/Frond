@@ -113,6 +113,9 @@ pub enum Flow {
 pub struct Layout {
     /// The note viewport, for click → link mapping.
     pub note_viewport: Rect,
+    /// The note pane's scrollbar column (`None` while no bar is drawn):
+    /// routes the press and drag that make it a position control.
+    pub note_scrollbar_area: Option<Rect>,
     /// The sidebar widget (`None` while hidden).
     pub sidebar_area: Option<Rect>,
     /// The backlinks panel (`None` while closed).
@@ -187,6 +190,11 @@ pub struct App {
     /// actual capture switch when this diverges from the live state). Off
     /// = the terminal handles the mouse natively (text selection/copy).
     pub mouse_capture: bool,
+    /// True while a left-button drag on the note pane's scrollbar owns the
+    /// pointer: the press on the bar starts it, every drag event keeps the
+    /// note following the pointer, and the release that ends it is consumed
+    /// instead of being handled as a click. See [`Self::handle_press`].
+    bar_drag: bool,
     /// Sidebar width override in terminal columns (`None` = the default
     /// 30% of the terminal, clamped 24–60; see `ui::sidebar_width`). Set
     /// by `<`/`>` and the config `sidebar_width` key, clamped 24–120.
@@ -279,6 +287,7 @@ impl App {
             git: None,
             watcher,
             mouse_capture: true,
+            bar_drag: false,
             sidebar_width: None,
             layout: Layout::default(),
             last_rescan: None,
@@ -913,6 +922,73 @@ impl App {
         self.disambiguation.is_some() || self.viewer.help_open
     }
 
+    /// Maps a row of the note pane's scrollbar track onto a scroll
+    /// position: the track's first row is the document's top, its last row
+    /// the bottom, and the rows between interpolate linearly over the
+    /// scroll range. Rows above/below the track clamp to the ends (a drag
+    /// can leave the column). `None` while no bar is drawn. This is the one
+    /// place the track-row → scroll mapping lives.
+    fn bar_scroll_at(&self, row: u16) -> Option<u32> {
+        let area = self.layout.note_scrollbar_area?;
+        let last = u32::from(area.height.saturating_sub(1));
+        if last == 0 {
+            return Some(0);
+        }
+        let offset = u32::from(row.saturating_sub(area.y)).min(last);
+        let max = self.viewer.max_scroll();
+        Some((u64::from(offset) * u64::from(max) / u64::from(last)) as u32)
+    }
+
+    /// Left-button press. On the note pane's scrollbar column it jumps the
+    /// note to the mapped position and starts a drag (the bar is a position
+    /// control, so the press never moves the keyboard focus). Any other
+    /// press is inert: clicks keep their release semantics, and popups keep
+    /// owning the pointer while open.
+    pub fn handle_press(&mut self, col: u16, row: u16) {
+        // A new press supersedes any drag state a lost release left behind:
+        // whatever this press starts (or does not), the next release is
+        // judged on it, not on a stale drag.
+        self.bar_drag = false;
+        if self.quick.open || self.search.open || self.any_popup_open() {
+            return;
+        }
+        let Some(area) = self.layout.note_scrollbar_area else {
+            return;
+        };
+        if !point_in_rect(col, row, area) {
+            return;
+        }
+        self.bar_drag = true;
+        if let Some(scroll) = self.bar_scroll_at(row) {
+            self.viewer.set_scroll(scroll);
+        }
+    }
+
+    /// Left-button drag: while a bar drag is active the note follows the
+    /// pointer's row (the column may leave the bar; only the row matters).
+    /// A drag that did not start on the bar does nothing.
+    pub fn handle_drag(&mut self, _col: u16, row: u16) {
+        if !self.bar_drag {
+            return;
+        }
+        if let Some(scroll) = self.bar_scroll_at(row) {
+            self.viewer.set_scroll(scroll);
+        }
+    }
+
+    /// Left-button release. The release that ends a bar drag is consumed:
+    /// it clears the drag and never acts as a click, so a link under the
+    /// pointer does not open. Every other release keeps the click semantics
+    /// (including the bar column itself, where a click is a no-op because
+    /// the column sits outside the note viewport).
+    pub fn handle_release(&mut self, col: u16, row: u16) {
+        if self.bar_drag {
+            self.bar_drag = false;
+            return;
+        }
+        self.handle_click(col, row);
+    }
+
     /// Mouse click. Pane focus rule (documented): a click on a pane moves
     /// keyboard focus (`Focus`) to that pane — sidebar → `Sidebar`, the
     /// note or base-table content → `Content`, the backlinks panel →
@@ -928,6 +1004,10 @@ impl App {
     /// `x`/`X` + Enter) is still set by link/checkbox clicks exactly like
     /// [`Self::activate_focused_link`]. Wheel events are position-routed
     /// instead ([`Self::handle_wheel_at`]) and do not move pane focus.
+    ///
+    /// The event loop reaches this through [`Self::handle_release`], never
+    /// directly on the button-up event: that wrapper consumes the release
+    /// which ends a scrollbar drag.
     ///
     /// Routing: the search popup (when open) owns clicks inside its
     /// rectangle; while the help/disambiguation popups are open clicks
