@@ -67,6 +67,34 @@ pub fn parse_frontmatter(source: &str) -> (NoteFrontmatter, Vec<LinkRef>, Vec<St
     (fm, links, warnings)
 }
 
+/// One top-level `key: value` entry plus any block-style list items that
+/// continue it. The items are kept as separate values instead of being
+/// joined into `value`: a list item may contain a comma (a tag like
+/// `mocktag, weird`), and re-splitting a joined string on commas would
+/// silently turn one item into several.
+struct Entry {
+    key: String,
+    value: String,
+    items: Vec<String>,
+}
+
+impl Entry {
+    /// The entry's scalar text for the flat raw map: the inline value,
+    /// the block items joined with `", "` when there is no inline value,
+    /// or both (the same rendering the parser used before items were
+    /// kept apart). List semantics live in `items` and the typed fields;
+    /// this map has no list type.
+    fn flat_value(&self) -> String {
+        if self.items.is_empty() {
+            self.value.clone()
+        } else if self.value.is_empty() {
+            self.items.join(", ")
+        } else {
+            format!("{}, {}", self.value, self.items.join(", "))
+        }
+    }
+}
+
 /// [`parse_frontmatter`] plus the generic per-key map of raw scalar
 /// values the `.base` table renderer filters and sorts against: every
 /// top-level `key: value` entry (comment-stripped, unquoted, non-empty),
@@ -86,9 +114,9 @@ pub fn parse_frontmatter_with_raw(
     let mut warnings = Vec::new();
     // Final key/value entries in source order (duplicate keys keep their
     // first position but take the last value — warned about below).
-    let mut entries: Vec<(String, String)> = Vec::new();
-    // Index into `entries` whose value a block-style list item (`- item`)
-    // extends.
+    let mut entries: Vec<Entry> = Vec::new();
+    // Index into `entries` whose block-style list items (`- item`)
+    // extend.
     let mut last_idx: Option<usize> = None;
 
     for line in source.lines() {
@@ -98,16 +126,21 @@ pub fn parse_frontmatter_with_raw(
         }
         if trimmed == "-" || trimmed.starts_with("- ") {
             // Block-style list item continuing the previous key, e.g.
-            // `related:` followed by `- "[[project]]"` lines. The item is
-            // appended to that key's value (quotes stripped); unknown
-            // keys just accumulate harmlessly.
+            // `related:` followed by `- "[[project]]"` lines, or `tags:`
+            // followed by one tag per line. The item stays a separate
+            // value so a comma inside it is never a separator.
             let item = trimmed[1..].trim();
             match last_idx.and_then(|i| entries.get_mut(i)) {
-                Some((_, value)) => {
-                    if !value.is_empty() {
-                        value.push_str(", ");
+                Some(entry) => {
+                    // Strip the comment before unquoting: a quoted item is
+                    // scanned only after its closing quote, so a `#` inside
+                    // `"a # b"` survives while `- draft # todo` loses the
+                    // tail like the inline form. Trim again after unquoting
+                    // so `- " a "` indexes `a`, as the inline form does.
+                    let item = unquote(strip_comment(item).trim()).trim();
+                    if !item.is_empty() {
+                        entry.items.push(item.to_string());
                     }
-                    value.push_str(item.trim_matches('"'));
                 }
                 None => warnings.push(format!(
                     "frontmatter list item without a preceding key: {trimmed:?}"
@@ -128,16 +161,21 @@ pub fn parse_frontmatter_with_raw(
             Some((key, value)) => {
                 let key = key.trim().to_string();
                 let value = value.trim().to_string();
-                match entries.iter().position(|(k, _)| *k == key) {
+                match entries.iter().position(|e| e.key == key) {
                     Some(idx) => {
-                        entries[idx].1 = value;
+                        entries[idx].value = value;
+                        entries[idx].items.clear();
                         warnings.push(format!(
                             "duplicate frontmatter key `{key}` — last value wins"
                         ));
                         last_idx = Some(idx);
                     }
                     None => {
-                        entries.push((key, value));
+                        entries.push(Entry {
+                            key,
+                            value,
+                            items: Vec::new(),
+                        });
                         last_idx = Some(entries.len() - 1);
                     }
                 }
@@ -149,14 +187,14 @@ pub fn parse_frontmatter_with_raw(
     let scalar = |key: &str| -> Option<String> {
         entries
             .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| unquote(strip_comment(v).trim()).to_string())
+            .find(|e| e.key == key)
+            .map(|e| unquote(strip_comment(&e.flat_value()).trim()).to_string())
             .filter(|v| !v.is_empty())
     };
-    for (key, value) in &entries {
-        let cleaned = unquote(strip_comment(value).trim()).to_string();
+    for entry in &entries {
+        let cleaned = unquote(strip_comment(&entry.flat_value()).trim()).to_string();
         if !cleaned.is_empty() {
-            raw.insert(key.clone(), cleaned);
+            raw.insert(entry.key.clone(), cleaned);
         }
     }
 
@@ -165,18 +203,28 @@ pub fn parse_frontmatter_with_raw(
     fm.updated = scalar("updated");
     fm.archived = scalar("archived");
     fm.note_type = scalar("type");
-    if let Some((_, raw)) = entries.iter().find(|(k, _)| k == "tags") {
-        fm.tags = parse_tags(raw);
+    if let Some(entry) = entries.iter().find(|e| e.key == "tags") {
+        // The inline value is a comma-separated list; each block item is
+        // already one list element, so it is never re-split.
+        let mut tags = parse_tags(&entry.value);
+        tags.extend(entry.items.iter().cloned());
+        fm.tags = tags;
     }
 
     // Wikilinks inside frontmatter values count as outgoing links
     // (Obsidian indexes them for backlinks and the graph). Comments are
     // stripped first so a `# note` tail cannot hide or fabricate links.
     let mut links = Vec::new();
-    for (_, value) in &entries {
-        for mut link in extract_wikilinks(strip_comment(value)) {
-            link.from_frontmatter = true;
-            links.push(link);
+    for entry in &entries {
+        let mut push = |value: &str| {
+            for mut link in extract_wikilinks(strip_comment(value)) {
+                link.from_frontmatter = true;
+                links.push(link);
+            }
+        };
+        push(&entry.value);
+        for item in &entry.items {
+            push(item);
         }
     }
 
@@ -228,8 +276,11 @@ fn unquote(value: &str) -> &str {
     strip_quote_pair(value).unwrap_or(value)
 }
 
-/// Parses a tags value: an inline `[a, b, c]` list (the vault convention).
-/// A bare scalar is tolerated as a single tag; empty yields no tags.
+/// Parses an inline tags value: an `[a, b, c]` list (the vault
+/// convention) or a bare scalar. A comma inside a quoted element
+/// (`"mocktag, weird"`) belongs to the tag, not to the separator — block
+/// list items are kept apart before this point, so they never rely on the
+/// split at all. Empty yields no tags.
 fn parse_tags(raw: &str) -> Vec<String> {
     let trimmed = strip_comment(raw).trim();
     let inner = match (trimmed.starts_with('['), trimmed.ends_with(']')) {
@@ -237,11 +288,40 @@ fn parse_tags(raw: &str) -> Vec<String> {
         (false, false) if !trimmed.is_empty() => trimmed,
         _ => return Vec::new(),
     };
-    inner
-        .split(',')
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect()
+    let mut tags = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for ch in inner.chars() {
+        match quote {
+            Some(q) if ch == q => quote = None,
+            Some(_) => current.push(ch),
+            // A quote opens an element only at its start; a quote inside
+            // a bare tag (an apostrophe) stays text.
+            None if ch == '"' || ch == '\'' => {
+                if current.trim().is_empty() {
+                    current.clear();
+                    quote = Some(ch);
+                } else {
+                    current.push(ch);
+                }
+            }
+            None if ch == ',' => {
+                push_tag(&mut tags, &current);
+                current.clear();
+            }
+            None => current.push(ch),
+        }
+    }
+    push_tag(&mut tags, &current);
+    tags
+}
+
+/// Pushes one trimmed, non-empty tag.
+fn push_tag(tags: &mut Vec<String>, text: &str) {
+    let tag = text.trim();
+    if !tag.is_empty() {
+        tags.push(tag.to_string());
+    }
 }
 
 #[cfg(test)]
@@ -342,6 +422,61 @@ mod tests {
         assert_eq!(links[0].target, "project");
         assert_eq!(links[1].target, "gpu-monitoring-todo");
         assert!(links.iter().all(|l| l.from_frontmatter));
+    }
+
+    #[test]
+    fn block_list_tag_with_a_comma_stays_one_tag() {
+        // Audit VAULT-4: the items were joined with ", " and re-split on
+        // every comma, so this tag became two.
+        let src = "tags:\n  - \"mocktag, weird\"\n  - gpu\n";
+        let (fm, _, warnings) = parse_frontmatter(src);
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(fm.tags, vec!["mocktag, weird", "gpu"]);
+    }
+
+    #[test]
+    fn block_list_item_strips_a_trailing_comment_like_the_inline_form() {
+        // The block item used to index `draft # todo`; the inline list's
+        // comment is stripped, so both forms must agree on the tag.
+        let (fm, _, warnings) = parse_frontmatter("tags:\n  - draft # todo\n  - gpu\n");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(fm.tags, vec!["draft", "gpu"]);
+
+        let (inline, _, _) = parse_frontmatter("tags: [draft, gpu] # todo\n");
+        assert_eq!(inline.tags, vec!["draft", "gpu"]);
+    }
+
+    #[test]
+    fn block_list_item_padding_matches_the_inline_form() {
+        let (fm, _, _) = parse_frontmatter("tags:\n  - \" a \"\n");
+        assert_eq!(fm.tags, vec!["a"]);
+
+        let (inline, _, _) = parse_frontmatter("tags: [\" a \"]\n");
+        assert_eq!(inline.tags, vec!["a"]);
+    }
+
+    #[test]
+    fn block_list_item_keeps_a_comment_inside_its_quotes() {
+        // Comment stripping happens before unquoting, so only text after
+        // the closing quote is a comment.
+        let (fm, _, _) = parse_frontmatter("tags:\n  - \"a # b\"\n  - \"c\" # note\n");
+        assert_eq!(fm.tags, vec!["a # b", "c"]);
+    }
+
+    #[test]
+    fn inline_quoted_tag_with_a_comma_stays_one_tag() {
+        let (fm, _, warnings) = parse_frontmatter("tags: [\"mocktag, weird\", gpu]\n");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(fm.tags, vec!["mocktag, weird", "gpu"]);
+    }
+
+    #[test]
+    fn list_items_without_commas_keep_their_boundaries() {
+        // Block items are separate list elements, never one joined string
+        // that happens to split back into the same tags.
+        let (fm, raw, _, _) = parse_frontmatter_with_raw("tags:\n  - alpha\n  - beta\n");
+        assert_eq!(fm.tags, vec!["alpha", "beta"]);
+        assert_eq!(raw.get("tags").map(String::as_str), Some("alpha, beta"));
     }
 
     #[test]

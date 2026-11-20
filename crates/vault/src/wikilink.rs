@@ -17,7 +17,8 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkRef {
     /// Link target before any `#heading` and `|alias`, with a trailing
-    /// `.md` stripped. Empty for `[[#heading]]` (a link to the containing
+    /// `.md` stripped (the suffix test is case-insensitive, like the
+    /// walker's). Empty for `[[#heading]]` (a link to the containing
     /// note itself).
     pub target: String,
     /// Heading anchor, if the link carried a `#…` part.
@@ -170,7 +171,7 @@ fn parse_inner(inner: &str, is_embed: bool) -> LinkRef {
         None => (target_part, None),
     };
     let mut target = target_part.trim().to_string();
-    if let Some(stripped) = target.strip_suffix(".md") {
+    if let Some(stripped) = crate::walk::strip_suffix_ignore_case(&target, ".md") {
         target = stripped.to_string();
     }
     LinkRef {
@@ -236,9 +237,13 @@ mod tests {
     }
 
     #[test]
-    fn md_suffix_stripped() {
-        let links = extract_wikilinks("[[analysis.md]]");
+    fn md_suffix_stripped_case_insensitively() {
+        // The walker indexes `X.MD`, so the link parser must treat its
+        // suffix the same way and leave the rest of the stem intact.
+        let links = extract_wikilinks("[[analysis.md]] [[analysis.MD]] [[Dir/Note.Md]]");
         assert_eq!(links[0].target, "analysis");
+        assert_eq!(links[1].target, "analysis");
+        assert_eq!(links[2].target, "Dir/Note");
     }
 
     #[test]

@@ -7,11 +7,21 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 17 is closed and committed. The audit rounds that remain are the
-  app crate's small findings (unit 18) and the vault crate's (units 19
-  and 20).
+  The audit's fix rounds are closed: the documentation (round S), the app
+  crate (units 17 and 18) and the vault crate (units 19 and 20). One small
+  unit remains — the two app-crate leftovers the audit rounds flagged —
+  and then the release.
 
 DONE
+  - Unit 20 — the vault's index, frontmatter and walk: the `.md`/`.base`
+    suffix stripping is case-insensitive everywhere (an `X.MD` note resolves
+    from both the bare and the path-style link), the frontmatter block-list
+    items are kept apart so a tag containing a comma survives as one tag
+    (and `file.hasTag` matches it), an unreadable subdirectory raises an
+    `IndexWarning` like an unreadable file, and the frontmatter fence
+    rules match the parser's exactly (a BOM and a repeated CR). Round 1
+    came back changes-needed (the block items had lost the comment
+    stripping); the fix round was reviewed clean.
   - Unit 17 — one popup list geometry: `ui::PopupList` holds the window
     (the first screen row, the anchor, the rows) and the screen-row →
     item mapping that rejects the chrome rows, used by the three
@@ -144,41 +154,14 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 18: the app crate's remaining audit findings. A *successful*
-      checkbox write is reported through `viewer.last_error`, so it renders
-      red like a refusal and never expires, against SPEC's neutral-colour,
-      3 s-TTL info contract (APP-3). The quick switcher's empty state
-      clips its footer — `popup_geometry` gives 2 inner rows for 0 items
-      while `draw_quick` renders 3 lines, so the only `Enter`/`Esc` hint is
-      dropped exactly when there are no matches (APP-4). `config.rs`'s
-      module header names six config keys where the loader, the template,
-      SPEC and README all carry ten (SPEC-6). Plus unit 17's two lows: the
-      degenerate height-4 quick popup, where `rows.max(1)` invents a
-      phantom row on the clipped footer, and the chrome row counts still
-      being written twice (the height sizing in `quick.rs`/`search.rs`
-      versus the `above`/`below` arguments).
-  - Unit 19: the vault crate's write path. A `~`-prefixed changed path is
-      dropped by `absolutize_path` (`crates/vault/src/git.rs:182`), so a
-      dirty tree reports clean — and the guarded write's git guard passes on
-      it, breaking SPEC's rule that the repository must be clean (audit
-      B2). And the checkbox toggle path is quadratic: `updated_field_line`
-      (`crates/vault/src/tasks.rs:341-362`) calls `line_range` once per
-      line, each starting at byte 0 — 100k lines take 96 s and the
-      single-threaded event loop hangs (audit B3).
-  - Unit 20: the vault crate's index, frontmatter and walk. The `.md`/
-      `.base` suffix stripping is case-sensitive while the surrounding
-      matching is case-insensitive, so an `X.MD` note is indexed but
-      `[[X.MD]]` never resolves (VAULT-3). Frontmatter block-list items
-      are joined with `", "` and re-split on every comma, so a tag
-      containing a comma becomes two tags (VAULT-4). An unreadable
-      subdirectory is dropped from the walk with no `IndexWarning`, while
-      an unreadable *file* warns — notes vanish silently (VAULT-5). Plus
-      unit 19's low: the frontmatter walk's fence rules must match the
-      parser's exactly — a UTF-8 BOM (and a repeated `\r`) is stripped by
-      `split_frontmatter` and the scanner but not by `is_fence`, so a
-      BOM-prefixed note is parsed and indexed yet never bumps `updated:`
-      (unit 19, L1).
-
+  - Unit 21: the two app-crate leftovers the audit rounds flagged.
+      `crates/app/src/quick.rs:103` still strips the extension
+      case-sensitively — it resolves anyway through the case-insensitive
+      `index.resolve`, so only the typed highlighting differs for an
+      `X.MD` note (unit 20, L1). And `crates/app/src/watch.rs:49` still
+      uses the warning-less `walk_vault`, so a directory locked after
+      startup is silent on the watch path — consistent with an unreadable
+      *file* there, so it is polish (unit 20, L2).
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
       recommendation is to drop it: the sidebar's scroll is a selection
@@ -186,7 +169,5 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 18 — the app crate's remaining audit findings.
-  2. Unit 19 — the vault crate's write path (both blocking audit findings).
-  3. Unit 20 — the vault crate's index, frontmatter and walk.
-  4. Then push and cut 0.6.4 with the audit fixes.
+  1. Unit 21 — the two app-crate leftovers.
+  2. Then push and cut 0.6.4 with the audit fixes.

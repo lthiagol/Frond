@@ -344,11 +344,17 @@ fn line_bounds(bytes: &[u8], start: usize) -> (usize, Option<usize>) {
     }
 }
 
-/// True when the line is a frontmatter fence. A `\r` before the `\n` is
-/// part of a CRLF terminator and is not content, so `---\r` is a fence
-/// too — the frontmatter parser and `scan` both trim it.
+/// True when the line is a frontmatter fence. The frontmatter parser trims
+/// every trailing `\r` before comparing (`\r` is a CRLF terminator, or a
+/// repeated one), so `---\r` and `---\r\r` are fences too. The caller
+/// strips a leading UTF-8 BOM from the file's first line, exactly as
+/// `frontmatter::split_frontmatter` does.
 fn is_fence(line: &[u8]) -> bool {
-    line == b"---" || line == b"---\r"
+    let mut end = line.len();
+    while end > 0 && line[end - 1] == b'\r' {
+        end -= 1;
+    }
+    &line[..end] == b"---"
 }
 
 /// Content byte ranges of the lines inside the leading frontmatter block
@@ -362,7 +368,10 @@ fn is_fence(line: &[u8]) -> bool {
 /// checkbox toggle path, which is the single-threaded UI thread.
 fn frontmatter_lines(bytes: &[u8]) -> Vec<(usize, usize)> {
     let (first_end, mut next) = line_bounds(bytes, 0);
-    if !is_fence(&bytes[..first_end]) {
+    let first = bytes[..first_end]
+        .strip_prefix(b"\xEF\xBB\xBF")
+        .unwrap_or(&bytes[..first_end]);
+    if !is_fence(first) {
         return Vec::new();
     }
     let mut lines = Vec::new();
@@ -601,6 +610,34 @@ mod tests {
         let text = std::str::from_utf8(&out).unwrap();
         assert!(text.contains("updated: 2026-11-11\r\n"));
         assert!(!text.contains("\r\r"), "no doubled CR");
+    }
+
+    #[test]
+    fn apply_toggle_bumps_updated_in_a_bom_prefixed_note() {
+        // Audit carry-over: split_frontmatter and scan strip a UTF-8 BOM,
+        // so the BOM-led fence is real frontmatter; the bump walk must
+        // agree instead of leaving `updated:` untouched.
+        let src = "\u{feff}---\nupdated: 2026-01-01\n---\n- [ ] t\n".as_bytes();
+        let (out, report) = apply_toggle(src, 3, TaskState::Unchecked, "2026-11-11").unwrap();
+        assert!(
+            report.updated_bumped,
+            "the BOM must not hide the frontmatter"
+        );
+        assert!(std::str::from_utf8(&out)
+            .unwrap()
+            .contains("updated: 2026-11-11\n"));
+    }
+
+    #[test]
+    fn apply_toggle_bumps_updated_with_repeated_cr_fences() {
+        // The parser trims every trailing `\r`, so `---\r\r` is a fence;
+        // the bump walk must use the same rule.
+        let src = b"---\r\r\nupdated: 2026-01-01\r\n---\r\r\n- [ ] t\r\n";
+        let (out, report) = apply_toggle(src, 3, TaskState::Unchecked, "2026-11-11").unwrap();
+        assert!(report.updated_bumped);
+        assert!(std::str::from_utf8(&out)
+            .unwrap()
+            .contains("updated: 2026-11-11\r\n"));
     }
 
     #[test]
