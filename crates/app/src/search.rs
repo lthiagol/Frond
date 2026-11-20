@@ -14,6 +14,8 @@
 use unicode_width::UnicodeWidthChar;
 use vault::{SearchHit, SearchResults};
 
+use crate::ui::PopupChrome;
+
 /// Which phase the search popup is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SearchMode {
@@ -88,6 +90,16 @@ impl SearchState {
     }
 }
 
+/// The results list's chrome: no prompt row above it (the prompt was input
+/// mode), one footer row below. [`popup_geometry`] sizes the popup from it
+/// and the renderer/click mappers take their [`crate::ui::PopupList`] from
+/// it, so the height and the chrome cannot disagree.
+pub const RESULTS_CHROME: PopupChrome = PopupChrome::FOOTER;
+
+/// Input mode's chrome: the prompt row above and the footer below, with no
+/// list rows between them.
+const INPUT_CHROME: PopupChrome = PopupChrome::PROMPT_AND_FOOTER;
+
 /// Geometry of the search popup within the terminal `area`: the popup
 /// rectangle and how many hit rows it shows. The renderer
 /// (`ui::draw_search`, which records the popup rect for the mouse
@@ -96,7 +108,8 @@ impl SearchState {
 /// drift apart.
 ///
 /// Input mode: a fixed 4-row popup (borders + prompt + footer). Results
-/// mode: one row per hit plus the footer, clamped to the terminal.
+/// mode: one row per hit plus the footer, clamped to the terminal. The
+/// empty results state still needs one row for "no matches".
 pub fn popup_geometry(
     area: ratatui::layout::Rect,
     mode: SearchMode,
@@ -105,12 +118,11 @@ pub fn popup_geometry(
     use ratatui::layout::Rect;
     let width = 70.min(area.width.saturating_sub(2)).max(1);
     let height = match mode {
-        SearchMode::Input => 4, // borders + prompt + footer
-        SearchMode::Results => {
-            (hits_len as u16 + 3) // + footer row
-                .min(area.height.saturating_sub(2))
-                .max(4)
-        }
+        SearchMode::Input => INPUT_CHROME.height(0),
+        SearchMode::Results => RESULTS_CHROME
+            .height(hits_len.max(1) as u16)
+            .min(area.height.saturating_sub(2))
+            .max(RESULTS_CHROME.height(1)),
     };
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
@@ -329,5 +341,41 @@ mod tests {
         assert_eq!(highlighted_text(&line), "needle");
         let line = snippet_line("head needle", 5, 11, 40, MATCH);
         assert_eq!(highlighted_text(&line), "needle");
+    }
+
+    #[test]
+    fn popup_height_is_the_chrome_plus_the_visible_rows() {
+        let area = ratatui::layout::Rect::new(0, 0, 100, 40);
+        let input = popup_geometry(area, SearchMode::Input, 0);
+        assert_eq!(
+            input.height,
+            INPUT_CHROME.height(0),
+            "input mode is prompt + footer, no list rows"
+        );
+        for hits in [0, 1, 5, 30] {
+            let popup = popup_geometry(area, SearchMode::Results, hits);
+            let rows = hits.max(1) as u16; // the empty state says "no matches"
+            assert_eq!(
+                popup.height,
+                RESULTS_CHROME.height(rows),
+                "the height derives from the one results chrome ({hits} hits)"
+            );
+            assert_eq!(
+                RESULTS_CHROME.list(popup, 0, hits).rows,
+                rows as usize,
+                "the list window shows exactly the rows the height made room for"
+            );
+        }
+    }
+
+    /// A terminal too short for the results popup still gets the empty
+    /// state's one list row: the floor is the chrome's height, not a bare
+    /// number left behind by a chrome change.
+    #[test]
+    fn results_height_floor_is_the_chrome() {
+        let tiny = ratatui::layout::Rect::new(0, 0, 100, 5);
+        let popup = popup_geometry(tiny, SearchMode::Results, 0);
+        assert_eq!(popup.height, RESULTS_CHROME.height(1));
+        assert_eq!(RESULTS_CHROME.list(popup, 0, 0).rows, 1);
     }
 }

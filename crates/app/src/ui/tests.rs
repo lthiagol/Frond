@@ -1300,25 +1300,46 @@ fn disambiguation_popup_scrolls_on_short_terminals() {
         selected: 7,
         heading: None,
     });
-    // 10 rows → popup height 8 → 5 candidate rows: a scroll window.
+    // 10 rows → popup height 8 → 4 candidate rows (the footer and its
+    // blank row are chrome): a scroll window.
     let backend = TestBackend::new(60, 10);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let screen = terminal.backend().to_string();
     assert!(screen.contains("ambiguous link"), "popup title");
     assert!(screen.contains("d8/dup.md"), "selected row is visible");
-    assert!(screen.contains("d4/dup.md"), "window starts mid-list");
+    assert!(screen.contains("d5/dup.md"), "window starts mid-list");
     assert!(
-        !screen.contains("d1/dup.md") && !screen.contains("d3/dup.md"),
+        !screen.contains("d1/dup.md") && !screen.contains("d4/dup.md"),
         "candidates above the window are scrolled off"
     );
+}
+
+/// The disambiguation popup's height and list window come from its one
+/// chrome value: the candidates, then the footer and its blank row.
+#[test]
+fn disambiguation_chrome_reserves_the_footer_and_its_blank_row() {
+    let popup = Rect::new(0, 0, 60, DISAMBIGUATION_CHROME.height(3));
+    assert_eq!(
+        popup.height,
+        3 + 4,
+        "borders + the candidates + two chrome rows"
+    );
+    let list = DISAMBIGUATION_CHROME.list(popup, 0, 3);
+    assert_eq!(
+        (list.first_row, list.rows),
+        (1, 3),
+        "the list window is exactly the candidates under the top border"
+    );
+    assert_eq!(list.index_at(4), None, "the first chrome row (the footer)");
+    assert_eq!(list.index_at(5), None, "the blank row under the footer");
 }
 
 #[test]
 fn popup_list_geometry_maps_list_rows_and_rejects_chrome() {
     // Search/disambiguation shape: no prompt row, a footer below the list.
     let popup = Rect::new(10, 4, 70, 6); // rows 5..8 are inner; 3 list rows
-    let list = PopupList::new(popup, 0, 1, 2, 10);
+    let list = PopupList::new(popup, PopupChrome::FOOTER, 2, 10);
     assert_eq!(
         (list.first_row, list.rows, list.start),
         (5, 3, 0),
@@ -1330,31 +1351,48 @@ fn popup_list_geometry_maps_list_rows_and_rejects_chrome() {
     assert_eq!(list.index_at(8), None, "footer row");
     assert_eq!(list.index_at(9), None, "bottom border");
     assert_eq!(
-        PopupList::new(popup, 0, 1, 2, 3).index_at(7),
+        PopupList::new(popup, PopupChrome::FOOTER, 2, 3).index_at(7),
         Some(2),
         "last real item"
     );
     assert_eq!(
-        PopupList::new(popup, 0, 1, 2, 3).index_at(6),
+        PopupList::new(popup, PopupChrome::FOOTER, 2, 3).index_at(6),
         Some(1),
         "items fill the window"
     );
 
     // Scrolled: the window ends at the selection.
-    let list = PopupList::new(popup, 0, 1, 9, 10);
+    let list = PopupList::new(popup, PopupChrome::FOOTER, 9, 10);
     assert_eq!(list.start, 7);
     assert_eq!(list.index_at(5), Some(7));
     assert_eq!(list.index_at(7), Some(9));
 
     // Quick switcher shape: one prompt row above the list, a footer below.
     let popup = Rect::new(10, 4, 70, 8); // 4 list rows (6..9), footer at 10
-    let list = PopupList::new(popup, 1, 1, 0, 2);
+    let list = PopupList::new(popup, PopupChrome::PROMPT_AND_FOOTER, 0, 2);
     assert_eq!((list.first_row, list.rows), (6, 4));
     assert_eq!(list.index_at(5), None, "prompt row");
     assert_eq!(list.index_at(6), Some(0));
     assert_eq!(list.index_at(7), Some(1));
     assert_eq!(list.index_at(8), None, "past the last item");
     assert_eq!(list.index_at(10), None, "footer row");
+}
+
+#[test]
+fn popup_list_has_no_rows_when_the_popup_is_borders_and_chrome_only() {
+    // A quick-switcher popup clamped to 4 rows (a terminal six rows or
+    // fewer) has room for the borders, the prompt and the footer — no
+    // list row at all. The list must not invent one on the footer row.
+    let popup = Rect::new(10, 4, 70, 4);
+    let list = PopupList::new(popup, PopupChrome::PROMPT_AND_FOOTER, 0, 5);
+    assert_eq!(list.rows, 0, "no room for a list row");
+    for row in popup.y..popup.y + popup.height {
+        assert_eq!(
+            list.index_at(row),
+            None,
+            "row {row} is border, prompt or footer — never a list row"
+        );
+    }
 }
 
 #[test]
@@ -2864,7 +2902,15 @@ fn quick_switcher_reports_no_matches() {
     app.quick.push_char('z');
     app.quick.push_char('z');
     let screen = render(&mut app);
+    assert!(
+        screen.contains(">zzz▏"),
+        "the empty state keeps its prompt: {screen}"
+    );
     assert!(screen.contains("no matches"), "{screen}");
+    assert!(
+        screen.contains("↑/↓ move · Enter open · Esc close"),
+        "the empty state keeps its footer: {screen}"
+    );
 }
 
 #[test]

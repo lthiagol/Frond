@@ -841,9 +841,9 @@ impl App {
                 if !report.updated_bumped {
                     // Vault convention is that every note carries
                     // `updated:`; when it is missing the marker toggle
-                    // still stands — record it once, quietly.
-                    self.viewer.last_error =
-                        Some("toggled (no updated: field in frontmatter to bump)".to_string());
+                    // still stands — record it once, quietly, through the
+                    // neutral expiring info channel (not the red error).
+                    self.set_status("toggled (no updated: field in frontmatter to bump)");
                 }
                 self.refresh_git(true);
             }
@@ -1055,7 +1055,7 @@ impl App {
         if !point_in_rect(col, row, popup) {
             return;
         }
-        let list = ui::PopupList::new(popup, 1, 1, self.quick.selected, self.quick.items.len());
+        let list = crate::quick::CHROME.list(popup, self.quick.selected, self.quick.items.len());
         let Some(index) = list.index_at(row) else {
             return;
         };
@@ -1080,7 +1080,8 @@ impl App {
         if self.search.mode != SearchMode::Results {
             return;
         }
-        let list = ui::PopupList::new(popup, 0, 1, self.search.selected, self.search.hits.len());
+        let list =
+            crate::search::RESULTS_CHROME.list(popup, self.search.selected, self.search.hits.len());
         let Some(index) = list.index_at(row) else {
             return;
         };

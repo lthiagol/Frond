@@ -822,6 +822,36 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
     );
 }
 
+/// The chrome rows inside a popup's border: how many rows sit above the
+/// list (a prompt) and below it (a footer).
+///
+/// A popup's height and its [`PopupList`] window both derive from one
+/// `PopupChrome`, so a change to the chrome cannot resize the popup and
+/// leave the list window behind (or vice versa).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopupChrome {
+    pub above: u16,
+    pub below: u16,
+}
+
+impl PopupChrome {
+    /// A prompt row above the list and a footer row below it.
+    pub const PROMPT_AND_FOOTER: Self = Self { above: 1, below: 1 };
+    /// Just a footer row below the list.
+    pub const FOOTER: Self = Self { above: 0, below: 1 };
+
+    /// The popup height for `rows` list rows: the border ring plus the
+    /// chrome plus the list itself.
+    pub fn height(self, rows: u16) -> u16 {
+        rows.saturating_add(2 + self.above + self.below)
+    }
+
+    /// The list window of a popup carrying this chrome.
+    pub fn list(self, popup: Rect, selected: usize, len: usize) -> PopupList {
+        PopupList::new(popup, self, selected, len)
+    }
+}
+
 /// The list window inside a popup: the popup's border and its chrome rows
 /// (the quick switcher's prompt above the list, the footer below it) are
 /// never item rows. Both the renderers and the click mappers take the
@@ -840,14 +870,15 @@ pub struct PopupList {
 }
 
 impl PopupList {
-    /// `popup` includes its one-cell border; `above` and `below` count the
-    /// chrome rows inside that border above and below the list (the quick
-    /// switcher's prompt row; every popup's footer row). The window ends
-    /// at the selection, so the selection is always visible.
-    pub fn new(popup: Rect, above: u16, below: u16, selected: usize, len: usize) -> Self {
-        let rows = popup.height.saturating_sub(2 + above + below).max(1) as usize;
+    /// `popup` includes its one-cell border; `chrome` counts the rows
+    /// inside that border above and below the list. The window ends at the
+    /// selection, so the selection is always visible. With no room for a
+    /// list row (a popup clamped to borders + chrome), there are no rows:
+    /// every screen row is chrome or border.
+    pub fn new(popup: Rect, chrome: PopupChrome, selected: usize, len: usize) -> Self {
+        let rows = popup.height.saturating_sub(2 + chrome.above + chrome.below) as usize;
         Self {
-            first_row: popup.y + 1 + above,
+            first_row: popup.y + 1 + chrome.above,
             start: selected.saturating_sub(rows.saturating_sub(1)),
             rows,
             len,
@@ -866,6 +897,12 @@ impl PopupList {
     }
 }
 
+/// The disambiguation popup's chrome: no prompt row above the candidates,
+/// and two rows below them — the footer plus the blank row the popup has
+/// always carried under it. Both the height and the list window come from
+/// this one value.
+const DISAMBIGUATION_CHROME: PopupChrome = PopupChrome { above: 0, below: 2 };
+
 /// Disambiguation popup for a wikilink the folder hint could not narrow.
 /// When more candidates exist than fit the terminal, the list scrolls and
 /// the selection is kept visible.
@@ -878,13 +915,14 @@ fn draw_disambiguation(
 ) {
     let footer = "j/k select · Enter open · other key cancel";
     let width = 60.min(area.width.saturating_sub(2)).max(1);
-    let height = (d.candidates.len() as u16 + 4)
+    let height = DISAMBIGUATION_CHROME
+        .height(d.candidates.len() as u16)
         .min(area.height.saturating_sub(2))
         .max(1);
     let popup = centered(area, width, height);
     // Stateless scroll window over the candidates: no chrome above the
-    // list, one footer row below it.
-    let list = PopupList::new(popup, 0, 1, d.selected, d.candidates.len());
+    // list, the footer (and its blank row) below it.
+    let list = DISAMBIGUATION_CHROME.list(popup, d.selected, d.candidates.len());
 
     let mut lines: Vec<Line<'static>> = d
         .candidates
@@ -936,7 +974,7 @@ fn draw_quick(f: &mut Frame, area: Rect, app: &App, ui: UiTheme) {
         .unwrap_or_else(|| crate::quick::popup_geometry(area, app.quick.items.len()));
     let inner_width = popup.width.saturating_sub(2) as usize;
     // The prompt is the chrome row above the list; the footer is below.
-    let list = PopupList::new(popup, 1, 1, app.quick.selected, app.quick.items.len());
+    let list = crate::quick::CHROME.list(popup, app.quick.selected, app.quick.items.len());
 
     let mut lines: Vec<Line<'static>> =
         vec![Line::from(Span::raw(format!(">{}▏", app.quick.query)))];
@@ -1066,7 +1104,11 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<
             } else {
                 // Stateless scroll window: the selection always visible.
                 // Results mode has no prompt row above the list.
-                let list = PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len());
+                let list = crate::search::RESULTS_CHROME.list(
+                    popup,
+                    app.search.selected,
+                    app.search.hits.len(),
+                );
                 app.search
                     .hits
                     .iter()

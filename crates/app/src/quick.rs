@@ -21,6 +21,8 @@ use std::path::PathBuf;
 
 use vault::NoteMeta;
 
+use crate::ui::PopupChrome;
+
 /// Score of one matched character.
 const SCORE_MATCH: i32 = 16;
 /// The matched character had the same case as the query.
@@ -44,6 +46,12 @@ const SCORE_STEM: i32 = 100;
 /// How many result rows the popup shows at once.
 pub const VISIBLE_ROWS: usize = 10;
 
+/// The quick switcher's chrome: the query prompt above the list and the
+/// footer below it. [`popup_geometry`] sizes the popup from it and the
+/// renderer/click mappers take their [`crate::ui::PopupList`] from it, so
+/// the height and the chrome cannot disagree.
+pub const CHROME: PopupChrome = PopupChrome::PROMPT_AND_FOOTER;
+
 /// Geometry of the quick-switcher popup within the terminal `area`.
 ///
 /// The popup is: a border, the query prompt, up to [`VISIBLE_ROWS`]
@@ -53,9 +61,13 @@ pub const VISIBLE_ROWS: usize = 10;
 pub fn popup_geometry(area: ratatui::layout::Rect, item_count: usize) -> ratatui::layout::Rect {
     use ratatui::layout::Rect;
     let width = 70.min(area.width.saturating_sub(2)).max(1);
-    // borders (2) + prompt (1) + footer (1) + the visible rows.
-    let rows = item_count.min(VISIBLE_ROWS) as u16;
-    let height = (rows + 4).min(area.height.saturating_sub(2)).max(4);
+    // The empty state shows "no matches" on one list row, so the popup
+    // always has room for the prompt, that row and the footer.
+    let rows = item_count.clamp(1, VISIBLE_ROWS) as u16;
+    let height = CHROME
+        .height(rows)
+        .min(area.height.saturating_sub(2))
+        .max(CHROME.height(0));
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect {
@@ -461,5 +473,24 @@ mod tests {
         state.items.clear();
         state.move_selection(3);
         assert_eq!(state.selected, 0, "an empty list has no selection");
+    }
+
+    #[test]
+    fn popup_height_is_the_chrome_plus_the_visible_rows() {
+        let area = ratatui::layout::Rect::new(0, 0, 100, 40);
+        for items in [0, 1, 4, VISIBLE_ROWS, VISIBLE_ROWS + 5] {
+            let popup = popup_geometry(area, items);
+            let rows = items.clamp(1, VISIBLE_ROWS) as u16;
+            assert_eq!(
+                popup.height,
+                CHROME.height(rows),
+                "the height derives from the one chrome ({items} items)"
+            );
+            assert_eq!(
+                CHROME.list(popup, 0, items).rows,
+                rows as usize,
+                "the list window shows exactly the rows the height made room for"
+            );
+        }
     }
 }
