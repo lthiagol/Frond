@@ -7,22 +7,20 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 29 is in flight: the last search stays active, and `n` / `N` in the
-  note pane move to the next / previous occurrence of it in the open note
-  (leaf's match-next). It is the parked list's match-next.
+  Unit 30 is in flight: the note pane gets an optional line-number gutter
+  (the config key `line_numbers`, default off) - the parked list's
+  line-number gutter. The unit also closes the finding unit 29's review
+  left behind (the bare `re:` test's comment describes clearing the active
+  search where the code replaces it, and its assertion pins neither).
 
-  The unit also closes the two lows unit 28's review left behind (the
-  search popup's error footer is not clamped to the popup's width, and the
-  bare `re:` case has no popup-level test).
+  The spec lines are written (SPEC.md, section Layout, and the config
+  keys), with the changelog's Unreleased section. The builder's brief is
+  at `/tmp/opencode/frond/unit-30-kickoff.md` (plus three more files).
 
-  The spec line is written (SPEC.md, section Search, plus a key-table
-  row), with the changelog's Unreleased section. The builder's brief is at
-  `/tmp/opencode/frond/unit-29-kickoff.md` (plus three more files).
-
-  Before this unit: unit 28 (the search popup takes a regular expression,
-  `re:`) is committed. Round 1 was clean on both axes (0 blocking, 3 low);
-  the merged findings are at
-  `/tmp/opencode/frond/review6/round1-findings.md`.
+  Before this unit: unit 29 (the last search stays active, `n`/`N` walk
+  it in the note) is committed. Round 1 was clean on both axes (0
+  blocking, 2 low); the merged findings are at
+  `/tmp/opencode/frond/review7/round1-findings.md`.
 
   Before that: unit 23 (the selection bar) is committed - the selected
   row of every list panel is one full-width bar, and its text is painted in

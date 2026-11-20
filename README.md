@@ -13,9 +13,13 @@ main engine of this project (vendored into `crates/engine`).
 - Collapsible folder-tree sidebar (resizable with `<`/`>` or the config) with status glyphs and changed-file markers, plus a tag view
 - Click-to-open everywhere — sidebar rows, backlink rows, in-note links — with opened notes revealing in the tree and focus following the reader
 - Wikilink navigation: resolution per Obsidian rules, heading anchors, disambiguation popup, back/forward history with scroll restore
-- Backlinks panel; global vault search with jump-to-line
+- Backlinks panel; global vault search with jump-to-line, and a regular-expression mode (`re:` prefix)
 - Quick switcher (`Ctrl+P`): fuzzy jump to a note by name
+- The last search stays active: `n`/`N` walk its occurrences in the open note
 - Outline (`o`): the sidebar shows the open note's headings, indented by level; `Enter` jumps to one
+- Scrollbars that are position controls: a press jumps, a drag follows, and the thumb highlights under the mouse
+- The link under the mouse is highlighted, so you see which one you are about to open
+- An optional line-number gutter in the note pane (the `line_numbers` config key)
 - Status bar: the note's size, its scroll position as a percentage, the watch state and the last render time
 - Git sync status (clean/dirty/ahead/behind) and per-note changed markers — read-only
 - `.base` table views (filters, sort, groupBy) with live refresh from the vault watcher
@@ -136,6 +140,7 @@ theme_rotation = "all"          # Shift+T group at startup: all, light or dark
 margin = 2                      # blank columns on each side of the note (0-10)
 margin_y = 1                    # blank rows above and below the note (0-5)
 icons = "nerd"                  # status-bar icons: nerd (needs a Nerd Font) or unicode
+line_numbers = false            # show a gutter with the note's source line numbers
 ```
 
 Missing file means defaults. A malformed file prints a warning and falls back

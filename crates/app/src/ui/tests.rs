@@ -63,6 +63,123 @@ fn note_text_starts_after_the_configured_margin() {
     assert_eq!(app.layout.note_viewport.width, 94, "100 less 3 per side");
 }
 
+/// The optional line-number gutter: the number sits on the first rendered
+/// row of a source line, a wrapped continuation's cell stays empty, and the
+/// text starts after the gutter (so it wraps that much earlier).
+#[test]
+fn line_numbers_gutter_numbers_the_first_row_of_a_source_line() {
+    let file = ui_viewer(
+        "ui-gutter-wrap.md",
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa\n",
+    );
+    let mut app = app_for(&file, None);
+    app.note_margin = 0;
+    app.note_margin_y = 0;
+    app.line_numbers = true;
+    let backend = TestBackend::new(24, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let vp = app.layout.note_viewport;
+    assert_eq!(vp.x, 1, "the one-digit gutter starts at the pane edge");
+    assert_eq!(vp.width, 23, "the text is the gutter narrower");
+    assert_eq!(buffer[(0, 0)].symbol(), "1", "first source line numbered");
+    assert_eq!(
+        buffer[(0, 0)].fg,
+        engine::default_markdown_theme().code_gutter,
+        "the gutter takes the markdown theme's code_gutter colour"
+    );
+    assert_ne!(
+        buffer[(1, 0)].symbol(),
+        " ",
+        "the text starts right after the gutter"
+    );
+    assert!(
+        app.viewer.lines.len() > 1,
+        "the fixture wraps into continuation rows"
+    );
+    assert_eq!(
+        buffer[(0, 1)].symbol(),
+        " ",
+        "a wrapped continuation shows an empty gutter cell"
+    );
+    assert_ne!(
+        buffer[(1, 1)].symbol(),
+        " ",
+        "the continuation's text still starts after the gutter"
+    );
+}
+
+/// The gutter's width is the digit count of the note's last source line, and
+/// the text area narrows by exactly that much.
+#[test]
+fn line_numbers_gutter_width_follows_the_last_line_number() {
+    let nine = ui_viewer("ui-gutter-nine.md", &long_note(9));
+    let mut app = app_for(&nine, None);
+    app.note_margin = 0;
+    app.note_margin_y = 0;
+    app.line_numbers = true;
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(app.layout.note_viewport.x, 1, "9 lines: one digit");
+    assert_eq!(app.layout.note_viewport.width, 99);
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(0, 0)].symbol(), "1");
+
+    let ten = ui_viewer("ui-gutter-ten.md", &long_note(10));
+    let mut app = app_for(&ten, None);
+    app.note_margin = 0;
+    app.note_margin_y = 0;
+    app.line_numbers = true;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(app.layout.note_viewport.x, 2, "10 lines: two digits");
+    assert_eq!(app.layout.note_viewport.width, 98);
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(0, 0)].symbol(), " ", "right-aligned in two cells");
+    assert_eq!(buffer[(1, 0)].symbol(), "1");
+}
+
+/// With the key off, the note pane is exactly the pre-gutter layout: no
+/// gutter column, full-width text.
+#[test]
+fn line_numbers_off_draws_no_gutter() {
+    let file = ui_viewer("ui-gutter-off.md", "alpha beta\n");
+    let mut app = app_for(&file, None);
+    app.note_margin = 0;
+    app.note_margin_y = 0;
+    app.line_numbers = false;
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(app.layout.note_viewport.x, 0, "no gutter column");
+    assert_eq!(app.layout.note_viewport.width, 100, "text keeps its width");
+    assert_eq!(buffer[(0, 0)].symbol(), "a", "the text starts at the edge");
+}
+
+/// The gutter is a column of its own: the link's columns inside the text do
+/// not move, so a click on the link still opens it.
+#[test]
+fn line_numbers_gutter_keeps_the_link_where_it_was() {
+    let (mut app, mut terminal, _file, vault) = hover_app("ui-gutter-link");
+    app.line_numbers = true;
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(
+        app.layout.note_viewport.x,
+        sidebar_width(100) + app.note_margin + 1,
+        "the content pane, the default margin, then the one-digit gutter"
+    );
+    let (col, row) = link_cell(&app, "goal");
+    app.handle_release(col, row);
+    assert_eq!(
+        app.viewer.path,
+        vault.path().join("goal.md"),
+        "a click on the link still opens it"
+    );
+}
+
 /// The vertical margin insets the text rows the same way: blank painted
 /// rows above and below, and the viewport the mouse and the scroll use.
 #[test]

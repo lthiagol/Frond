@@ -3,7 +3,7 @@
 //! Keys: `theme` (string), `vault` (path), `watch` (bool), `mouse` (bool),
 //! `sidebar_width` (columns), `metadata` (bool), `theme_rotation`
 //! ("all"/"light"/"dark"), `margin` (columns), `margin_y` (rows), `icons`
-//! ("nerd"/"unicode"). Missing file = defaults;
+//! ("nerd"/"unicode"), `line_numbers` (bool). Missing file = defaults;
 //! malformed file = warning + defaults (never a crash). Unknown keys are
 //! ignored but reported (never silently). The `FROND_CONFIG` env var overrides the path
 //! (tests and smokes only — they must never write to the real `~/.config`).
@@ -38,6 +38,8 @@ pub struct Config {
     pub margin_y: Option<u16>,
     /// Status-bar icon set: "nerd" or "unicode".
     pub icons: Option<String>,
+    /// Whether the note pane shows a line-number gutter.
+    pub line_numbers: Option<bool>,
 }
 
 /// Glyph set for the status bar's note, table and clock icons. `nerd` (the
@@ -107,6 +109,7 @@ struct ConfigRaw {
     margin: Option<u16>,
     margin_y: Option<u16>,
     icons: Option<String>,
+    line_numbers: Option<bool>,
     /// Keys outside our vocabulary — captured so they can be reported.
     #[serde(flatten)]
     unknown: BTreeMap<String, toml::Value>,
@@ -181,6 +184,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # Status-bar icons beside the note name: "nerd" needs a Nerd Font in the
 # terminal; "unicode" uses only standard glyphs. Default: "nerd".
 # icons = "nerd"
+
+# Show a line-number gutter left of the note text: each rendered line's
+# source line number (a wrapped continuation shows an empty cell). The text
+# is narrower by the gutter's width. Default: false.
+# line_numbers = false
 "#;
 
 /// Loads the config from `path`. Returns the config plus warnings:
@@ -224,6 +232,7 @@ fn load_status(path: &Path) -> (Config, Vec<String>, bool) {
                     margin: raw.margin,
                     margin_y: raw.margin_y,
                     icons: raw.icons,
+                    line_numbers: raw.line_numbers,
                 },
                 warnings,
                 false,
@@ -477,6 +486,21 @@ mod tests {
         assert_eq!(config.mouse, Some(true));
         assert_eq!(config.metadata, Some(true));
         assert_eq!(config.margin_y, Some(1));
+        assert_eq!(config.line_numbers, Some(false));
+    }
+
+    #[test]
+    fn line_numbers_parses_and_defaults_off() {
+        let dir = TempDir::new("cfg-line-numbers");
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert!(warnings.is_empty());
+        assert_eq!(
+            config.line_numbers, None,
+            "an absent key leaves the default off to the app"
+        );
+        std::fs::write(dir.path().join("config.toml"), "line_numbers = true\n").unwrap();
+        let (config, _) = load_at(&dir, "config.toml");
+        assert_eq!(config.line_numbers, Some(true));
     }
 
     #[test]

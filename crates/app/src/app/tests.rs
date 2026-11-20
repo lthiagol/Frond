@@ -2135,10 +2135,13 @@ fn each_executed_search_replaces_the_active_one() {
     run_search(&mut app, "re:(");
     assert_eq!(active_lines(&app), vec![2]);
 
-    // A bare `re:` runs but matches nothing, so it replaces the active
-    // search with one that has no occurrences.
+    // A bare `re:` runs (the popup shows its empty results) but the empty
+    // pattern never becomes an active search: it clears the previous one.
     run_search(&mut app, "re:");
-    assert!(active_lines(&app).is_empty());
+    assert!(
+        app.active_search.is_none(),
+        "a bare re: clears the active search rather than replacing it"
+    );
 }
 
 /// The occurrences are the search's own: a hit in the source text counts

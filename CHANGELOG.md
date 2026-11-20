@@ -27,6 +27,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 - The last search stays active: `n` and `N` in the note pane move to the
   next and the previous occurrence of it in the open note, so you can walk
   through the hits of a note you just opened.
+- The note pane can show a line-number gutter: with the new config key
+  `line_numbers` on, a column left of the text shows the note's source
+  line numbers (a wrapped line's continuation shows an empty cell).
 
 ### Fixed
 

@@ -83,6 +83,42 @@ fn draw_scrollbar(
     );
 }
 
+/// The note pane's line-number gutter width: the digits of the note's last
+/// source line. An empty note still needs one column (there is no line 0 to
+/// name). `source` is the raw file, so the count includes the frontmatter,
+/// exactly like the engine's 1-based `source_line_map`.
+fn line_number_gutter_width(source: &str) -> u16 {
+    source.lines().count().max(1).to_string().len() as u16
+}
+
+/// Paints the visible line numbers right-aligned in `area`. `source_line_map`
+/// is 1-based; a rendered row repeats its predecessor's source line when it
+/// is a wrapped continuation, and only the first row of a source line gets
+/// the number. Rows outside `first..last` are not drawn.
+fn draw_line_numbers(
+    f: &mut Frame,
+    area: Rect,
+    source_line_map: &[usize],
+    first: usize,
+    last: usize,
+    fg: Color,
+    bg: Color,
+) {
+    let style = Style::new().fg(fg).bg(bg);
+    for (row, index) in (first..last).enumerate() {
+        let Some(&line) = source_line_map.get(index) else {
+            break;
+        };
+        if index > 0 && source_line_map.get(index - 1) == Some(&line) {
+            continue;
+        }
+        let number = line.to_string();
+        let x = area.right().saturating_sub(number.len() as u16);
+        f.buffer_mut()
+            .set_stringn(x, area.y + row as u16, number, area.width as usize, style);
+    }
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
     // The chrome palette: every hardcoded shell color below comes from
@@ -171,14 +207,24 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         // side is the margin plus that column.
         let margin = app.note_margin;
         let margin_y = app.note_margin_y;
+        let gutter_width = if app.line_numbers {
+            line_number_gutter_width(&app.viewer.source)
+        } else {
+            0
+        };
         let text_full = Rect {
             x: note_full.x + margin,
             y: note_full.y + margin_y,
             width: note_full.width.saturating_sub(2 * margin),
             height: note_full.height.saturating_sub(margin_y.saturating_mul(2)),
         };
+        // The gutter takes its columns from the text area's left edge, so
+        // the text is narrower by exactly its width and wraps earlier. The
+        // margin stays outside it: it is blank padding, not part of the pane.
+        let gutter_width = gutter_width.min(text_full.width);
+        let text_width = text_full.width.saturating_sub(gutter_width);
         let text_rows = text_full.height as usize;
-        let full_width = text_full.width as usize;
+        let full_width = text_width as usize;
         // A pane shorter than twice the margin leaves no text rows. ratatui
         // reads a 0 viewport as "unset" and scales the thumb against the
         // track, claiming visible rows the pane does not have: draw no bar.
@@ -191,13 +237,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             full_width
         };
         app.viewer.on_content_width(wrap_width);
-        let note_area = if bar_shown {
-            Rect {
-                width: text_full.width.saturating_sub(1),
-                ..text_full
-            }
-        } else {
-            text_full
+        let note_area = Rect {
+            x: text_full.x + gutter_width,
+            width: text_width.saturating_sub(u16::from(bar_shown)),
+            ..text_full
         };
         app.layout.note_viewport = note_area;
         // The viewer subtracts the status line itself, so pass the text rows
@@ -223,6 +266,22 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Paragraph::new(text)
             .style(Style::new().bg(ui.content_bg))
             .render(note_area, f.buffer_mut());
+        if app.line_numbers && gutter_width > 0 {
+            let gutter = Rect {
+                x: text_full.x,
+                width: gutter_width,
+                ..text_full
+            };
+            draw_line_numbers(
+                f,
+                gutter,
+                &app.viewer.source_line_map,
+                first,
+                last,
+                app.viewer.code_gutter(),
+                ui.content_bg,
+            );
+        }
         if bar_shown {
             let bar = Rect {
                 x: note_full.right() - 1,

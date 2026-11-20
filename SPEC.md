@@ -126,6 +126,18 @@ frontmatter at all — the whole file is body.
   is only a colour: it does not move the link focus (`x` / `X`), and
   clicking the link still opens it. Mouse capture off (`m`) disables it,
   like every other mouse action.
+- The note pane has an optional **line-number gutter**: with the config
+  key `line_numbers` on (default off), a column to the left of the note's
+  text shows the source line number of each line. The number appears on
+  the first rendered line of a source line; a wrapped continuation line
+  shows an empty gutter. The gutter's width follows the digits of the
+  note's last line number, the note's text is that much narrower (and
+  wraps that much earlier), and the gutter is painted in the markdown
+  theme's `code_gutter` colour. The numbers are right-aligned in the
+  gutter's columns, and an empty note still draws a one-column gutter
+  (there is no line 0 to name). The gutter is a column of its own: the
+  text's columns do not move inside the text area, so the links and the
+  checkboxes stay where they are.
 - Session memory (XDG state dir — `XDG_STATE_HOME/frond`, else
   `~/.local/state/frond`; `FROND_SESSION` overrides it; one file per
   vault, named after a hash of the vault root): the last open note
@@ -327,7 +339,9 @@ own keys, and they take them instead of the app:
   `Shift+T` starts in), `margin` (blank columns on each side of the note,
   0–10, default 2), `margin_y` (blank rows above and below the note, 0–5,
   default 1), `icons` (`nerd` | `unicode`, default `nerd`: the note
-  and base icons on the status bar; `nerd` needs a Nerd Font in the terminal).
+  and base icons on the status bar; `nerd` needs a Nerd Font in the terminal),
+  `line_numbers` (bool, default off: the note pane shows a gutter with the
+  note's source line numbers).
   Read at
   startup; `--vault`/`--theme`/`--watch`/`--mouse` override. Missing file =
   defaults; malformed file = warning + defaults (never a crash); unknown

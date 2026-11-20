@@ -452,6 +452,8 @@ fn main() {
             // Vertical note margin (config `margin_y`, blank rows above and
             // below the note text).
             app.note_margin_y = effective_margin_y(config.margin_y);
+            // Line-number gutter (config `line_numbers`, default off).
+            app.line_numbers = config.line_numbers.unwrap_or(false);
             // Mouse capture default (config/flag): the App field drives the
             // runtime toggle (`m`); setup_terminal already applied the
             // startup state.
