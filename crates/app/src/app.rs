@@ -91,6 +91,17 @@ pub enum SidebarMode {
     Outline,
 }
 
+/// The scrollbar that owns an active left-button drag. Each bar is a
+/// position control for its own pane; the target says which pane follows
+/// the pointer until the release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BarTarget {
+    Note,
+    /// The sidebar panel: the tree, tag list or outline currently shown.
+    Sidebar,
+    Backlinks,
+}
+
 /// A still-ambiguous wikilink awaiting the user's pick (shown as a popup;
 /// only reached when the same-folder/nearest-ancestor hint found nothing).
 pub struct Disambiguation {
@@ -118,8 +129,15 @@ pub struct Layout {
     pub note_scrollbar_area: Option<Rect>,
     /// The sidebar widget (`None` while hidden).
     pub sidebar_area: Option<Rect>,
+    /// The sidebar panel's scrollbar column (`None` while its rows fit):
+    /// its bar positions the shown list's selection (tree, tags or outline
+    /// - the three share one panel and one bar).
+    pub sidebar_scrollbar_area: Option<Rect>,
     /// The backlinks panel (`None` while closed).
     pub backlinks_area: Option<Rect>,
+    /// The backlinks panel's scrollbar column (`None` while its rows fit):
+    /// its bar positions the panel's selection.
+    pub backlinks_scrollbar_area: Option<Rect>,
     /// The search popup (`None` while closed): routes result-row clicks and
     /// wheels by position.
     pub search_area: Option<Rect>,
@@ -190,11 +208,11 @@ pub struct App {
     /// actual capture switch when this diverges from the live state). Off
     /// = the terminal handles the mouse natively (text selection/copy).
     pub mouse_capture: bool,
-    /// True while a left-button drag on the note pane's scrollbar owns the
-    /// pointer: the press on the bar starts it, every drag event keeps the
-    /// note following the pointer, and the release that ends it is consumed
-    /// instead of being handled as a click. See [`Self::handle_press`].
-    bar_drag: bool,
+    /// The scrollbar whose drag owns the pointer, if any: the press on a bar
+    /// starts it, every drag event keeps that pane following the pointer, and
+    /// the release that ends it is consumed instead of being handled as a
+    /// click. See [`Self::handle_press`].
+    bar_drag: Option<BarTarget>,
     /// Sidebar width override in terminal columns (`None` = the default
     /// 30% of the terminal, clamped 24–60; see `ui::sidebar_width`). Set
     /// by `<`/`>` and the config `sidebar_width` key, clamped 24–120.
@@ -287,7 +305,7 @@ impl App {
             git: None,
             watcher,
             mouse_capture: true,
-            bar_drag: false,
+            bar_drag: None,
             sidebar_width: None,
             layout: Layout::default(),
             last_rescan: None,
@@ -674,6 +692,20 @@ impl App {
     /// keeps the selection visible and clamps the scroll.
     pub fn on_backlinks_viewport(&mut self, height: usize) {
         self.backlink_viewport = height.max(1);
+        self.scroll_backlink_selection_into_view();
+    }
+
+    /// Selects a backlink row without opening it (the panel bar's position
+    /// control) and keeps it visible. Out-of-range indices are ignored.
+    fn select_backlink(&mut self, index: usize) {
+        if index >= self.backlinks.len() {
+            return;
+        }
+        self.backlink_sel = index;
+        self.scroll_backlink_selection_into_view();
+    }
+
+    fn scroll_backlink_selection_into_view(&mut self) {
         if self.backlink_sel >= self.backlink_scroll + self.backlink_viewport {
             self.backlink_scroll = self.backlink_sel + 1 - self.backlink_viewport;
         } else if self.backlink_sel < self.backlink_scroll {
@@ -926,64 +958,135 @@ impl App {
     /// position: the track's first row is the document's top, its last row
     /// the bottom, and the rows between interpolate linearly over the
     /// scroll range. Rows above/below the track clamp to the ends (a drag
-    /// can leave the column). `None` while no bar is drawn. This is the one
-    /// place the track-row → scroll mapping lives.
+    /// can leave the column). `None` while no bar is drawn.
     fn bar_scroll_at(&self, row: u16) -> Option<u32> {
         let area = self.layout.note_scrollbar_area?;
-        let last = u32::from(area.height.saturating_sub(1));
-        if last == 0 {
-            return Some(0);
-        }
-        let offset = u32::from(row.saturating_sub(area.y)).min(last);
-        let max = self.viewer.max_scroll();
-        Some((u64::from(offset) * u64::from(max) / u64::from(last)) as u32)
+        Some(bar_value_at(area, row, self.viewer.max_scroll() as usize) as u32)
     }
 
-    /// Left-button press. On the note pane's scrollbar column it jumps the
-    /// note to the mapped position and starts a drag (the bar is a position
-    /// control, so the press never moves the keyboard focus). Any other
-    /// press is inert: clicks keep their release semantics, and popups keep
-    /// owning the pointer while open.
+    /// Moves the shown sidebar list's selection to the row the panel's bar
+    /// names (the tree, the tag list or the outline). Selecting never
+    /// activates: a bar press does not open a note, toggle a folder or jump
+    /// to an outline heading.
+    fn select_sidebar_bar_row(&mut self, area: Rect, row: u16) {
+        match self.sidebar_mode {
+            SidebarMode::Tree => {
+                let Some(sidebar) = &mut self.sidebar else {
+                    return;
+                };
+                if let Some(index) = bar_list_index(area, row, sidebar.row_count()) {
+                    sidebar.select(index);
+                }
+            }
+            SidebarMode::Tags => {
+                if let Some(index) = bar_list_index(area, row, self.tags.rows().len()) {
+                    self.tags.select(index);
+                }
+            }
+            SidebarMode::Outline => {
+                let len = self.outline_len();
+                if let Some(index) = bar_list_index(area, row, len) {
+                    self.outline.select(index, len);
+                }
+            }
+        }
+    }
+
+    /// Moves the backlinks panel's selection to the row its bar names.
+    /// Selecting never opens the link.
+    fn select_backlink_bar_row(&mut self, area: Rect, row: u16) {
+        if let Some(index) = bar_list_index(area, row, self.backlinks.len()) {
+            self.select_backlink(index);
+        }
+    }
+
+    /// Left-button press. On any scrollbar column (the note pane, the
+    /// sidebar panel, the backlinks panel) it jumps that pane to the mapped
+    /// position and starts a drag: the bars are position controls, so the
+    /// press never moves the keyboard focus, and a list bar's press moves
+    /// the selection without opening it. Any other press is inert: clicks
+    /// keep their release semantics, and popups keep owning the pointer
+    /// while open. With mouse capture off the app ignores the mouse
+    /// entirely, independent of what the terminal forwards.
     pub fn handle_press(&mut self, col: u16, row: u16) {
         // A new press supersedes any drag state a lost release left behind:
         // whatever this press starts (or does not), the next release is
         // judged on it, not on a stale drag.
-        self.bar_drag = false;
+        self.bar_drag = None;
+        if !self.mouse_capture {
+            return;
+        }
         if self.quick.open || self.search.open || self.any_popup_open() {
             return;
         }
-        let Some(area) = self.layout.note_scrollbar_area else {
-            return;
-        };
-        if !point_in_rect(col, row, area) {
-            return;
+        if let Some(area) = self.layout.note_scrollbar_area {
+            if point_in_rect(col, row, area) {
+                self.bar_drag = Some(BarTarget::Note);
+                if let Some(scroll) = self.bar_scroll_at(row) {
+                    self.viewer.set_scroll(scroll);
+                }
+                return;
+            }
         }
-        self.bar_drag = true;
-        if let Some(scroll) = self.bar_scroll_at(row) {
-            self.viewer.set_scroll(scroll);
+        if self.sidebar_visible {
+            if let Some(area) = self.layout.sidebar_scrollbar_area {
+                if point_in_rect(col, row, area) {
+                    self.bar_drag = Some(BarTarget::Sidebar);
+                    self.select_sidebar_bar_row(area, row);
+                    return;
+                }
+            }
+        }
+        if let Some(area) = self.layout.backlinks_scrollbar_area {
+            if point_in_rect(col, row, area) {
+                self.bar_drag = Some(BarTarget::Backlinks);
+                self.select_backlink_bar_row(area, row);
+            }
         }
     }
 
-    /// Left-button drag: while a bar drag is active the note follows the
+    /// Left-button drag: while a bar drag is active its pane follows the
     /// pointer's row (the column may leave the bar; only the row matters).
-    /// A drag that did not start on the bar does nothing.
+    /// A drag that did not start on a bar does nothing, and a popup that
+    /// opened mid-drag owns the pointer: the pane behind it must not keep
+    /// moving (the release still ends the drag).
     pub fn handle_drag(&mut self, _col: u16, row: u16) {
-        if !self.bar_drag {
+        let Some(target) = self.bar_drag else {
+            return;
+        };
+        if !self.mouse_capture {
             return;
         }
-        if let Some(scroll) = self.bar_scroll_at(row) {
-            self.viewer.set_scroll(scroll);
+        if self.quick.open || self.search.open || self.any_popup_open() {
+            return;
+        }
+        match target {
+            BarTarget::Note => {
+                if let Some(scroll) = self.bar_scroll_at(row) {
+                    self.viewer.set_scroll(scroll);
+                }
+            }
+            BarTarget::Sidebar => {
+                if let Some(area) = self.layout.sidebar_scrollbar_area {
+                    self.select_sidebar_bar_row(area, row);
+                }
+            }
+            BarTarget::Backlinks => {
+                if let Some(area) = self.layout.backlinks_scrollbar_area {
+                    self.select_backlink_bar_row(area, row);
+                }
+            }
         }
     }
 
     /// Left-button release. The release that ends a bar drag is consumed:
-    /// it clears the drag and never acts as a click, so a link under the
-    /// pointer does not open. Every other release keeps the click semantics
-    /// (including the bar column itself, where a click is a no-op because
-    /// the column sits outside the note viewport).
+    /// it clears the drag and never acts as a click, so a link, note row or
+    /// folder under the pointer does not open. Every other release keeps
+    /// the click semantics (including a bar column, where a click is a
+    /// no-op because the bar is not a row target).
     pub fn handle_release(&mut self, col: u16, row: u16) {
-        if self.bar_drag {
-            self.bar_drag = false;
+        if self.bar_drag.is_some() {
+            self.bar_drag = None;
             return;
         }
         self.handle_click(col, row);
@@ -1029,6 +1132,26 @@ impl App {
             return;
         }
         if self.any_popup_open() {
+            return;
+        }
+        // A list panel's bar column is a position control, not a row
+        // target: a bare release there (a press/drag pair is consumed by
+        // `handle_release`) must not open the row under the pointer or
+        // move focus. The backlinks click rect already stops before its
+        // bar; the sidebar's covers the whole panel.
+        if self.sidebar_visible
+            && self
+                .layout
+                .sidebar_scrollbar_area
+                .is_some_and(|area| point_in_rect(col, row, area))
+        {
+            return;
+        }
+        if self
+            .layout
+            .backlinks_scrollbar_area
+            .is_some_and(|area| point_in_rect(col, row, area))
+        {
             return;
         }
         if let Some(area) = self.layout.status_name_area {
@@ -1953,13 +2076,7 @@ impl App {
             return;
         }
         let next = (self.backlink_sel as isize + delta).clamp(0, len as isize - 1) as usize;
-        self.backlink_sel = next;
-        if next >= self.backlink_scroll + self.backlink_viewport {
-            self.backlink_scroll = next + 1 - self.backlink_viewport;
-        } else if next < self.backlink_scroll {
-            self.backlink_scroll = next;
-        }
-        self.clamp_backlink_scroll();
+        self.select_backlink(next);
     }
 
     fn toggle_sidebar(&mut self) {
@@ -2262,6 +2379,27 @@ pub(crate) fn outline_rows<'a>(
     } else {
         &viewer.toc
     }
+}
+
+/// Maps a row of a vertical bar's track onto a value in `0..=max`: the
+/// track's first row is 0, its last row `max`, the rows between interpolate
+/// linearly. Rows above/below the track clamp to the ends (a drag can leave
+/// the column). This is the one place a bar's track-row mapping lives; the
+/// note pane maps onto its scroll range, a list panel onto its row indices.
+fn bar_value_at(area: Rect, row: u16, max: usize) -> usize {
+    let last = usize::from(area.height.saturating_sub(1));
+    if last == 0 {
+        return 0;
+    }
+    let offset = usize::from(row.saturating_sub(area.y)).min(last);
+    (offset as u64 * max as u64 / last as u64) as usize
+}
+
+/// Maps a row of a list panel's bar onto a row index: the track's first row
+/// is the list's first row, its last row the list's last, linear between.
+/// `None` when the list is empty (there is no row to select).
+fn bar_list_index(area: Rect, row: u16, len: usize) -> Option<usize> {
+    Some(bar_value_at(area, row, len.checked_sub(1)?))
 }
 
 /// Is `(col, row)` inside `area`?

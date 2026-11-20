@@ -119,6 +119,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.layout.note_viewport = note_area;
         app.layout.note_scrollbar_area = None;
         app.layout.backlinks_area = None;
+        app.layout.backlinks_scrollbar_area = None;
         draw_base_table(f, note_area, app, ui);
     } else {
         // The backlinks panel (`b`) takes the bottom slice of the content area.
@@ -216,6 +217,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
         // Geometry for click routing (focus on click), fresh every frame.
         app.layout.backlinks_area = None;
+        app.layout.backlinks_scrollbar_area = None;
         if panel_height > 0 {
             let panel = Rect {
                 y: content_area.y + view_height - panel_height,
@@ -226,10 +228,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
     }
 
+    let mut sidebar_bar = None;
     if let Some(sidebar_rect) = sidebar_area {
         let index = app.index.as_ref().map(|i| i.borrow());
         if app.sidebar_mode == SidebarMode::Tags {
-            draw_tag_list(
+            sidebar_bar = draw_tag_list(
                 f,
                 sidebar_rect,
                 &mut app.tags,
@@ -249,9 +252,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             } = app;
             let entries = crate::app::outline_rows(base, viewer);
             outline.sync(entries.len());
-            draw_outline(f, sidebar_rect, outline, entries, ui, focused);
+            sidebar_bar = draw_outline(f, sidebar_rect, outline, entries, ui, focused);
         } else if let Some(sidebar) = &mut app.sidebar {
-            draw_sidebar(
+            sidebar_bar = draw_sidebar(
                 f,
                 sidebar_rect,
                 sidebar,
@@ -262,6 +265,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             );
         }
     }
+    // The panel's bar column is a selection position control: it follows
+    // whichever list the sidebar shows (tree, tags or outline).
+    app.layout.sidebar_scrollbar_area = sidebar_bar;
 
     let status = Rect {
         x: area.x,
@@ -452,7 +458,7 @@ fn draw_sidebar(
     focused: bool,
     index: Option<&VaultIndex>,
     git: Option<&GitStatus>,
-) {
+) -> Option<Rect> {
     let inner_height = area.height.saturating_sub(2) as usize;
     sidebar.on_viewport_height(inner_height.max(1));
     sidebar.scroll_selection_into_view();
@@ -494,7 +500,7 @@ fn draw_sidebar(
         },
         window,
         ui,
-    );
+    )
 }
 
 /// Geometry and chrome of one bordered list panel (sidebar tree, tag
@@ -512,7 +518,13 @@ struct ListPanel {
 /// The shared tail of the three list panels: bordered block on
 /// `sidebar_bg`, the visible row window, and the scrollbar when the rows
 /// overflow. Keeps the panels' click geometry (`list_row_at`) identical.
-fn render_list_panel(f: &mut Frame, panel: ListPanel, window: Vec<Line<'static>>, ui: UiTheme) {
+/// Returns the bar's column when one was drawn, for the position control.
+fn render_list_panel(
+    f: &mut Frame,
+    panel: ListPanel,
+    window: Vec<Line<'static>>,
+    ui: UiTheme,
+) -> Option<Rect> {
     let border = if panel.focused {
         ui.sidebar_border_focused
     } else {
@@ -531,15 +543,19 @@ fn render_list_panel(f: &mut Frame, panel: ListPanel, window: Vec<Line<'static>>
         panel.text_area,
     );
     if panel.overflow {
+        let bar = list_scrollbar_area(panel.area);
         draw_scrollbar(
             f,
-            list_scrollbar_area(panel.area),
+            bar,
             panel.rows_total,
             panel.scroll,
             panel.area.height.saturating_sub(2) as usize,
             ui.popup_dimmed_fg,
             ui.sidebar_bg,
         );
+        Some(bar)
+    } else {
+        None
     }
 }
 
@@ -647,7 +663,7 @@ fn draw_outline(
     entries: &[engine::TocEntry],
     ui: UiTheme,
     focused: bool,
-) {
+) -> Option<Rect> {
     let inner_height = area.height.saturating_sub(2) as usize;
     let rows_total = entries.len();
     outline.on_viewport_height(inner_height.max(1), rows_total);
@@ -684,7 +700,7 @@ fn draw_outline(
         },
         window,
         ui,
-    );
+    )
 }
 
 /// One outline row: the heading indented by its depth relative to the
@@ -716,7 +732,7 @@ fn draw_tag_list(
     ui: UiTheme,
     focused: bool,
     index: Option<&VaultIndex>,
-) {
+) -> Option<Rect> {
     let inner_height = area.height.saturating_sub(2) as usize;
     tags.on_viewport_height(inner_height.max(1));
     tags.scroll_selection_into_view();
@@ -750,7 +766,7 @@ fn draw_tag_list(
         },
         window,
         ui,
-    );
+    )
 }
 
 /// One tag-list row: `#tag (N)` or an indented note (vault-relative path
@@ -807,6 +823,9 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
         width: hit_right - area.x,
         ..area
     });
+    // The bar column positions the panel's selection (the click rect above
+    // deliberately stops before it).
+    app.layout.backlinks_scrollbar_area = bar_shown.then(|| list_scrollbar_area(area));
     app.on_backlinks_viewport(inner_height.max(1));
 
     let index = app.index.as_ref().map(|i| i.borrow());
