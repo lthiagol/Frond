@@ -30,6 +30,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 - The note pane can show a line-number gutter: with the new config key
   `line_numbers` on, a column left of the text shows the note's source
   line numbers (a wrapped line's continuation shows an empty cell).
+- The warnings the vault index records while it walks the vault at
+  startup (an unreadable file or directory) now reach the status bar.
+  They used to be silent, so a note that was skipped was a note you could
+  not find and had no way of knowing about.
 
 ### Fixed
 

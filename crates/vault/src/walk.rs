@@ -52,6 +52,12 @@ pub struct WalkWarning {
     pub message: String,
 }
 
+/// Message prefix shared by every warning about a path that could not be
+/// read at all (the walk's directories, the index's files). One home for
+/// the spelling: callers that need to tell an unreadable path apart from a
+/// frontmatter diagnostic match on it.
+pub(crate) const UNREADABLE_PREFIX: &str = "unreadable: ";
+
 /// Walks `root` depth-first collecting `.md` and `.base` files, folders
 /// before files, case-insensitive order within each group. Fails only if
 /// `root` itself cannot be read; unreadable subdirectories are dropped
@@ -161,7 +167,7 @@ fn walk_dir(
                 if let Err(err) = walk_dir(&entry.path, depth + 1, out, warnings) {
                     warnings.push(WalkWarning {
                         path: entry.path,
-                        message: format!("unreadable: {err}"),
+                        message: format!("{UNREADABLE_PREFIX}{err}"),
                     });
                 }
             }

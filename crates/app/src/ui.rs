@@ -113,6 +113,14 @@ fn draw_line_numbers(
             continue;
         }
         let number = line.to_string();
+        // A pane narrower than the note's line count cannot show the whole
+        // number. Keep the least significant digits inside the gutter: the
+        // full string would start left of it, in the margin.
+        let number = if number.len() > area.width as usize {
+            &number[number.len() - area.width as usize..]
+        } else {
+            number.as_str()
+        };
         let x = area.right().saturating_sub(number.len() as u16);
         f.buffer_mut()
             .set_stringn(x, area.y + row as u16, number, area.width as usize, style);
@@ -1600,8 +1608,9 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             error_shown = true;
         }
     }
-    // The watch walk's unreadable-directory state: error-ish, but it
-    // outlives a transient info message and clears with the condition.
+    // The vault's unreadable-path state (a directory the walk cannot read,
+    // a file the startup index could not read): error-ish, but it outlives
+    // a transient info message and clears with the condition.
     if let Some(warning) = &app.walk_warning {
         spans.push(Span::styled(
             format!(" · {warning}"),

@@ -1776,11 +1776,9 @@ fn vault_watcher_reindexes_and_reparses() {
 }
 
 /// A directory that becomes unreadable after startup: the watch walk
-/// reports it, and the app puts the warning in its own status-bar slot (the
-/// startup index keeps the same warning to itself; mid-session the bar is
-/// the channel the user can see). It is state: it stays while the
-/// condition lasts and clears on the walk that finds the directory readable
-/// again — no unrelated action needed.
+/// reports it, and the app puts the warning in its own status-bar slot. It
+/// is state: it stays while the condition lasts and clears on the walk that
+/// finds the directory readable again — no unrelated action needed.
 #[test]
 fn a_directory_locked_after_startup_surfaces_a_warning_that_clears() {
     let vault_dir = vault();
@@ -1860,6 +1858,154 @@ fn a_walk_warning_does_not_replace_a_real_error() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
+}
+
+// --- startup warnings --------------------------------------------------
+
+/// A directory the startup walk could not read is on the bar from the first
+/// frame, vault-relative, and the first walk reporting the same condition
+/// still leaves one message — not two.
+#[test]
+fn a_startup_unreadable_directory_is_shown_once_and_clears() {
+    let vault_dir = vault();
+    let sub = vault_dir.path().join("sub");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    let file = TempFile::new("app-startup-dir.md", "MAIN\n\n");
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let index = shared_index(&vault_dir); // built while `sub` is locked
+    let mut app = App::new(viewer, Some(vault_dir.path().to_path_buf()), Some(index)).unwrap();
+
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("a startup warning is silent"));
+    assert!(
+        message.contains("sub: unreadable"),
+        "names the directory, vault-relative: {message:?}"
+    );
+    assert!(
+        !message.contains(&vault_dir.path().display().to_string()),
+        "the vault root is not part of the message: {message:?}"
+    );
+    assert!(
+        app.viewer.last_error.is_none(),
+        "the startup warning has its own slot, not the error one: {:?}",
+        app.viewer.last_error
+    );
+
+    // The first walk re-reports the same directory: same message, once.
+    app.poll();
+    assert_eq!(app.walk_warning.as_deref(), Some(message.as_str()));
+    assert_eq!(
+        message.matches("unreadable").count(),
+        1,
+        "the same condition is one message, not two: {message:?}"
+    );
+
+    // Readable again: the next walk ends the condition and clears the slot.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    app.last_vault_scan = None;
+    app.poll();
+    assert!(
+        app.walk_warning.is_none(),
+        "a readable directory clears the startup warning: {:?}",
+        app.walk_warning
+    );
+}
+
+/// A file the startup index could not read stays on the bar through the
+/// walks that do not report files, until the file reads again.
+#[test]
+fn a_startup_unreadable_file_stays_until_it_reads_again() {
+    let vault_dir = TempDir::new("app-startup-file");
+    std::fs::write(
+        vault_dir.path().join("ok.md"),
+        "---\nstatus: active\n---\nok\n",
+    )
+    .unwrap();
+    let locked = vault_dir.path().join("locked.md");
+    std::fs::write(&locked, "secret\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    let file = TempFile::new("app-startup-file-main.md", "MAIN\n\n");
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let index = shared_index(&vault_dir); // built while `locked.md` is unreadable
+    let mut app = App::new(
+        viewer,
+        Some(vault_dir.path().to_path_buf()),
+        Some(index.clone()),
+    )
+    .unwrap();
+    assert!(
+        !index.borrow().notes().any(|note| note.path == locked),
+        "the skipped file starts out absent from the index"
+    );
+
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("the skipped file is silent"));
+    assert!(
+        message.contains("locked.md: unreadable"),
+        "names the file, vault-relative: {message:?}"
+    );
+
+    // A walk does not report files; the startup snapshot must survive it.
+    app.poll();
+    assert_eq!(
+        app.walk_warning.as_deref(),
+        Some(message.as_str()),
+        "the file's warning outlives a walk that does not name it"
+    );
+
+    // The file reads again: the next tick clears the slot and puts the
+    // note back in the index, so search, tags and links can find it.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    app.last_vault_scan = None;
+    app.poll();
+    assert!(
+        app.walk_warning.is_none(),
+        "a readable file clears the startup warning: {:?}",
+        app.walk_warning
+    );
+    let index = index.borrow();
+    assert!(
+        index.notes().any(|note| note.path == locked),
+        "the healed file is back in the index, not just out of the warning"
+    );
+    assert!(
+        !index
+            .warnings()
+            .iter()
+            .any(|warning| warning.path == locked && warning.is_unreadable()),
+        "the index drops the file's unreadable warning too: {:?}",
+        index.warnings()
+    );
+}
+
+/// A vault the walk skipped nothing in shows no warning. The fixture's plain
+/// notes carry a frontmatter diagnostic in the index; that is not a note the
+/// reader lost, so it does not reach the bar.
+#[test]
+fn a_clean_startup_shows_no_warning() {
+    let vault_dir = vault();
+    let (_f, app) = app(&vault_dir);
+    assert!(
+        app.walk_warning.is_none(),
+        "nothing was skipped, so nothing is shown: {:?}",
+        app.walk_warning
+    );
 }
 
 // --- M4: global search --------------------------------------------
