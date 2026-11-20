@@ -1,20 +1,30 @@
 //! Vault-wide change detection for the poll-based watcher.
 //!
 //! Every vault-wide poll walks the index's root (cheap: hidden entries and
-//! directory symlinks are skipped, `vault::walk_vault` — it now lists
-//! `.base` files alongside `.md` notes), stats each file (mtime + size,
-//! same fingerprint as the single-file watcher) and feeds every
-//! added/modified/removed file into [`VaultIndex::reindex_one`]. The
-//! watcher itself holds no index state — the index owns the data, the
-//! watcher only decides *when* to refresh.
+//! directory symlinks are skipped, `vault::walk_vault_with_warnings` — it
+//! lists `.base` files alongside `.md` notes and reports directories it
+//! could not read), stats each file (mtime + size, same fingerprint as the
+//! single-file watcher) and feeds every added/modified/removed file into
+//! [`VaultIndex::reindex_one`]. The watcher itself holds no index state —
+//! the index owns the data, the watcher only decides *when* to refresh.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use vault::walk::{walk_vault, WalkEntry};
-use vault::VaultIndex;
+use vault::walk::{walk_vault_with_warnings, WalkEntry};
+use vault::{IndexWarning, VaultIndex};
 
 use crate::viewer::FileStamp;
+
+/// One poll's outcome: the paths whose index entries changed, plus the
+/// walk's warnings (directories that could not be read this tick). The
+/// caller must surface the warnings — a directory dropping out of the
+/// index is never silent.
+#[derive(Debug, Default)]
+pub struct PollOutcome {
+    pub changed: Vec<PathBuf>,
+    pub warnings: Vec<IndexWarning>,
+}
 
 /// Fingerprint of every currently-indexed note.
 pub struct VaultWatcher {
@@ -43,13 +53,24 @@ impl VaultWatcher {
     }
 
     /// One vault-wide poll: reindexes every changed/new/removed file and
-    /// returns the list of changed paths (empty = nothing happened).
-    /// Vault-unreadable walks are skipped entirely (retry next tick).
-    pub fn poll(&mut self, index: &mut VaultIndex) -> Vec<PathBuf> {
-        let Ok(entries) = walk_vault(index.root()) else {
-            return Vec::new();
+    /// returns the changed paths plus the walk's warnings (empty
+    /// `changed` = nothing happened). A root that cannot be walked at all
+    /// is skipped entirely (retry next tick).
+    pub fn poll(&mut self, index: &mut VaultIndex) -> PollOutcome {
+        let Ok(report) = walk_vault_with_warnings(index.root()) else {
+            return PollOutcome::default();
         };
-        self.reconcile(index, &entries)
+        PollOutcome {
+            changed: self.reconcile(index, &report.entries),
+            warnings: report
+                .warnings
+                .into_iter()
+                .map(|w| IndexWarning {
+                    path: w.path,
+                    message: w.message,
+                })
+                .collect(),
+        }
     }
 
     /// Compares one walk's results against the stamps and feeds every
@@ -121,14 +142,14 @@ mod tests {
         // ADD: a new note appears.
         wait_mtime_tick();
         write(&dir.path().join("b.md"), "---\nstatus: draft\n---\n");
-        let changed = watcher.poll(&mut index);
+        let changed = watcher.poll(&mut index).changed;
         assert_eq!(changed, vec![dir.path().join("b.md")]);
         assert_eq!(index.len(), 2);
 
         // MODIFY: content change (same length) is caught by mtime.
         wait_mtime_tick();
         write(&dir.path().join("a.md"), "---\nstatus: resolved\n---\n");
-        let changed = watcher.poll(&mut index);
+        let changed = watcher.poll(&mut index).changed;
         assert_eq!(changed, vec![dir.path().join("a.md")]);
         assert_eq!(
             index
@@ -142,12 +163,12 @@ mod tests {
         // REMOVE: deleted file drops out of the index.
         wait_mtime_tick();
         fs::remove_file(dir.path().join("b.md")).unwrap();
-        let changed = watcher.poll(&mut index);
+        let changed = watcher.poll(&mut index).changed;
         assert_eq!(changed, vec![dir.path().join("b.md")]);
         assert_eq!(index.len(), 1);
 
         // Quiet tick: no changes.
-        assert!(watcher.poll(&mut index).is_empty());
+        assert!(watcher.poll(&mut index).changed.is_empty());
     }
 
     #[test]
@@ -156,27 +177,27 @@ mod tests {
         write(&dir.path().join("a.md"), "a\n");
         let mut index = VaultIndex::build(dir.path()).unwrap();
         let mut watcher = VaultWatcher::new(&index);
-        assert!(watcher.poll(&mut index).is_empty());
+        assert!(watcher.poll(&mut index).changed.is_empty());
 
         // ADD: a new `.base` file is picked up (path-only in the index).
         wait_mtime_tick();
         let base = dir.path().join("tasks.base");
         write(&base, "filters: []\n");
-        let changed = watcher.poll(&mut index);
+        let changed = watcher.poll(&mut index).changed;
         assert_eq!(changed, vec![base.clone()]);
         assert_eq!(index.bases().collect::<Vec<_>>(), vec![base.clone()]);
 
         // MODIFY: content changes re-feed the path; the listing stays.
         wait_mtime_tick();
         write(&base, "filters:\n  and: []\n");
-        let changed = watcher.poll(&mut index);
+        let changed = watcher.poll(&mut index).changed;
         assert_eq!(changed, vec![base.clone()]);
         assert_eq!(index.bases().count(), 1);
 
         // REMOVE: the base drops out.
         wait_mtime_tick();
         fs::remove_file(&base).unwrap();
-        let changed = watcher.poll(&mut index);
+        let changed = watcher.poll(&mut index).changed;
         assert_eq!(changed, vec![base]);
         assert!(index.bases().next().is_none());
     }
@@ -217,7 +238,7 @@ mod tests {
         // walk's entries, then make the parent directory unsearchable so
         // `FileStamp::of` fails with EACCES while the entry list still
         // contains the path.
-        let entries = walk_vault(dir.path()).unwrap();
+        let entries = walk_vault_with_warnings(dir.path()).unwrap().entries;
         assert_eq!(entries.len(), 2);
         {
             use std::os::unix::fs::PermissionsExt;
@@ -246,7 +267,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(dir.path().join("sub"), fs::Permissions::from_mode(0o755)).unwrap();
         }
-        assert!(watcher.poll(&mut index).is_empty());
+        assert!(watcher.poll(&mut index).changed.is_empty());
     }
 
     /// Startup race: a file created between `VaultIndex::build` and the
@@ -266,7 +287,7 @@ mod tests {
         write(&dir.path().join("late.md"), "---\nstatus: draft\n---\n");
         let mut watcher = VaultWatcher::new(&index);
 
-        let changed = watcher.poll(&mut index);
+        let changed = watcher.poll(&mut index).changed;
         assert_eq!(changed, vec![dir.path().join("late.md")]);
         assert_eq!(index.len(), 2, "the late file got indexed");
         assert_eq!(
@@ -278,6 +299,51 @@ mod tests {
             Some("draft")
         );
         // And the next poll is quiet.
-        assert!(watcher.poll(&mut index).is_empty());
+        assert!(watcher.poll(&mut index).changed.is_empty());
+    }
+
+    /// A directory that becomes unreadable *after* startup must produce a
+    /// warning on the watch path too: its notes vanish from the walk, and
+    /// that must never be silent (the startup walk already reports it).
+    #[test]
+    fn a_directory_locked_after_startup_is_reported() {
+        let dir = TempDir::new("watch-locked");
+        write(&dir.path().join("a.md"), "a\n");
+        write(&dir.path().join("locked/inside.md"), "h\n");
+        let mut index = VaultIndex::build(dir.path()).unwrap();
+        assert_eq!(index.len(), 2);
+        let mut watcher = VaultWatcher::new(&index);
+        assert!(
+            index
+                .warnings()
+                .iter()
+                .all(|w| !w.message.contains("unreadable")),
+            "readable at startup: {:?}",
+            index.warnings()
+        );
+
+        let locked = dir.path().join("locked");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let outcome = watcher.poll(&mut index);
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|w| w.path == locked && w.message.contains("unreadable")),
+            "the locked directory is reported: {:?}",
+            outcome.warnings
+        );
+
+        // Readable again: the warning clears and the note comes back.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let outcome = watcher.poll(&mut index);
+        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+        assert_eq!(index.len(), 2, "the note is back in the index");
     }
 }

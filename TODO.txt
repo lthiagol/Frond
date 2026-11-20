@@ -7,12 +7,19 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  The audit's fix rounds are closed: the documentation (round S), the app
-  crate (units 17 and 18) and the vault crate (units 19 and 20). One small
-  unit remains — the two app-crate leftovers the audit rounds flagged —
-  and then the release.
+  The audit is done: the documentation (round S), the app crate (units 17,
+  18 and 21) and the vault crate (units 19 and 20). All four blocking
+  findings are fixed and the lows are closed or recorded. What is left is
+  the release and the parked list.
 
 DONE
+  - Unit 21 — the two app-crate leftovers: the quick switcher strips the
+    extension case-insensitively (through the vault's helper), and the
+    watch path reports a directory it cannot read. The warning has its own
+    slot: it clears when the condition ends, never replaces a newer real
+    error, and sits between the `.base` warnings and the info message.
+    Round 1 came back changes-needed (the warning had borrowed the
+    sticky error slot); the fix round was reviewed clean.
   - Unit 20 — the vault's index, frontmatter and walk: the `.md`/`.base`
     suffix stripping is case-insensitive everywhere (an `X.MD` note resolves
     from both the bare and the path-style link), the frontmatter block-list
@@ -154,14 +161,11 @@ HAPPENED
     rustup's default location.
 
 OPEN
-  - Unit 21: the two app-crate leftovers the audit rounds flagged.
-      `crates/app/src/quick.rs:103` still strips the extension
-      case-sensitively — it resolves anyway through the case-insensitive
-      `index.resolve`, so only the typed highlighting differs for an
-      `X.MD` note (unit 20, L1). And `crates/app/src/watch.rs:49` still
-      uses the warning-less `walk_vault`, so a directory locked after
-      startup is silent on the watch path — consistent with an unreadable
-      *file* there, so it is polish (unit 20, L2).
+  - The **startup** warnings never reach the user: the index records them
+      (`index.warnings()`) but the running app displays none of them, so
+      an unreadable file or directory found at startup is silent — the
+      mid-session case was fixed in unit 21, the startup case was not
+      (audit, unit 21, SPEC low 2).
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
       recommendation is to drop it: the sidebar's scroll is a selection
@@ -169,5 +173,5 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Unit 21 — the two app-crate leftovers.
-  2. Then push and cut 0.6.4 with the audit fixes.
+  1. Push `main`, then cut 0.6.4 with the audit fixes.
+  2. Then the parked list.

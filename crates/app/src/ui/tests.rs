@@ -479,6 +479,37 @@ fn status_message_is_neutral_and_error_wins() {
 }
 
 #[test]
+fn status_walk_warning_outranks_info_and_sits_after_the_real_error() {
+    let dir = name_vault();
+    let mut app = status_app(&dir, "solo.md");
+    app.set_status("theme: ocean");
+    app.walk_warning = Some("sub: unreadable directory".to_string());
+    let screen = render_at(&mut app, 110);
+    let row = status_row(&screen);
+    assert!(
+        row.contains("sub: unreadable directory"),
+        "warning shown: {row}"
+    );
+    assert!(
+        !row.contains("theme: ocean"),
+        "the warning outranks the info message: {row}"
+    );
+    assert!(!row.contains("Tab sidebar"), "hints hidden: {row}");
+
+    // The real error still owns the earlier slot; both are red, in order.
+    app.viewer.last_error = Some("not writing: changed on disk".to_string());
+    let screen = render_at(&mut app, 110);
+    let row = status_row(&screen);
+    let error_at = row
+        .find("not writing: changed on disk")
+        .expect("error shown");
+    let warning_at = row
+        .find("sub: unreadable directory")
+        .expect("warning shown");
+    assert!(error_at < warning_at, "real error first: {row}");
+}
+
+#[test]
 fn scroll_percent_reads_the_offset() {
     assert_eq!(scroll_percent(0, 100), 0, "top");
     assert_eq!(scroll_percent(50, 100), 50, "half way");

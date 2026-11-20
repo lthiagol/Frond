@@ -226,8 +226,15 @@ pub struct App {
     /// `baseview.rs`.
     pub base: Option<BaseState>,
     /// Transient info message for the status bar (`STATUS_MESSAGE_TTL`).
-    /// Shown only while `viewer.last_error` is `None`.
+    /// Shown only while no error-ish message (the real error, a `.base`
+    /// warning or the walk warning) outranks it.
     pub last_status: Option<StatusMessage>,
+    /// The watch walk's unreadable-directory warning, rendered on the
+    /// status bar after the real error and the `.base` warnings. It is
+    /// persistent state, not an event: it tracks the condition and clears
+    /// itself when the next walk reads cleanly, so it never replaces a
+    /// newer error the user still needs. `None` = every directory readable.
+    pub walk_warning: Option<String>,
     /// A clipboard copy requested by a click, waiting for the event loop
     /// to write its OSC 52 sequence to the terminal (kept out of the
     /// render buffer; see `main.rs`).
@@ -294,6 +301,7 @@ impl App {
             pending_theme_scan: None,
             base: None,
             last_status: None,
+            walk_warning: None,
             pending_clipboard: None,
         };
         app.refresh_tags();
@@ -1227,6 +1235,9 @@ impl App {
         let current_reloaded = self.viewer.last_reload != previous_reload;
 
         let mut vault_changed = false;
+        // `Some` only when a scan actually ran this tick: a poll between
+        // scans must not look like "no warnings" and clear the condition.
+        let mut walk_warnings = None;
         if let Some(index) = &self.index {
             if current_reloaded {
                 index.borrow_mut().reindex_one(&self.viewer.path);
@@ -1239,9 +1250,14 @@ impl App {
             {
                 self.last_vault_scan = Some(now);
                 if let Some(watcher) = &mut self.watcher {
-                    vault_changed |= !watcher.poll(&mut index.borrow_mut()).is_empty();
+                    let outcome = watcher.poll(&mut index.borrow_mut());
+                    vault_changed |= !outcome.changed.is_empty();
+                    walk_warnings = Some(outcome.warnings);
                 }
             }
+        }
+        if let Some(warnings) = walk_warnings {
+            self.surface_walk_warnings(&warnings);
         }
 
         if vault_changed {
@@ -1278,6 +1294,39 @@ impl App {
         }
         if self.backlinks_open {
             self.refresh_backlinks();
+        }
+    }
+
+    /// Records the watch walk's unreadable-directory warning for the status
+    /// bar. The startup path records the same condition as an
+    /// `IndexWarning` on the index, which the running app never shows;
+    /// mid-session the bar is the channel the user can actually see, and a
+    /// directory dropping out of the index must never be silent.
+    ///
+    /// This is state, not an event: an empty set clears the slot, and an
+    /// unchanged set leaves it untouched. It deliberately does not go into
+    /// `viewer.last_error` — a background condition must never replace a
+    /// newer error (a refused write, a failed open) that still needs the
+    /// user.
+    fn surface_walk_warnings(&mut self, warnings: &[vault::IndexWarning]) {
+        if warnings.is_empty() {
+            self.walk_warning = None;
+            return;
+        }
+        let root = self.index.as_ref().map(|i| i.borrow().root().to_path_buf());
+        let text = warnings
+            .iter()
+            .map(|w| {
+                let path = root
+                    .as_deref()
+                    .and_then(|root| w.path.strip_prefix(root).ok())
+                    .unwrap_or(w.path.as_path());
+                format!("{}: {}", path.display(), w.message)
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        if self.walk_warning.as_deref() != Some(text.as_str()) {
+            self.walk_warning = Some(text);
         }
     }
 

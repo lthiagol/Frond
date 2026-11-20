@@ -19,6 +19,7 @@
 
 use std::path::PathBuf;
 
+use vault::walk::strip_suffix_ignore_case;
 use vault::NoteMeta;
 
 use crate::ui::PopupChrome;
@@ -97,10 +98,11 @@ impl QuickCandidate {
     /// Builds a candidate from a path and its vault-relative label.
     ///
     /// `ext` is the extension to strip (`.md`, `.base`); the label keeps
-    /// it (it is what the user sees).
+    /// it (it is what the user sees). The suffix is stripped
+    /// case-insensitively, like the vault's resolver strips it, so an
+    /// `X.MD` note's haystacks match a `.md` note's.
     pub fn new(path: PathBuf, label: String, ext: &str) -> Self {
-        let target = label
-            .strip_suffix(ext)
+        let target = strip_suffix_ignore_case(&label, ext)
             .map(str::to_string)
             .unwrap_or_else(|| label.clone());
         let stem = target.rsplit('/').next().unwrap_or(&target).to_string();
@@ -336,15 +338,9 @@ mod tests {
     use super::*;
 
     fn candidate(path: &str, label: &str) -> QuickCandidate {
-        let stem = label.rsplit('/').next().unwrap_or(label);
-        let stem = stem.strip_suffix(".md").unwrap_or(stem);
-        let target = label.strip_suffix(".md").unwrap_or(label).to_string();
-        QuickCandidate {
-            path: PathBuf::from(path),
-            label: label.to_string(),
-            target,
-            stem: stem.to_string(),
-        }
+        // Go through the production constructor: a hand-built duplicate
+        // could disagree with it (it did, for an uppercase suffix).
+        QuickCandidate::new(PathBuf::from(path), label.to_string(), ".md")
     }
 
     #[test]
@@ -426,6 +422,32 @@ mod tests {
         assert_eq!(m.positions, vec![9, 10, 11, 12, 13]);
         let matched: String = m.positions.iter().map(|&p| label[p]).collect();
         assert_eq!(matched, "alpha");
+    }
+
+    /// The vault resolves `X.MD` exactly like `x.md`, so the switcher's
+    /// haystacks must agree: otherwise the note's extension is part of the
+    /// match target and the typed highlight lands on `.MD`.
+    #[test]
+    fn an_uppercase_md_suffix_is_stripped_like_a_lowercase_one() {
+        let lower = candidate("/v/notes/alpha.md", "notes/alpha.md");
+        let upper = candidate("/v/notes/ALPHA.MD", "notes/ALPHA.MD");
+        assert_eq!(lower.target, "notes/alpha");
+        assert_eq!(lower.stem, "alpha");
+        assert_eq!(upper.target, "notes/ALPHA", "the suffix is stripped");
+        assert_eq!(upper.stem, "ALPHA");
+        assert!(
+            score_candidate("d", &upper).is_none(),
+            "the suffix is not part of the match target"
+        );
+        assert!(
+            score_candidate("d", &lower).is_none(),
+            "a lowercase note never matched its suffix either"
+        );
+        assert_eq!(
+            score_candidate("alpha", &upper).expect("match").positions,
+            score_candidate("alpha", &lower).expect("match").positions,
+            "the same query highlights the same columns in both notes"
+        );
     }
 
     #[test]

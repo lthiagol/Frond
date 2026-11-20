@@ -260,6 +260,13 @@ own keys, and they take them instead of the app:
   config file's mtime is polled on the 1 s watcher tick; a changed `theme`
   key live-applies. `vault` path changes apply on the next launch; `watch`
   stays the `w`-key session toggle.
+- **Unreadable directories:** a directory the vault scan cannot read is
+  reported on the status bar — its notes are missing from the index, so
+  the reader is told — and the report stays for as long as the condition
+  lasts, clearing itself when the directory is readable again. It is a
+  background fact, so it never replaces a newer error the user still
+  needs (a refused write, a failed open), and it does not outlive the
+  condition.
 
 ## Status bar
 
