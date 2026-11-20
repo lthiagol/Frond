@@ -173,13 +173,19 @@ fn find_rename_separator(field: &str) -> Option<usize> {
 
 /// Joins a (possibly quoted, possibly escaped) repository-relative
 /// porcelain path onto the toplevel. Absolute paths pass through.
+///
+/// A porcelain path is repository-relative whatever its first character:
+/// a name starting with `~` is an ordinary file, not a home directory
+/// (git expands no paths in its output). Rejecting such a name dropped
+/// the entry, so a repository holding `~draft.md` reported clean and the
+/// guarded write's git precondition passed on a dirty tree.
 fn absolutize_path(toplevel: &Path, raw: &str) -> Option<PathBuf> {
     let unquoted = unquote_c(raw);
     let path = PathBuf::from(&unquoted);
     if path.is_absolute() {
         return Some(path);
     }
-    if unquoted.starts_with('~') || unquoted.is_empty() {
+    if unquoted.is_empty() {
         return None;
     }
     Some(toplevel.join(path))
@@ -363,6 +369,30 @@ mod tests {
         assert!(status
             .changed_files
             .contains(&dir.path().join("sub").join("c.md")));
+    }
+
+    #[test]
+    fn tilde_prefixed_paths_are_changed_files_not_dropped() {
+        // Porcelain paths are repository-relative: `~draft.md` is an
+        // ordinary file. Dropping it made a dirty tree report clean, so
+        // the status bar showed `✓` and the guarded write's git
+        // precondition (which refuses only when `clean` is false) passed.
+        let dir = TempDir::new("git-tilde");
+        init_repo(dir.path());
+        write(&dir.path().join("~kept.md"), "k\n");
+        commit_all(dir.path(), "initial");
+
+        write(&dir.path().join("~kept.md"), "changed\n"); // modified tracked
+        write(&dir.path().join("~draft.md"), "d\n"); // untracked
+
+        let status = read_status(dir.path()).expect("repo readable");
+        assert!(!status.clean, "a `~`-prefixed change is dirty");
+        assert_eq!(
+            status.changed_files,
+            BTreeSet::from([dir.path().join("~kept.md"), dir.path().join("~draft.md")]),
+            "both `~` paths are in changed_files: {:?}",
+            status.changed_files
+        );
     }
 
     #[test]
