@@ -89,11 +89,11 @@ impl SearchState {
 }
 
 /// Geometry of the search popup within the terminal `area`: the popup
-/// rectangle and how many hit rows it shows. Shared by the renderer
+/// rectangle and how many hit rows it shows. The renderer
 /// (`ui::draw_search`, which records the popup rect for the mouse
-/// handlers) and documented here so the click/wheel mapping in `app.rs`
-/// (which re-derives list rows from the stored popup rect) cannot drift
-/// from what was actually drawn.
+/// handlers) and the click mapper in `app.rs` both take their list rows
+/// from `ui::PopupList`, so what is drawn and what is clickable cannot
+/// drift apart.
 ///
 /// Input mode: a fixed 4-row popup (borders + prompt + footer). Results
 /// mode: one row per hit plus the footer, clamped to the terminal.

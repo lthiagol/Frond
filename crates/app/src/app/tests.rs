@@ -2699,6 +2699,53 @@ fn search_popup_border_footer_and_outside_clicks_do_nothing() {
     assert_eq!(app.viewer.path, file.path());
 }
 
+/// Overflowing results: 10 hits do not fit the three list rows of a 6-row
+/// popup, so the footer row maps to a real hit index that is *not on
+/// screen*. Clicking it must be a no-op, or a later Enter opens a row the
+/// reader never saw. (The other footer test uses 3 hits, where the list
+/// fits the popup and the misroute cannot happen.)
+#[test]
+fn footer_click_is_a_no_op_when_the_results_overflow_the_popup() {
+    let (_dir, _file, mut app) = search_state_app();
+    app.search.hits = (0..10)
+        .map(|i| vault::SearchHit {
+            path: format!("{i}.md").into(),
+            line: i,
+            text: "hit".into(),
+            start: 0,
+            end: 3,
+        })
+        .collect();
+    app.search.selected = 0;
+    let popup = Rect::new(30, 5, 70, 6); // 3 list rows: popup.y + 1..=+3
+    app.layout.search_area = Some(popup);
+
+    // A visible row selects that row's hit; the footer does nothing.
+    app.handle_click(40, popup.y + 3);
+    assert_eq!(app.search.selected, 2, "the last visible row is hit 2");
+    assert!(app.search.open, "a first click only selects");
+    app.handle_click(40, popup.y + 4); // footer row
+    assert_eq!(app.search.selected, 2, "the footer changes nothing");
+    assert!(app.search.open, "the footer does not open a hit");
+
+    // With the window scrolled to the bottom, the same holds and the
+    // window does not jump. (Selection 8 → anchor 6, so the footer row
+    // would map to hit 9 here — a hidden row, as above.)
+    app.search.selected = 8;
+    let list = crate::ui::PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len());
+    assert_eq!(list.start, 6, "precondition: the window is scrolled");
+    app.handle_click(40, list.first_row);
+    assert_eq!(app.search.selected, 6, "the top visible row is hit 6");
+    let before =
+        crate::ui::PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len()).start;
+    assert_eq!(before, 4);
+    app.handle_click(40, popup.y + 4); // footer row
+    assert_eq!(app.search.selected, 6, "footer click is still inert");
+    let after =
+        crate::ui::PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len()).start;
+    assert_eq!(after, before, "the list did not jump");
+}
+
 #[test]
 fn wheel_over_search_results_scrolls_the_selection_not_the_content() {
     let (_dir, file, mut app) = search_state_app();

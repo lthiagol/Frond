@@ -1315,6 +1315,49 @@ fn disambiguation_popup_scrolls_on_short_terminals() {
 }
 
 #[test]
+fn popup_list_geometry_maps_list_rows_and_rejects_chrome() {
+    // Search/disambiguation shape: no prompt row, a footer below the list.
+    let popup = Rect::new(10, 4, 70, 6); // rows 5..8 are inner; 3 list rows
+    let list = PopupList::new(popup, 0, 1, 2, 10);
+    assert_eq!(
+        (list.first_row, list.rows, list.start),
+        (5, 3, 0),
+        "the anchor starts at the first item while the selection fits"
+    );
+    assert_eq!(list.index_at(5), Some(0));
+    assert_eq!(list.index_at(7), Some(2));
+    assert_eq!(list.index_at(4), None, "top border");
+    assert_eq!(list.index_at(8), None, "footer row");
+    assert_eq!(list.index_at(9), None, "bottom border");
+    assert_eq!(
+        PopupList::new(popup, 0, 1, 2, 3).index_at(7),
+        Some(2),
+        "last real item"
+    );
+    assert_eq!(
+        PopupList::new(popup, 0, 1, 2, 3).index_at(6),
+        Some(1),
+        "items fill the window"
+    );
+
+    // Scrolled: the window ends at the selection.
+    let list = PopupList::new(popup, 0, 1, 9, 10);
+    assert_eq!(list.start, 7);
+    assert_eq!(list.index_at(5), Some(7));
+    assert_eq!(list.index_at(7), Some(9));
+
+    // Quick switcher shape: one prompt row above the list, a footer below.
+    let popup = Rect::new(10, 4, 70, 8); // 4 list rows (6..9), footer at 10
+    let list = PopupList::new(popup, 1, 1, 0, 2);
+    assert_eq!((list.first_row, list.rows), (6, 4));
+    assert_eq!(list.index_at(5), None, "prompt row");
+    assert_eq!(list.index_at(6), Some(0));
+    assert_eq!(list.index_at(7), Some(1));
+    assert_eq!(list.index_at(8), None, "past the last item");
+    assert_eq!(list.index_at(10), None, "footer row");
+}
+
+#[test]
 fn wikilink_line_renders_link_text() {
     let vault_dir = TempDir::new("ui-wikilink");
     std::fs::write(vault_dir.path().join("goal.md"), "goal body\n").unwrap();
