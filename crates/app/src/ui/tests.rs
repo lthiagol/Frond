@@ -1690,6 +1690,95 @@ fn link_hover_is_cleared_by_state_changes() {
     assert_eq!(app.viewer.hover_link, None, "capture off means no hover");
 }
 
+/// A scroll that moves the content drops the hover at once; a scroll that
+/// changes nothing keeps it; and the next frame re-evaluates a pointer that
+/// stayed still, so the highlight is always true of what is under it. A
+/// `.base` table covering the note clears it.
+#[test]
+fn link_hover_follows_scroll_and_a_base_table_clears_it() {
+    let vault_dir = TempDir::new("ui-link-hover-scroll");
+    std::fs::write(vault_dir.path().join("goal.md"), "goal body\n").unwrap();
+    std::fs::write(
+        vault_dir.path().join("board.base"),
+        "views:\n  - type: table\n    name: All\n    order:\n      - file.name\n",
+    )
+    .unwrap();
+    let body = "[[goal]]\n".repeat(120);
+    let file = ui_viewer("ui-link-hover-scroll.md", &body);
+    let mut app = app_with_index(&file, &vault_dir);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let (col, row) = link_cell(&app, "goal");
+    let hover = engine::default_markdown_theme().link_hover;
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    assert_eq!(app.viewer.hover_link, Some(0), "hover while over the link");
+
+    // A scroll that changes nothing (already at the top) keeps the hover.
+    app.viewer.scroll_up(1);
+    assert_eq!(app.viewer.hover_link, Some(0), "a no-op scroll keeps it");
+
+    // A scroll that moves the content under the pointer extinguishes it...
+    app.viewer.scroll_down(1);
+    assert_eq!(
+        app.viewer.hover_link, None,
+        "moving the content clears the hover"
+    );
+    // ...and the next frame recomputes it from the still pointer's cell.
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let expected = app
+        .viewer
+        .link_at(
+            app.viewer.scroll as usize + usize::from(row - app.layout.note_viewport.y),
+            usize::from(col - app.layout.note_viewport.x),
+        )
+        .expect("a link sits under the pointer after the scroll");
+    assert_eq!(
+        app.viewer.hover_link,
+        Some(expected),
+        "the frame re-evaluated the stationary pointer"
+    );
+    assert_eq!(
+        terminal.backend().buffer()[(col, row)].fg,
+        hover,
+        "the link now under the pointer is painted"
+    );
+
+    // A `.base` table covers the note: no link behind it may stay lit.
+    app.open_base_at(&vault_dir.path().join("board.base"), 0)
+        .unwrap();
+    assert_eq!(
+        app.viewer.hover_link, None,
+        "opening a .base table clears the hover"
+    );
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(
+        app.viewer.hover_link, None,
+        "the stationary pointer stays dark behind the table"
+    );
+}
+
+/// Closing a popup under a stationary pointer relights the link beneath it
+/// without waiting for a mouse move.
+#[test]
+fn a_stationary_pointer_is_re_evaluated_when_a_popup_closes() {
+    let (mut app, mut terminal, _file, _vault) = hover_app("ui-link-hover-popup");
+    let (col, row) = link_cell(&app, "goal");
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    assert_eq!(app.viewer.hover_link, Some(0));
+
+    app.viewer.help_open = true;
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(app.viewer.hover_link, None, "a popup clears the hover");
+
+    app.viewer.help_open = false;
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(
+        app.viewer.hover_link,
+        Some(0),
+        "the same pointer cell is re-evaluated on the next frame"
+    );
+}
+
 // --- M4: git segment, changed markers, search popup -----------------
 
 /// Commits everything in `dir` (fixture setup only; the app's own git
@@ -1809,6 +1898,78 @@ fn search_popup_renders_prompt_results_and_highlight() {
     app.search.hits.clear();
     let screen = render(&mut app);
     assert!(screen.contains("no matches"));
+}
+
+#[test]
+fn search_popup_runs_a_regex_query_and_highlights_the_match() {
+    let vault_dir = TempDir::new("ui-search-regex-run");
+    std::fs::write(
+        vault_dir.path().join("hay.md"),
+        "alpha 123\nBeta 456\ngamma\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-search-regex-run.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('s')));
+    for ch in "re:[a-z]+ \\d{3}".chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        app.search.mode,
+        crate::search::SearchMode::Results,
+        "a valid pattern searches"
+    );
+    assert_eq!(app.search.hits.len(), 2, "{:?}", app.search.hits);
+    assert_eq!(app.search.hits[0].line, 0);
+    assert_eq!(app.search.hits[1].line, 1);
+    assert_eq!(
+        &app.search.hits[1].text[app.search.hits[1].start..app.search.hits[1].end],
+        "Beta 456",
+        "the match offsets cover the shape, case-insensitively"
+    );
+    let screen = render(&mut app);
+    assert!(
+        screen.contains("2 hits"),
+        "hit count in the title: {screen}"
+    );
+    assert!(screen.contains("hay.md:1: "), "first hit row");
+    assert!(screen.contains("hay.md:2: "), "second hit row");
+}
+
+#[test]
+fn search_popup_reports_an_invalid_regex_and_keeps_the_query() {
+    let vault_dir = TempDir::new("ui-search-regex-bad");
+    std::fs::write(vault_dir.path().join("hay.md"), "needle\n").unwrap();
+    let file = ui_viewer("ui-search-regex-bad.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('s')));
+    for ch in "re:(".chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        app.search.mode,
+        crate::search::SearchMode::Input,
+        "nothing is searched, so the popup stays in the input mode"
+    );
+    assert_eq!(app.search.query, "re:(", "the query stays intact");
+    assert!(app.search.hits.is_empty(), "nothing was searched");
+    let screen = render(&mut app);
+    assert!(
+        screen.contains("invalid regex:"),
+        "the footer reports the invalid pattern: {screen}"
+    );
+    assert!(
+        screen.contains("unclosed group"),
+        "the footer names what is wrong: {screen}"
+    );
+    assert!(
+        screen.contains("/re:(▏"),
+        "the query is still in the prompt: {screen}"
+    );
 }
 
 #[test]
@@ -3830,6 +3991,54 @@ fn list_panel_scrollbars_highlight_their_thumbs_under_the_pointer() {
     assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
 }
 
+/// The tag list and the outline draw their bar through their own call
+/// sites (separate from the tree's, which the test above covers), so each
+/// one pins the hover itself.
+#[test]
+fn tag_list_scrollbar_thumb_highlights_under_the_pointer() {
+    let vault_dir = TempDir::new("ui-bar-hover-tags");
+    for i in 0..40 {
+        std::fs::write(
+            vault_dir.path().join(format!("n{i:02}.md")),
+            format!("---\ntags: [tag{i:02}]\n---\nbody\n"),
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-hover-tags.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('t')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Tags);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .sidebar_scrollbar_area
+        .expect("the tag list overflows and draws its bar");
+    assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
+}
+
+#[test]
+fn outline_scrollbar_thumb_highlights_under_the_pointer() {
+    let vault_dir = TempDir::new("ui-bar-hover-outline");
+    let mut body = String::new();
+    for i in 0..60 {
+        body.push_str(&format!("# Heading {i}\n\nbody\n\n"));
+    }
+    std::fs::write(vault_dir.path().join("long.md"), body).unwrap();
+    let file = ui_viewer("ui-bar-hover-outline.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_note(&vault_dir.path().join("long.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('o')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Outline);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .sidebar_scrollbar_area
+        .expect("the outline overflows and draws its bar");
+    assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
+}
+
 /// The help popup's bar highlights too.
 #[test]
 fn help_scrollbar_thumb_highlights_under_the_pointer() {
@@ -3870,6 +4079,10 @@ fn mouse_capture_off_clears_the_scrollbar_hover() {
     draw_with_pointer(&mut terminal, &mut app, Some((bar.x, bar.y)));
     let lit = thumb_cells(terminal.backend().buffer(), bar.x, bar.y..bar.bottom());
     assert!(
+        !lit.is_empty(),
+        "the fixture's bar draws a thumb (otherwise every `all` below is vacuous)"
+    );
+    assert!(
         lit.iter()
             .all(|(_, fg)| *fg == app.theme_ui.scrollbar_hover_fg),
         "the control tick: the pointer lights the thumb"
@@ -3885,6 +4098,10 @@ fn mouse_capture_off_clears_the_scrollbar_hover() {
     );
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let after = thumb_cells(terminal.backend().buffer(), bar.x, bar.y..bar.bottom());
+    assert!(
+        !after.is_empty(),
+        "the bar still draws a thumb with capture off"
+    );
     assert!(
         after
             .iter()

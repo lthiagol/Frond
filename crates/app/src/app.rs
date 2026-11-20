@@ -16,7 +16,7 @@ use crate::config::ConfigWatch;
 use crate::links::{LinkState, RenderedLink};
 use crate::nav::Nav;
 use crate::outline::Outline;
-use crate::search::{SearchMode, SearchState};
+use crate::search::{SearchMode, SearchQuery, SearchState};
 use crate::sidebar::{NodeKind, Sidebar};
 use crate::tags::TagList;
 use crate::theme::{Theme, ThemeChoices, ThemeRotation};
@@ -1026,11 +1026,23 @@ impl App {
         self.sync_link_hover();
     }
 
+    /// Maps a screen cell to the note's rendered `(line, column)`. One
+    /// home for the hover lookup and the click hit-test: the hover names
+    /// the link a click would open, so the two mappings must never drift.
+    fn note_cell_at(&self, col: u16, row: u16) -> Option<(usize, usize)> {
+        let area = self.layout.note_viewport;
+        if !point_in_rect(col, row, area) {
+            return None;
+        }
+        let line = self.viewer.scroll as usize + usize::from(row - area.y);
+        let col = usize::from(col - area.x);
+        Some((line, col))
+    }
+
     /// The link under the pointer, mapped through the last frame's note
-    /// viewport and the viewer's scroll: the screen cell's row offset is a
-    /// rendered line, its column offset a display column. `None` outside
-    /// the note pane, while a popup owns the pointer, while a `.base` table
-    /// covers the note, and while mouse capture is off.
+    /// viewport and the viewer's scroll. `None` outside the note pane,
+    /// while a popup owns the pointer, while a `.base` table covers the
+    /// note, and while mouse capture is off.
     fn hovered_link_at_pointer(&self) -> Option<usize> {
         if !self.mouse_capture || self.base.is_some() {
             return None;
@@ -1039,19 +1051,16 @@ impl App {
             return None;
         }
         let pointer = self.pointer?;
-        let area = self.layout.note_viewport;
-        if !point_in_rect(pointer.x, pointer.y, area) {
-            return None;
-        }
-        let line = self.viewer.scroll as usize + usize::from(pointer.y - area.y);
-        let col = usize::from(pointer.x - area.x);
+        let (line, col) = self.note_cell_at(pointer.x, pointer.y)?;
         self.viewer.link_at(line, col)
     }
 
     /// Pushes the link under the pointer into the viewer, which restyles
-    /// only when the hovered link changes. A pointer that stays over one
-    /// link therefore costs no re-render.
-    fn sync_link_hover(&mut self) {
+    /// only when the hovered link changes. Called on every pointer event
+    /// and again from each frame draw, so a pointer that stays still is
+    /// still true of what is under it after the state around it moves (a
+    /// scroll, a popup closing).
+    pub(crate) fn sync_link_hover(&mut self) {
         let hovered = self.hovered_link_at_pointer();
         self.viewer.set_hover_link(hovered);
     }
@@ -1253,15 +1262,10 @@ impl App {
             self.focus = Focus::Content;
             return;
         }
-        let area = self.layout.note_viewport;
-        // Right edge included: the scrollbar column sits just past the
-        // text rect and must never reach the link/checkbox hit-test.
-        if !point_in_rect(col, row, area) {
+        let Some((line, col)) = self.note_cell_at(col, row) else {
             return;
-        }
+        };
         self.focus = Focus::Content;
-        let line = self.viewer.scroll as usize + (row - area.y) as usize;
-        let col = (col - area.x) as usize;
         // Checkboxes first: the glyph is not a link region, but a task
         // line can also contain links — the glyph columns are matched
         // before the link regions so the click target is unambiguous.
@@ -2071,16 +2075,22 @@ impl App {
                 KeyCode::Enter if plain => {
                     let index = self.index.clone();
                     self.search.run(|query| match &index {
-                        Some(index) => index.borrow().search(query),
-                        None => SearchResults::default(),
+                        Some(index) => match query {
+                            SearchQuery::Literal(text) => Ok(index.borrow().search(text)),
+                            SearchQuery::Regex(pattern) => index
+                                .borrow()
+                                .search_regex(pattern)
+                                .map_err(|err| regex_error_line(&err.to_string())),
+                        },
+                        None => Ok(SearchResults::default()),
                     });
                 }
                 KeyCode::Backspace if plain => {
-                    self.search.query.pop();
+                    self.search.backspace();
                 }
                 KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => return Flow::Quit,
                 KeyCode::Esc => self.search.close(),
-                KeyCode::Char(c) if plain => self.search.query.push(c),
+                KeyCode::Char(c) if plain => self.search.push_char(c),
                 _ => {}
             },
             SearchMode::Results => match key.code {
@@ -2098,7 +2108,7 @@ impl App {
                 // Any typed character refines the query in place.
                 KeyCode::Char(c) if plain => {
                     self.search.mode = SearchMode::Input;
-                    self.search.query.push(c);
+                    self.search.push_char(c);
                 }
                 _ => {}
             },
@@ -2463,6 +2473,20 @@ fn bar_value_at(area: Rect, row: u16, max: usize) -> usize {
 /// `None` when the list is empty (there is no row to select).
 fn bar_list_index(area: Rect, row: u16, len: usize) -> Option<usize> {
     Some(bar_value_at(area, row, len.checked_sub(1)?))
+}
+
+/// One footer line for a regular-expression compile error. The engine's
+/// detailed diagnostic is multi-line; its last non-empty line names the
+/// problem, which is what the popup's single footer row has room for.
+fn regex_error_line(message: &str) -> String {
+    let detail = message
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or(message)
+        .trim();
+    let detail = detail.strip_prefix("error: ").unwrap_or(detail);
+    format!("invalid regex: {detail}")
 }
 
 /// Is `(col, row)` inside `area`?

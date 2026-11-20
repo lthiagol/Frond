@@ -20,6 +20,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 - The link under the mouse is highlighted in the theme's `link_hover`
   colour, so you can see which link you are about to open. The link focus
   does not move, and clicking the link still opens it.
+- The global search popup takes a regular expression: a query that starts
+  with `re:` is matched as one (case-insensitively, line by line), so a
+  query can match a shape and not only a literal string. An invalid
+  pattern is reported in the popup and searches nothing.
 
 ### Fixed
 

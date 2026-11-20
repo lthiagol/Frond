@@ -233,6 +233,15 @@ own keys, and they take them instead of the app:
   the selection, `Enter` opens the selected hit's line, and any typed
   character returns to the query and refines it. `Esc` closes; `Ctrl+C`
   quits.
+  The query is a **regular expression** when it starts with `re:`; the
+  prefix is stripped and the rest is matched as a regular expression,
+  case-insensitively, line by line. A query without the prefix is the
+  case-insensitive substring search. An invalid regular expression is
+  reported in the popup (the footer says what is wrong); nothing is
+  searched and the popup stays in the query line with the query intact.
+  The matches are highlighted in the results exactly as the substring
+  matches are. An empty pattern (a bare `re:`) searches nothing: the
+  popup shows its results list with no matches.
 - **Quick switcher (`Ctrl+P`)** — a query line over the vault's notes:
   `Enter` opens the selected note, `Backspace` edits the query, `j`/`k`
   (or the arrows) and PgUp/PgDn move the selection, any typed character

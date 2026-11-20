@@ -14,3 +14,4 @@ license = "MIT"
 [workspace.dependencies]
 ratatui = "0.30"
 crossterm = "0.29"
+regex = "1.13"
