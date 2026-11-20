@@ -560,4 +560,8 @@ All four are shipped. The work after them (each documented in its own
 section above): the guarded checkbox write, the `.base` table views, the
 theme groups, the note margin, the status-bar icon sets, the quick
 switcher, the session memory, and — in 0.6.2 — the scrollbar geometry and
-symbols, and the scroll position in the status bar.
+symbols, and the scroll position in the status bar. In 0.6.5: the
+selection bar (every list panel), the interactive scrollbars (the note
+pane and the list panels) with the thumb's hover highlight, the link
+hover, the regular-expression search with its match-next, the
+line-number gutter, and the vault index's startup warnings.
