@@ -141,6 +141,55 @@ fn line_numbers_gutter_width_follows_the_last_line_number() {
     assert_eq!(buffer[(1, 0)].symbol(), "1");
 }
 
+/// The gutter keeps numbering every rendered row, not just the first: a
+/// regression that stopped after row 0 would leave the rest blank.
+#[test]
+fn line_numbers_gutter_numbers_rows_after_the_first() {
+    let file = ui_viewer("ui-gutter-rows.md", "- alpha\n- beta\n- gamma\n- delta\n");
+    let mut app = app_for(&file, None);
+    app.note_margin = 0;
+    app.note_margin_y = 0;
+    app.line_numbers = true;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    // The four items are source lines 1..4, one rendered row each.
+    assert_eq!(buffer[(0, 0)].symbol(), "1", "first item numbered");
+    assert_eq!(buffer[(0, 1)].symbol(), "2", "second item numbered");
+    assert_eq!(buffer[(0, 2)].symbol(), "3", "third item numbered");
+    assert_eq!(buffer[(0, 3)].symbol(), "4", "fourth item numbered");
+}
+
+/// A pane too narrow for the line count clamps the number to the gutter:
+/// its leading digits must not land in the margin one column left.
+#[test]
+fn line_numbers_truncate_the_number_to_the_gutter_width() {
+    let items: String = (1..=10).map(|i| format!("- item{i}\n")).collect();
+    let file = ui_viewer("ui-gutter-narrow.md", &items);
+    let mut app = app_for(&file, None);
+    // Content is 7 columns: three per margin leaves one for the gutter,
+    // while the last source line (10) needs two digits.
+    app.note_margin = 3;
+    app.note_margin_y = 0;
+    app.line_numbers = true;
+    let mut terminal = Terminal::new(TestBackend::new(7, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let gutter_x = app.note_margin;
+    // The tenth item is source line 10: two digits, one gutter cell.
+    let row = 9;
+    assert_eq!(
+        buffer[(gutter_x - 1, row)].symbol(),
+        " ",
+        "the margin column stays blank"
+    );
+    assert_eq!(
+        buffer[(gutter_x, row)].symbol(),
+        "0",
+        "the least significant digit stays inside the gutter"
+    );
+}
+
 /// With the key off, the note pane is exactly the pre-gutter layout: no
 /// gutter column, full-width text.
 #[test]
@@ -624,6 +673,49 @@ fn status_walk_warning_outranks_info_and_sits_after_the_real_error() {
         .find("sub: unreadable directory")
         .expect("warning shown");
     assert!(error_at < warning_at, "real error first: {row}");
+}
+
+/// The status bar carries the startup warning from the first frame, with
+/// the path relative to the vault root.
+#[test]
+fn status_bar_shows_the_startup_warning_vault_relative() {
+    let dir = TempDir::new("ui-startup-warning");
+    std::fs::write(dir.path().join("solo.md"), "# S\n").unwrap();
+    std::fs::create_dir_all(dir.path().join("locked")).unwrap();
+    std::fs::write(dir.path().join("locked").join("hidden.md"), "h\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            dir.path().join("locked"),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+    }
+    let viewer = Viewer::open(&dir.path().join("solo.md"), 80).unwrap();
+    let index = std::rc::Rc::new(std::cell::RefCell::new(
+        VaultIndex::build(dir.path()).unwrap(),
+    ));
+    let mut app = App::new(viewer, Some(dir.path().to_path_buf()), Some(index)).unwrap();
+    let screen = render_at(&mut app, 110);
+    let row = status_row(&screen);
+    assert!(
+        row.contains("locked: unreadable"),
+        "the startup warning is on the bar: {row}"
+    );
+    assert!(
+        !row.contains(&dir.path().display().to_string()),
+        "the path is vault-relative: {row}"
+    );
+
+    // Restore so the fixture's TempDir can clean up.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            dir.path().join("locked"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+    }
 }
 
 #[test]

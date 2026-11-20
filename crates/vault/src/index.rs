@@ -7,7 +7,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::frontmatter::{parse_frontmatter_with_raw, split_frontmatter};
-use crate::walk::{is_base_path, is_indexable, strip_suffix_ignore_case, walk_vault_with_warnings};
+use crate::walk::{
+    is_base_path, is_indexable, strip_suffix_ignore_case, walk_vault_with_warnings,
+    UNREADABLE_PREFIX,
+};
 use crate::wikilink::{extract_wikilinks, LinkRef};
 
 /// One raw-text match of a global vault search ([`VaultIndex::search`]).
@@ -198,6 +201,16 @@ pub struct IndexWarning {
     pub message: String,
 }
 
+impl IndexWarning {
+    /// True when the path itself could not be read (a file or a directory
+    /// the walk or the index could not open), as opposed to a frontmatter
+    /// diagnostic about a note that was indexed. The app's startup report
+    /// is about notes that are missing, so it filters with this.
+    pub fn is_unreadable(&self) -> bool {
+        self.message.starts_with(UNREADABLE_PREFIX)
+    }
+}
+
 /// Result of resolving a wikilink target against the index.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Resolution {
@@ -282,7 +295,7 @@ impl VaultIndex {
                 Ok(source) => index.insert_note(&entry.path, &source),
                 Err(err) => index.warnings.push(IndexWarning {
                     path: entry.path,
-                    message: format!("unreadable: {err}"),
+                    message: format!("{UNREADABLE_PREFIX}{err}"),
                 }),
             }
         }
@@ -688,7 +701,7 @@ impl VaultIndex {
                     self.warnings.retain(|w| w.path != path);
                     self.warnings.push(IndexWarning {
                         path: path.to_path_buf(),
-                        message: format!("unreadable: {err}"),
+                        message: format!("{UNREADABLE_PREFIX}{err}"),
                     });
                 }
                 dirty

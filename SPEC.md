@@ -360,6 +360,12 @@ own keys, and they take them instead of the app:
   background fact, so it never replaces a newer error the user still
   needs (a refused write, a failed open), and it does not outlive the
   condition.
+  The **startup** walk reports the same way: the warnings the index
+  records while it builds (an unreadable file or directory) are surfaced
+  in the same slot, with the paths relative to the vault root. A note
+  that was skipped is a note the reader cannot find, so it is never
+  silent — the same condition reported twice (once at startup, once by a
+  later walk) is one message, not two.
 
 ## Status bar
 

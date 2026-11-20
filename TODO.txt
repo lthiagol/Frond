@@ -7,20 +7,20 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 30 is in flight: the note pane gets an optional line-number gutter
-  (the config key `line_numbers`, default off) - the parked list's
-  line-number gutter. The unit also closes the finding unit 29's review
-  left behind (the bare `re:` test's comment describes clearing the active
-  search where the code replaces it, and its assertion pins neither).
+  Unit 32 is in flight: the 0.6.5 release cut. This cycle landed the
+  selection bar, the interactive scrollbars, the scrollbar hover, the
+  link hover, the regex search, the match-next, the line-number gutter
+  and the startup warnings - the release carries them.
 
-  The spec lines are written (SPEC.md, section Layout, and the config
-  keys), with the changelog's Unreleased section. The builder's brief is
-  at `/tmp/opencode/frond/unit-30-kickoff.md` (plus three more files).
+  The builder's brief is at `/tmp/opencode/frond/unit-32-kickoff.md` (plus
+  one more file).
 
-  Before this unit: unit 29 (the last search stays active, `n`/`N` walk
-  it in the note) is committed. Round 1 was clean on both axes (0
-  blocking, 2 low); the merged findings are at
-  `/tmp/opencode/frond/review7/round1-findings.md`.
+  Before this unit: unit 31 (the startup warnings reach the user) is
+  committed. Round 1 came back changes-needed (a healed file's warning
+  cleared while the note stayed out of the index); the delta review was
+  clean. The merged findings are at
+  `/tmp/opencode/frond/review9/round1-findings.md` and
+  `/tmp/opencode/frond/review9/round2-findings.md`.
 
   Before that: unit 23 (the selection bar) is committed - the selected
   row of every list panel is one full-width bar, and its text is painted in
@@ -39,6 +39,32 @@ WHERE WE ARE
   commit, and the gate was run by the orchestrator, never taken on trust.
 
 DONE
+  - Unit 31 — the startup warnings reach the user: the warnings the index
+    records while it walks the vault at startup (an unreadable file or
+    directory) are surfaced in the status bar through the walk warnings'
+    sticky slot, vault-relative and deduplicated. A file that reads again
+    is reindexed before its warning goes, so the note comes back with it.
+  - Unit 30 — the note pane can show a line-number gutter (the config key
+    `line_numbers`, default off): the source line numbers, an empty cell on
+    a wrapped continuation, the markdown theme's `code_gutter` colour, and
+    a text area that is that much narrower.
+  - Unit 29 — the last search stays active: `n` and `N` in the note pane
+    walk its occurrences in the open note (in the source text, the way the
+    search finds them), wrapping at both ends.
+  - Unit 28 — the search popup takes a regular expression (`re:`), with
+    the `regex` crate in the vault crate; an invalid pattern is reported
+    in the popup and searches nothing.
+  - Unit 27 — the link under the mouse is highlighted in the markdown
+    theme's `link_hover` colour; the focus does not move and the click
+    still opens it.
+  - Unit 26 — a scrollbar's thumb highlights under the mouse, in the
+    theme's accent (the new theme role `scrollbar_hover_fg`).
+  - Unit 25 — the list panels' scrollbars position their selection (the
+    sidebar's scroll is a selection cursor, not a document position); a
+    press on the bar is not a row click any more.
+  - Unit 24 — the note pane's scrollbar is a position control: a press
+    jumps the note, a drag follows the pointer, and the drag's release is
+    not a click.
   - Unit 23 — the selection bar: the selected row of every list panel (the
     sidebar tree, the outline, the tag view, the backlinks panel, and the
     search, quick-switch and disambiguation popups) is one full-width bar —
@@ -130,11 +156,6 @@ HAPPENED
     their own lenses; the enumeration is part of the rule.
 
 OPEN
-  - The **startup** warnings never reach the user: the index records them
-      (`index.warnings()`) but the running app displays none of them, so
-      an unreadable file or directory found at startup is silent — the
-      mid-session case was fixed in unit 21, the startup case was not
-      (audit, unit 21, SPEC low 2).
   - From unit 23's review (both lows, carried): the search popup's
       `snippet_line` (`crates/app/src/search.rs`) can overshoot its width
       budget by a cell with wide characters, so a selected row's bar misses
@@ -145,6 +166,13 @@ OPEN
   - From unit 25's review (one low, carried): `crates/app/src/tags.rs`
       carries the same doc comment twice ("Does this row carry the
       selection?") — a one-line cleanup, pre-existing.
+  - From unit 31's review (three lows, carried): the index classifies an
+      unreadable path by the message prefix `unreadable: ` (a `kind` field
+      would make it structural); a directory's warning clears when the
+      whole walk fails (the inherited unit 21 semantics); a file that
+      becomes unreadable mid-session is recorded by `reindex_one` but
+      never surfaced, while the spec's never-silent sentence is scoped to
+      the startup walk.
   - Parked: an interactive scrollbar (click to jump, drag — TODO.md §5.8),
       a link hover preview, regex + match-next in the search popup, a
       line-number gutter. And a scroll position for the sidebar tree — the
