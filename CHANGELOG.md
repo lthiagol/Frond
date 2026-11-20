@@ -24,6 +24,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   with `re:` is matched as one (case-insensitively, line by line), so a
   query can match a shape and not only a literal string. An invalid
   pattern is reported in the popup and searches nothing.
+- The last search stays active: `n` and `N` in the note pane move to the
+  next and the previous occurrence of it in the open note, so you can walk
+  through the hits of a note you just opened.
 
 ### Fixed
 

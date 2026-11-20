@@ -1197,6 +1197,7 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<
     let popup = app.layout.search_area.unwrap_or_else(|| {
         crate::search::popup_geometry(area, app.search.mode, app.search.hits.len())
     });
+    let inner_width = popup.width.saturating_sub(2) as usize;
     let footer = match app.search.error.as_deref() {
         Some(error) => error.to_string(),
         None => match app.search.mode {
@@ -1204,7 +1205,9 @@ fn draw_search(f: &mut Frame, area: Rect, app: &App, ui: UiTheme, index: Option<
             SearchMode::Results => "j/k move · Enter open · Esc close".to_string(),
         },
     };
-    let inner_width = popup.width.saturating_sub(2) as usize;
+    // A long regex diagnostic is one line: clamp it to the popup's inner
+    // width instead of letting the border cut it mid-word.
+    let footer = truncate_ellipsis(&footer, inner_width);
 
     let mut lines: Vec<Line<'static>> = match app.search.mode {
         SearchMode::Input => {
@@ -1611,6 +1614,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
             ),
             ("b", "toggle backlinks panel"),
             ("s / Ctrl+P", "global search · quick note switcher"),
+            ("n / N", "next/previous search match (note pane)"),
             ("Backspace / Ctrl+O", "back / forward (scroll restored)"),
         ],
     ),

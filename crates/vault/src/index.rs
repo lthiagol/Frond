@@ -43,6 +43,94 @@ pub struct SearchResults {
     pub capped: bool,
 }
 
+/// A compiled search rule: the case-insensitive literal substring or the
+/// case-insensitive regular expression, matched one line at a time.
+///
+/// [`VaultIndex::search`], [`VaultIndex::search_regex`] and the app's
+/// in-note `n`/`N` all scan through this type, so a query finds the same
+/// lines in one note as it does across the vault.
+#[derive(Clone, Debug)]
+pub enum SearchPattern {
+    /// A blank query (a bare `re:` included) searches nothing.
+    Empty,
+    /// A lowercased literal needle, plus whether it is all ASCII (the
+    /// per-line scan's fast path).
+    Literal { needle: String, ascii: bool },
+    /// A compiled case-insensitive regular expression.
+    Regex(regex::Regex),
+}
+
+impl SearchPattern {
+    /// The literal query's rule. An empty query matches nothing, like the
+    /// search's blank-query rule (and unlike an empty regular expression,
+    /// which would match every line).
+    pub fn literal(query: &str) -> Self {
+        let needle = query.to_lowercase();
+        if needle.is_empty() {
+            return Self::Empty;
+        }
+        let ascii = needle.is_ascii();
+        Self::Literal { needle, ascii }
+    }
+
+    /// The regular-expression query's rule: compiled case-insensitively.
+    /// An empty pattern matches nothing — the search's bare-`re:` rule.
+    pub fn regex(pattern: &str) -> Result<Self, regex::Error> {
+        if pattern.is_empty() {
+            return Ok(Self::Empty);
+        }
+        Ok(Self::Regex(
+            regex::RegexBuilder::new(pattern)
+                .case_insensitive(true)
+                .build()?,
+        ))
+    }
+
+    /// `true` when the pattern can never match (a blank query).
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    /// The 0-based indices of the lines of `text` the pattern matches, in
+    /// line order. `text.lines()` is the split the vault scan uses for a
+    /// note's raw text, so the indices are the note's source lines.
+    pub fn matching_lines(&self, text: &str) -> Vec<usize> {
+        let mut scratch = String::new();
+        text.lines()
+            .enumerate()
+            .filter(|(_, line)| self.find_in(line, &mut scratch).is_some())
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    /// The first match on `line`, as byte offsets in it (snapped to char
+    /// boundaries — case folding can shift them), or `None`. `scratch` is a
+    /// reusable buffer for the ASCII path; the caller owns it so a
+    /// vault-wide scan allocates nothing per line.
+    fn find_in(&self, line: &str, scratch: &mut String) -> Option<(usize, usize)> {
+        match self {
+            Self::Empty => None,
+            Self::Regex(regex) => regex.find(line).map(|found| (found.start(), found.end())),
+            Self::Literal { needle, ascii } => {
+                if *ascii && line.is_ascii() {
+                    scratch.clear();
+                    scratch.push_str(line);
+                    scratch.make_ascii_lowercase();
+                    let pos = scratch.find(needle.as_str())?;
+                    Some((pos, pos + needle.len()))
+                } else {
+                    let folded = line.to_lowercase();
+                    let pos = folded.find(needle.as_str())?;
+                    Some((
+                        floor_char_boundary(line, pos),
+                        ceil_char_boundary(line, pos + needle.len()),
+                    ))
+                }
+            }
+        }
+    }
+}
+
 /// Case-insensitive `ends_with` (ASCII folding, matching the
 /// `eq_ignore_ascii_case` semantics used elsewhere here).
 fn ends_with_ci(haystack: &str, needle: &str) -> bool {
@@ -307,12 +395,12 @@ impl VaultIndex {
     /// many matches is *not* reported as capped), and
     /// [`SearchResults::capped`] tells the caller to display "N+".
     pub fn search(&self, query: &str) -> SearchResults {
-        let needle = query.to_lowercase();
-        if needle.is_empty() {
+        let pattern = SearchPattern::literal(query);
+        let SearchPattern::Literal { needle, ascii } = &pattern else {
             return SearchResults::default();
-        }
+        };
         let mut hits: Vec<SearchHit> = Vec::new();
-        let ascii_needle = needle.is_ascii();
+        let ascii_needle = *ascii;
         // A needle with a line break could match across lines in a whole-note
         // scan, which the per-line search never does: keep those per-line.
         let whole_note = ascii_needle && !needle.contains(['\n', '\r']);
@@ -324,7 +412,7 @@ impl VaultIndex {
                 // line so there is one hit per matching line.
                 let mut from = 0;
                 let (mut counted, mut line_idx) = (0, 0);
-                while let Some(rel) = folded[from..].find(&needle) {
+                while let Some(rel) = folded[from..].find(needle.as_str()) {
                     let pos = from + rel;
                     let line_start = folded[..pos].rfind('\n').map_or(0, |i| i + 1);
                     let line_end = folded[pos..].find('\n').map_or(folded.len(), |i| pos + i);
@@ -358,30 +446,13 @@ impl VaultIndex {
                 continue;
             }
             for (index, line) in raw.text.lines().enumerate() {
-                // Per-line path. An all-ASCII line and needle fold bytewise
-                // into one reused buffer (no allocation per line); any
-                // non-ASCII line takes the Unicode path (it can match an
-                // ASCII needle through folding, e.g. the Kelvin sign).
-                let (start, end) = if ascii_needle && line.is_ascii() {
-                    ascii_buf.clear();
-                    ascii_buf.push_str(line);
-                    ascii_buf.make_ascii_lowercase();
-                    let Some(pos) = ascii_buf.find(&needle) else {
-                        continue;
-                    };
-                    (pos, pos + needle.len())
-                } else {
-                    // Offsets come from the folded string; case folding
-                    // can change byte lengths (e.g. `İ`), so the range is
-                    // snapped to char boundaries of the original line.
-                    let folded = line.to_lowercase();
-                    let Some(pos) = folded.find(&needle) else {
-                        continue;
-                    };
-                    (
-                        floor_char_boundary(line, pos),
-                        ceil_char_boundary(line, pos + needle.len()),
-                    )
+                // The per-line path is the shared rule (`find_in`): an
+                // all-ASCII line and needle fold bytewise into one reused
+                // buffer (no allocation per line); any non-ASCII line takes
+                // the Unicode path (it can match an ASCII needle through
+                // folding, e.g. the Kelvin sign).
+                let Some((start, end)) = pattern.find_in(line, &mut ascii_buf) else {
+                    continue;
                 };
                 let hit = SearchHit {
                     path: path.clone(),
@@ -405,26 +476,23 @@ impl VaultIndex {
     /// lines as [`Self::search`], matched line by line: one hit per
     /// matching line (the first match on it), in path order then line
     /// order, with the same cap and [`SearchHit`] offsets. An invalid
-    /// pattern is returned as an error and nothing is scanned.
+    /// pattern is returned as an error and nothing is scanned; an empty one
+    /// searches nothing.
     pub fn search_regex(&self, pattern: &str) -> Result<SearchResults, regex::Error> {
-        if pattern.is_empty() {
-            return Ok(SearchResults::default());
-        }
-        let regex = regex::RegexBuilder::new(pattern)
-            .case_insensitive(true)
-            .build()?;
+        let pattern = SearchPattern::regex(pattern)?;
+        let mut scratch = String::new();
         let mut hits = Vec::new();
         for (path, raw) in &self.raw_lines {
             for (index, line) in raw.text.lines().enumerate() {
-                let Some(found) = regex.find(line) else {
+                let Some((start, end)) = pattern.find_in(line, &mut scratch) else {
                     continue;
                 };
                 let hit = SearchHit {
                     path: path.clone(),
                     line: index,
                     text: line.to_string(),
-                    start: found.start(),
-                    end: found.end(),
+                    start,
+                    end,
                 };
                 if push_hit(&mut hits, hit) {
                     return Ok(SearchResults { hits, capped: true });
@@ -885,6 +953,45 @@ mod tests {
         assert_eq!(hits[1].text, "has Needle here");
         // Byte range covers the match inside the raw line.
         assert_eq!(&hits[1].text[hits[1].start..hits[1].end], "Needle");
+    }
+
+    /// The one-note scan behind the app's `n`/`N` finds exactly the lines
+    /// the vault-wide search reports for that note — the same rule, not a
+    /// second copy of it.
+    #[test]
+    fn search_pattern_finds_the_lines_the_vault_search_reports() {
+        let vault = TempDir::new("vk-search-pattern");
+        let text = "---\nstatus: active\n---\nNeedle one\nplain\nneedle two\n";
+        write(&vault.path().join("a.md"), text);
+        let index = VaultIndex::build(vault.path()).unwrap();
+
+        let literal = SearchPattern::literal("needle");
+        let searched: Vec<usize> = index.search("needle").hits.iter().map(|h| h.line).collect();
+        assert_eq!(searched, vec![3, 5]);
+        assert_eq!(literal.matching_lines(text), searched);
+        assert_eq!(
+            SearchPattern::literal("NEEDLE").matching_lines(text),
+            searched,
+            "case-insensitive, like the search"
+        );
+
+        let regex = SearchPattern::regex(r"needle \w+").unwrap();
+        let searched: Vec<usize> = index
+            .search_regex(r"needle \w+")
+            .unwrap()
+            .hits
+            .iter()
+            .map(|h| h.line)
+            .collect();
+        assert_eq!(&searched, &[3, 5]);
+        assert_eq!(regex.matching_lines(text), searched);
+
+        // A blank query and a bare `re:` search nothing, like the popup.
+        assert!(SearchPattern::literal("").matching_lines(text).is_empty());
+        assert!(SearchPattern::regex("")
+            .unwrap()
+            .matching_lines(text)
+            .is_empty());
     }
 
     #[test]

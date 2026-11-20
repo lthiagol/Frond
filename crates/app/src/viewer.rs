@@ -595,13 +595,23 @@ impl Viewer {
     /// (e.g. a trailing raw line that renders to nothing) scroll to the
     /// bottom.
     pub fn scroll_to_source_line(&mut self, raw_line: usize) {
+        let target = self.scroll_target_for_source_line(raw_line);
+        self.set_scroll(target);
+    }
+
+    /// Where [`Self::scroll_to_source_line`] would land for `raw_line`
+    /// (0-based), clamped to the scroll range — the single home of that
+    /// mapping, so `n`/`N` can compare an occurrence's landing spot with
+    /// the current scroll before moving. Two context lines sit above the
+    /// target; a target past the end lands at the bottom.
+    pub fn scroll_target_for_source_line(&self, raw_line: usize) -> u32 {
         let target = raw_line.saturating_add(1); // engine map is 1-based
         let rendered = self
             .source_line_map
             .iter()
             .position(|&src| src >= target)
             .unwrap_or(self.lines.len().saturating_sub(1));
-        self.set_scroll(rendered.saturating_sub(2) as u32);
+        (rendered.saturating_sub(2) as u32).min(self.max_scroll())
     }
 
     /// Re-reads and re-parses the file, preserving the scroll position

@@ -16,7 +16,7 @@ use crate::config::ConfigWatch;
 use crate::links::{LinkState, RenderedLink};
 use crate::nav::Nav;
 use crate::outline::Outline;
-use crate::search::{SearchMode, SearchQuery, SearchState};
+use crate::search::{ActiveSearch, SearchMode, SearchQuery, SearchState};
 use crate::sidebar::{NodeKind, Sidebar};
 use crate::tags::TagList;
 use crate::theme::{Theme, ThemeChoices, ThemeRotation};
@@ -179,6 +179,10 @@ pub struct App {
     pub disambiguation: Option<Disambiguation>,
     /// Global search popup (`s`): input prompt + results.
     pub search: SearchState,
+    /// The last search the popup executed: `n`/`N` walk its occurrences in
+    /// the open note. Each executed search replaces it; a query that never
+    /// ran (blank, invalid pattern) keeps the previous one.
+    pub active_search: Option<ActiveSearch>,
     /// Quick note switcher (`Ctrl+P`): fuzzy note jump over the index.
     pub quick: crate::quick::QuickState,
     /// Last read-only git sync status (`None` = unavailable: no git, not
@@ -307,6 +311,7 @@ impl App {
             backlink_viewport: 8,
             disambiguation: None,
             search: SearchState::default(),
+            active_search: None,
             quick: crate::quick::QuickState::default(),
             git: None,
             watcher,
@@ -1903,6 +1908,15 @@ impl App {
             KeyCode::Char('G') | KeyCode::End if plain && self.focus == Focus::Content => {
                 self.scroll_content_to(true)
             }
+            // `n`/`N`: walk the active search's occurrences in the open
+            // note. The modal popups above already took their keys, and a
+            // `.base` table hides the note, so this is the note pane only.
+            KeyCode::Char('n') if plain && self.focus == Focus::Content && self.base.is_none() => {
+                self.goto_search_match(true);
+            }
+            KeyCode::Char('N') if plain && self.focus == Focus::Content && self.base.is_none() => {
+                self.goto_search_match(false);
+            }
             KeyCode::Char('w') if plain && self.focus == Focus::Content => {
                 self.viewer.toggle_watch()
             }
@@ -1972,6 +1986,44 @@ impl App {
             (None, true) => self.viewer.scroll_bottom(),
             (None, false) => self.viewer.scroll_top(),
         }
+    }
+
+    /// `n` / `N`: moves the note pane to the next / previous occurrence of
+    /// the active search in the open note, scrolling it into view.
+    ///
+    /// The position is the scroll, not the last match visited: an
+    /// occurrence counts as "next" when jumping to it would scroll *below*
+    /// where the reader is now (and "previous" when above), so the
+    /// occurrence already on screen is never jumped to again. With none
+    /// left in that direction the search wraps to the far occurrence. No
+    /// active search, or no occurrence in this note, moves nothing.
+    fn goto_search_match(&mut self, forward: bool) {
+        let Some(active) = self.active_search.as_ref() else {
+            return;
+        };
+        let occurrences = active.occurrences(&self.viewer.source);
+        if occurrences.is_empty() {
+            return;
+        }
+        // The landing spot of each occurrence, in document order, is
+        // non-decreasing (the source-line map is monotonic), so the first
+        // one past (or before) the current scroll is the nearest in that
+        // direction.
+        let target = if forward {
+            occurrences
+                .iter()
+                .copied()
+                .find(|&line| self.viewer.scroll_target_for_source_line(line) > self.viewer.scroll)
+                .unwrap_or(occurrences[0])
+        } else {
+            occurrences
+                .iter()
+                .rev()
+                .copied()
+                .find(|&line| self.viewer.scroll_target_for_source_line(line) < self.viewer.scroll)
+                .unwrap_or(occurrences[occurrences.len() - 1])
+        };
+        self.viewer.scroll_to_source_line(target);
     }
 
     /// Mouse wheel with the cursor position: a wheel over the visible
@@ -2074,7 +2126,7 @@ impl App {
             SearchMode::Input => match key.code {
                 KeyCode::Enter if plain => {
                     let index = self.index.clone();
-                    self.search.run(|query| match &index {
+                    let ran = self.search.run(|query| match &index {
                         Some(index) => match query {
                             SearchQuery::Literal(text) => Ok(index.borrow().search(text)),
                             SearchQuery::Regex(pattern) => index
@@ -2084,6 +2136,9 @@ impl App {
                         },
                         None => Ok(SearchResults::default()),
                     });
+                    if ran {
+                        self.active_search = ActiveSearch::from_query(&self.search.query);
+                    }
                 }
                 KeyCode::Backspace if plain => {
                     self.search.backspace();
