@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::frontmatter::{parse_frontmatter_with_raw, split_frontmatter};
-use crate::walk::{is_base_path, is_indexable, walk_vault};
+use crate::walk::{is_base_path, is_indexable, strip_suffix_ignore_case, walk_vault_with_warnings};
 use crate::wikilink::{extract_wikilinks, LinkRef};
 
 /// One raw-text match of a global vault search ([`VaultIndex::search`]).
@@ -161,7 +161,8 @@ pub struct VaultIndex {
 impl VaultIndex {
     /// Walks `root` and indexes every `.md` note; `.base` files are
     /// collected path-only (never parsed). Fails only if `root` itself
-    /// cannot be read; per-file problems become warnings.
+    /// cannot be read; per-file problems and unreadable subdirectories
+    /// become warnings.
     pub fn build(root: &Path) -> io::Result<Self> {
         let mut index = Self {
             root: root.to_path_buf(),
@@ -175,7 +176,16 @@ impl VaultIndex {
             tags: BTreeMap::new(),
             raw_lines: BTreeMap::new(),
         };
-        for entry in walk_vault(root)? {
+        let walk = walk_vault_with_warnings(root)?;
+        // A directory the walk could not read is reported exactly like an
+        // unreadable file: its notes are skipped, but the user is told.
+        index
+            .warnings
+            .extend(walk.warnings.into_iter().map(|w| IndexWarning {
+                path: w.path,
+                message: w.message,
+            }));
+        for entry in walk.entries {
             if is_base_path(&entry.path) {
                 index.bases.insert(entry.path);
                 continue;
@@ -411,8 +421,7 @@ impl VaultIndex {
         if ends_with_ci(target, ".base") {
             return self.resolve_base(target);
         }
-        let target = target
-            .strip_suffix(".md")
+        let target = strip_suffix_ignore_case(target, ".md")
             .unwrap_or(target)
             .trim()
             .to_string();
@@ -447,13 +456,10 @@ impl VaultIndex {
     /// side. No suffix fallback (unlike notes): a moved base is simply
     /// not found rather than guessed at.
     fn resolve_base(&self, target: &str) -> Resolution {
-        let target = if ends_with_ci(target, ".base") {
-            &target[..target.len() - ".base".len()]
-        } else {
-            target
-        }
-        .trim()
-        .to_string();
+        let target = strip_suffix_ignore_case(target, ".base")
+            .unwrap_or(target)
+            .trim()
+            .to_string();
         if target.is_empty() {
             return Resolution::NotFound;
         }
@@ -467,7 +473,7 @@ impl VaultIndex {
                         .unwrap_or(p)
                         .to_string_lossy()
                         .replace('\\', "/");
-                    rel.strip_suffix(".base")
+                    strip_suffix_ignore_case(&rel, ".base")
                         .unwrap_or(&rel)
                         .eq_ignore_ascii_case(&target)
                 })
@@ -514,7 +520,7 @@ impl VaultIndex {
             .notes
             .values()
             .filter(|n| {
-                let rel = n.rel_path.strip_suffix(".md").unwrap_or(&n.rel_path);
+                let rel = strip_suffix_ignore_case(&n.rel_path, ".md").unwrap_or(&n.rel_path);
                 ends_with_ci(rel, &needle)
             })
             .map(|n| n.path.clone())
@@ -666,7 +672,7 @@ impl VaultIndex {
     fn rebuild_derived(&mut self) {
         self.by_rel.clear();
         for note in self.notes.values() {
-            let rel = note.rel_path.strip_suffix(".md").unwrap_or(&note.rel_path);
+            let rel = strip_suffix_ignore_case(&note.rel_path, ".md").unwrap_or(&note.rel_path);
             self.by_rel
                 .entry(rel.to_ascii_lowercase())
                 .or_default()
@@ -972,6 +978,30 @@ mod tests {
         assert_eq!(mocktag.len(), 1);
         assert_eq!(mocktag[0].rel_path, "projects/analysis.md");
         assert!(index.notes_with_tag("missing").is_empty());
+    }
+
+    #[test]
+    fn a_tag_containing_a_comma_is_indexed_once() {
+        // Audit VAULT-4 end to end: the tag view lists the tag once and a
+        // base `file.hasTag` lookup can match it (see base.rs).
+        let vault = TempDir::new("vk-tag-comma");
+        write(
+            &vault.path().join("note.md"),
+            "---\ntags:\n  - \"mocktag, weird\"\n  - gpu\n---\n",
+        );
+        let index = VaultIndex::build(vault.path()).unwrap();
+        assert_eq!(
+            note_at(&index, "note.md").tags,
+            vec!["mocktag, weird", "gpu"]
+        );
+        let hits = index.notes_with_tag("mocktag, weird");
+        assert_eq!(hits.len(), 1, "the comma tag is one tag");
+        assert_eq!(hits[0].rel_path, "note.md");
+        assert!(
+            index.notes_with_tag("mocktag").is_empty(),
+            "the comma tag is not split into a bare `mocktag`"
+        );
+        assert_eq!(index.tag_counts().len(), 2, "two tags, not three");
     }
 
     #[test]
@@ -1415,6 +1445,77 @@ mod tests {
             index.resolve("MIXED-CASE-NOTE"),
             Resolution::Found(vault.path().join("Mixed-Case-Note.md"))
         );
+    }
+
+    #[test]
+    fn uppercase_md_suffix_resolves_bare_and_path_links() {
+        // The walker indexes `X.MD` (its suffix test ignores case); the
+        // resolver must strip the same suffix case-insensitively, both for
+        // a bare target and for the path-style form.
+        let vault = TempDir::new("vk-md-case");
+        write(&vault.path().join("dir/X.MD"), "x\n");
+        write(
+            &vault.path().join("source.md"),
+            "[[X.MD]] [[dir/X]] [[dir/X.MD]]\n",
+        );
+        let index = VaultIndex::build(vault.path()).unwrap();
+        let note = vault.path().join("dir/X.MD");
+        for target in ["X.MD", "X", "dir/X", "dir/X.MD"] {
+            assert_eq!(
+                index.resolve(target),
+                Resolution::Found(note.clone()),
+                "{target}"
+            );
+        }
+        assert_eq!(
+            index.backlinks_to(&note),
+            vec![vault.path().join("source.md")],
+            "both link spellings resolve to the note"
+        );
+    }
+
+    #[test]
+    fn uppercase_base_suffix_resolves_path_targets() {
+        let vault = TempDir::new("vk-base-case");
+        write(&vault.path().join("dir/Board.BASE"), "views: []\n");
+        let index = VaultIndex::build(vault.path()).unwrap();
+        let base = vault.path().join("dir/Board.BASE");
+        for target in [
+            "Board.BASE",
+            "board.base",
+            "dir/Board.BASE",
+            "dir/board.base",
+        ] {
+            assert_eq!(
+                index.resolve(target),
+                Resolution::Found(base.clone()),
+                "{target}"
+            );
+        }
+    }
+
+    #[test]
+    fn unreadable_directory_becomes_warning_not_silent_drop() {
+        let vault = TempDir::new("vk-unreadable-dir");
+        write(&vault.path().join("a.md"), "ok\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = vault.path().join("locked");
+            write(&locked.join("inside.md"), "---\ntags: [hidden]\n---\n");
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+            let index = VaultIndex::build(vault.path()).unwrap();
+            assert_eq!(index.len(), 1, "notes in the locked folder are skipped");
+            assert!(
+                index
+                    .warnings()
+                    .iter()
+                    .any(|w| w.path.ends_with("locked") && w.message.contains("unreadable")),
+                "warning names the directory: {:?}",
+                index.warnings()
+            );
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     #[test]

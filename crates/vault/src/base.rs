@@ -1410,6 +1410,32 @@ mod tests {
     }
 
     #[test]
+    fn has_tag_matches_a_comma_tag_from_a_block_list() {
+        // Audit VAULT-4: joining the block items and re-splitting on every
+        // comma made this filter match nothing.
+        let base = parse_base(
+            "filters:\n  and:\n    - 'file.hasTag(\"mocktag, weird\")'\nviews:\n  - type: table\n    name: V\n    order:\n      - file.name\n",
+        );
+        assert!(base.warnings.is_empty(), "{:?}", base.warnings);
+        let index = index_with(&[
+            ("note.md", "---\ntags:\n  - \"mocktag, weird\"\n---\n"),
+            ("other.md", "---\ntags: [mocktag]\n---\n"),
+        ]);
+        let table = build_table(&index, &base, 0, "2026-01-01");
+        let names: Vec<String> = table
+            .rows
+            .iter()
+            .filter_map(|r| match r {
+                TableRow::Note(n) => {
+                    Some(n.path.file_name().unwrap().to_string_lossy().into_owned())
+                }
+                TableRow::Group(_) => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["note.md"]);
+    }
+
+    #[test]
     fn sort_applies_direction_and_missing_goes_last() {
         let base = parse_base(
             "views:\n  - type: table\n    name: V\n    order:\n      - file.name\n    sort:\n      - property: updated\n        direction: DESC\n",

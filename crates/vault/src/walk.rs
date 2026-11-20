@@ -36,20 +36,51 @@ pub struct DirEntryInfo {
 }
 
 /// One note or `.base` file found by the walk. Per-entry problems
-/// (unreadable directory, vanished file) are skipped, so a bad entry never
+/// (vanished file, unreadable directory) are skipped, so a bad entry never
 /// aborts the walk.
 #[derive(Debug)]
 pub struct WalkEntry {
     pub path: PathBuf,
 }
 
+/// A directory the walk could not descend into. The walk skips it and
+/// keeps going; the caller surfaces the problem (the index turns it into
+/// an `IndexWarning`) so the notes inside it do not vanish silently.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WalkWarning {
+    pub path: PathBuf,
+    pub message: String,
+}
+
 /// Walks `root` depth-first collecting `.md` and `.base` files, folders
 /// before files, case-insensitive order within each group. Fails only if
-/// `root` itself cannot be read.
+/// `root` itself cannot be read; unreadable subdirectories are dropped
+/// without a report (use [`walk_vault_with_warnings`] when the caller can
+/// surface them).
 pub fn walk_vault(root: &Path) -> io::Result<Vec<WalkEntry>> {
-    let mut out = Vec::new();
-    walk_dir(root, 0, &mut out)?;
-    Ok(out)
+    Ok(collect(root)?.entries)
+}
+
+/// [`walk_vault`] plus one [`WalkWarning`] per subdirectory that could not
+/// be read. Its entries are skipped exactly as before; the warning is what
+/// makes the omission visible.
+pub fn walk_vault_with_warnings(root: &Path) -> io::Result<WalkReport> {
+    collect(root)
+}
+
+/// The complete result of one walk: the indexable files and the
+/// directories that could not be read.
+#[derive(Debug)]
+pub struct WalkReport {
+    pub entries: Vec<WalkEntry>,
+    pub warnings: Vec<WalkWarning>,
+}
+
+fn collect(root: &Path) -> io::Result<WalkReport> {
+    let mut entries = Vec::new();
+    let mut warnings = Vec::new();
+    walk_dir(root, 0, &mut entries, &mut warnings)?;
+    Ok(WalkReport { entries, warnings })
 }
 
 /// The file kind a name denotes: `.md` → note, `.base` → base table
@@ -116,12 +147,23 @@ pub fn read_dir_entries(dir: &Path, depth: usize) -> io::Result<Vec<DirEntryInfo
     Ok(dirs)
 }
 
-fn walk_dir(dir: &Path, depth: usize, out: &mut Vec<WalkEntry>) -> io::Result<()> {
+fn walk_dir(
+    dir: &Path,
+    depth: usize,
+    out: &mut Vec<WalkEntry>,
+    warnings: &mut Vec<WalkWarning>,
+) -> io::Result<()> {
     for entry in read_dir_entries(dir, depth)? {
         match entry.kind {
-            // Unreadable subdirectory: skip it, don't abort the walk.
+            // Unreadable subdirectory: skip it, don't abort the walk — but
+            // report it so its notes do not vanish without a word.
             EntryKind::Dir => {
-                let _ = walk_dir(&entry.path, depth + 1, out);
+                if let Err(err) = walk_dir(&entry.path, depth + 1, out, warnings) {
+                    warnings.push(WalkWarning {
+                        path: entry.path,
+                        message: format!("unreadable: {err}"),
+                    });
+                }
             }
             EntryKind::Note | EntryKind::Base => out.push(WalkEntry { path: entry.path }),
         }
@@ -148,8 +190,22 @@ pub fn is_base_path(path: &Path) -> bool {
 /// ASCII-case-insensitive `ends_with` that neither allocates nor can panic
 /// on a multi-byte name (compares bytes, not a `str` slice).
 pub(crate) fn ends_with_ignore_case(name: &str, suffix: &str) -> bool {
-    let (name, suffix) = (name.as_bytes(), suffix.as_bytes());
-    name.len() >= suffix.len() && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
+    strip_suffix_ignore_case(name, suffix).is_some()
+}
+
+/// ASCII-case-insensitive counterpart of [`str::strip_suffix`]: the
+/// suffix-stripping rule shared by the walker, the wikilink parser and the
+/// resolver, so a suffix that is *matched* case-insensitively is also
+/// *stripped* case-insensitively.
+pub(crate) fn strip_suffix_ignore_case<'a>(value: &'a str, suffix: &str) -> Option<&'a str> {
+    let (value_len, suffix_len) = (value.len(), suffix.len());
+    if value_len >= suffix_len
+        && value.as_bytes()[value_len - suffix_len..].eq_ignore_ascii_case(suffix.as_bytes())
+    {
+        Some(&value[..value_len - suffix_len])
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -224,6 +280,31 @@ mod tests {
         }
         fs::write(path.join("bottom.md"), "b").unwrap();
         assert!(walk_vault(dir.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn walk_reports_an_unreadable_directory_instead_of_dropping_it_silently() {
+        let dir = TempDir::new("vk-walk-unreadable");
+        fs::write(dir.path().join("a.md"), "a").unwrap();
+        fs::create_dir_all(dir.path().join("locked")).unwrap();
+        fs::write(dir.path().join("locked").join("inside.md"), "h").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = dir.path().join("locked");
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+            let report = walk_vault_with_warnings(dir.path()).unwrap();
+            assert_eq!(report.entries.len(), 1, "the readable note is still walked");
+            assert!(
+                report
+                    .warnings
+                    .iter()
+                    .any(|w| w.path.ends_with("locked") && w.message.contains("unreadable")),
+                "unreadable directory reported: {:?}",
+                report.warnings
+            );
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     #[test]
