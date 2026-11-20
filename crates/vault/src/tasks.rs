@@ -334,31 +334,59 @@ fn line_range(bytes: &[u8], n: usize) -> Option<(usize, usize)> {
     None
 }
 
+/// Byte bounds of the line starting at `start`: its content `[start, end)`
+/// (terminator excluded) and the start of the following line, when there
+/// is one. Callers keep `start <= bytes.len()`.
+fn line_bounds(bytes: &[u8], start: usize) -> (usize, Option<usize>) {
+    match bytes[start..].iter().position(|&b| b == b'\n') {
+        Some(offset) => (start + offset, Some(start + offset + 1)),
+        None => (bytes.len(), None),
+    }
+}
+
+/// True when the line is a frontmatter fence. A `\r` before the `\n` is
+/// part of a CRLF terminator and is not content, so `---\r` is a fence
+/// too — the frontmatter parser and `scan` both trim it.
+fn is_fence(line: &[u8]) -> bool {
+    line == b"---" || line == b"---\r"
+}
+
+/// Content byte ranges of the lines inside the leading frontmatter block
+/// (opening and closing fences excluded, in source order). Empty when the
+/// file does not open with a closed `---` fence — an unterminated fence
+/// means there is no frontmatter at all, matching `scan` and
+/// `frontmatter::split_frontmatter`.
+///
+/// The walk continues from the previous line's end and stops at the
+/// closing fence, so a note's body is never examined: this runs on the
+/// checkbox toggle path, which is the single-threaded UI thread.
+fn frontmatter_lines(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let (first_end, mut next) = line_bounds(bytes, 0);
+    if !is_fence(&bytes[..first_end]) {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    while let Some(start) = next {
+        let (end, following) = line_bounds(bytes, start);
+        if is_fence(&bytes[start..end]) {
+            return lines;
+        }
+        lines.push((start, end));
+        next = following;
+    }
+    Vec::new()
+}
+
 /// Byte range of the frontmatter `updated:` line (content only), if the
 /// file opens with a closed `---` fence and carries the field. The last
 /// occurrence wins — matching the frontmatter parser's duplicate-key
 /// semantics.
 fn updated_field_line(bytes: &[u8]) -> Option<(usize, usize)> {
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    let mut n = 0usize;
-    while let Some(range) = line_range(bytes, n) {
-        ranges.push(range);
-        n += 1;
-    }
-    let first = ranges.first()?;
-    if &bytes[first.0..first.1] != b"---" {
-        return None;
-    }
-    let mut found = None;
-    for &(start, end) in ranges.iter().skip(1) {
-        if &bytes[start..end] == b"---" {
-            break;
-        }
-        if bytes[start..end].starts_with(b"updated:") {
-            found = Some((start, end));
-        }
-    }
-    found
+    let lines = frontmatter_lines(bytes);
+    let idx = lines
+        .iter()
+        .rposition(|&(start, end)| bytes[start..end].starts_with(b"updated:"))?;
+    Some(lines[idx])
 }
 
 /// Replaces the value of the frontmatter `updated:` line with `today`.
@@ -563,6 +591,19 @@ mod tests {
     }
 
     #[test]
+    fn apply_toggle_bumps_the_field_in_a_fully_crlf_note() {
+        // The fences are `---\r` here; they are CRLF terminators, not
+        // content, so this is a real frontmatter block (the parser and
+        // `scan` trim the `\r` the same way).
+        let src = b"---\r\nupdated: 2026-01-01\r\n---\r\n- [ ] t\r\n";
+        let (out, report) = apply_toggle(src, 3, TaskState::Unchecked, "2026-11-11").unwrap();
+        assert!(report.updated_bumped);
+        let text = std::str::from_utf8(&out).unwrap();
+        assert!(text.contains("updated: 2026-11-11\r\n"));
+        assert!(!text.contains("\r\r"), "no doubled CR");
+    }
+
+    #[test]
     fn apply_toggle_preserves_a_tab_before_the_comment() {
         // Reviewer F3: the comment scan matched ` #` only, so a
         // tab-before-`#` comment was replaced along with the value.
@@ -586,6 +627,83 @@ mod tests {
         // earlier one stays untouched.
         assert!(text.contains("updated: YYYY-MM-DD\n"));
         assert!(text.contains("updated: 2026-11-11\n"));
+    }
+
+    #[test]
+    fn frontmatter_walk_stops_at_the_closing_fence() {
+        // Audit B3: the old walk indexed every line of the note by
+        // rescanning from byte 0 (O(lines × bytes)). The frontmatter is at
+        // the top, so the walk stops at the closing fence: even a 50k-line
+        // body whose every line is shaped like the field adds no range.
+        let mut src = String::from("---\nupdated: 2026-01-01\n---\n");
+        for _ in 0..50_000 {
+            src.push_str("updated: body line\n");
+        }
+        assert_eq!(
+            frontmatter_lines(src.as_bytes()),
+            vec![(4, 23)],
+            "only the frontmatter line is walked"
+        );
+        assert_eq!(
+            updated_field_line(src.as_bytes()),
+            Some((4, 23)),
+            "a body line is not a frontmatter field"
+        );
+    }
+
+    #[test]
+    fn no_frontmatter_never_walks_the_body() {
+        // The first line decides: without an opening fence there is no
+        // frontmatter, so nothing below it is examined.
+        let mut src = String::from("# Title\nupdated: not frontmatter\n");
+        for _ in 0..50_000 {
+            src.push_str("- [ ] line\n");
+        }
+        assert!(frontmatter_lines(src.as_bytes()).is_empty());
+        assert_eq!(updated_field_line(src.as_bytes()), None);
+    }
+
+    #[test]
+    fn an_unterminated_fence_is_no_frontmatter_so_nothing_is_bumped() {
+        // Same convention as `scan` and `frontmatter::split_frontmatter`:
+        // without a closing `---` the whole file is body, so a body line
+        // that happens to start with `updated:` is not a field.
+        let src = b"---\nstatus: active\nupdated: 2026-01-01\n- [ ] task\n";
+        let (out, report) = apply_toggle(src, 3, TaskState::Unchecked, "2026-11-11").unwrap();
+        assert!(!report.updated_bumped);
+        assert!(std::str::from_utf8(&out)
+            .unwrap()
+            .contains("updated: 2026-01-01\n"));
+    }
+
+    #[test]
+    fn toggle_on_a_large_note_is_bounded() {
+        // Audit B3 measured the old quadratic index at ~24 s for 50k lines
+        // (release build) on the single-threaded event loop. A linear pass
+        // is milliseconds even in a debug test build; the bound is
+        // generous against a loaded machine and still an order of
+        // magnitude below the old shape.
+        let target = 50_000usize;
+        let mut src = String::from("---\nupdated: 2026-01-01\n---\n");
+        for i in 0..target {
+            if i + 1 == target {
+                src.push_str("- [ ] last\n");
+            } else {
+                src.push_str("- [ ] line\n");
+            }
+        }
+        let bytes = src.into_bytes();
+        let started = std::time::Instant::now();
+        let (out, report) =
+            apply_toggle(&bytes, 3 + target - 1, TaskState::Unchecked, "2026-11-11")
+                .expect("toggle the last line");
+        let elapsed = started.elapsed();
+        assert!(report.updated_bumped);
+        assert!(std::str::from_utf8(&out).unwrap().ends_with("- [~] last\n"));
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "50k-line toggle took {elapsed:?} (the old quadratic scan took ~24 s)"
+        );
     }
 
     #[test]

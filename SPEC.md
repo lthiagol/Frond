@@ -396,6 +396,9 @@ wikilink-preprocessing offset shifts) and the frontmatter `updated:`
 value (bumped to today, only when the field already exists — an absent
 field is never added; the key, post-colon whitespace, any trailing
 comment, and the line terminator including a CRLF's `\r` are preserved).
+The frontmatter block is recognized with the reader's own fence rules: a
+CRLF `---` fence counts, and the field is only bumped inside the block,
+never in the body.
 Replacement is atomic: the original's permissions are read together with
 the content (before the temp file exists — unreadable metadata refuses
 the write), the temp file is fsynced before the rename, and the existing

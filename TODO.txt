@@ -172,7 +172,12 @@ OPEN
       are joined with `", "` and re-split on every comma, so a tag
       containing a comma becomes two tags (VAULT-4). An unreadable
       subdirectory is dropped from the walk with no `IndexWarning`, while
-      an unreadable *file* warns — notes vanish silently (VAULT-5).
+      an unreadable *file* warns — notes vanish silently (VAULT-5). Plus
+      unit 19's low: the frontmatter walk's fence rules must match the
+      parser's exactly — a UTF-8 BOM (and a repeated `\r`) is stripped by
+      `split_frontmatter` and the scanner but not by `is_fence`, so a
+      BOM-prefixed note is parsed and indexed yet never bumps `updated:`
+      (unit 19, L1).
 
   - Parked: a link hover preview, regex + match-next in the search popup, a
       line-number gutter, a scroll position for the sidebar tree (the
