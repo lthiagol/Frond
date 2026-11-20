@@ -2413,6 +2413,13 @@ fn long_note(lines: usize) -> String {
     (0..lines).map(|i| format!("line-{i:03}\n")).collect()
 }
 
+/// The list row a bar's track row names: the first track row is the list's
+/// first row, the last its last, linear between (written out here, not
+/// shared with the implementation, so the test pins the rule).
+fn bar_row_at(offset: u16, len: usize, track_height: u16) -> usize {
+    offset as usize * (len - 1) / (track_height as usize - 1)
+}
+
 #[test]
 fn note_scrollbar_absent_when_content_fits() {
     let file = ui_viewer("ui-bar-fit.md", "short\nnote\n");
@@ -2935,45 +2942,331 @@ fn sidebar_width_override_moves_the_divider() {
     );
 }
 
-/// Documented behavior (sidebar + tag list): the scrollbar column is inside
-/// the widget, so a click there is owned by the sidebar and maps by ROW
-/// only — it selects the row on that screen line, same as a click on the
-/// text. Pinned here with the bar drawn (overflowing list) and absent
-/// (fitting list).
+/// The sidebar panel's bar is a position control for the tree's selection:
+/// the track's first row names the list's first row, its last the last, and
+/// the rows between map linearly. A press selects without opening, and the
+/// keyboard focus stays where it was.
 #[test]
-fn sidebar_click_on_scrollbar_column_selects_the_row_when_bar_present() {
-    let vault_dir = TempDir::new("ui-bar-click-col");
+fn sidebar_tree_bar_press_positions_the_selection() {
+    let vault_dir = TempDir::new("ui-bar-tree-pos");
     for i in 0..40 {
         std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
     }
-    let file = ui_viewer("ui-bar-click-col.md", "x\n");
+    let file = ui_viewer("ui-bar-tree-pos.md", "x\n");
     let mut app = app_for(&file, Some(vault_dir.path()));
-    let backend = TestBackend::new(100, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let area = app.layout.sidebar_area.expect("sidebar visible");
-    let bar_col = sidebar_width(100) - 2;
-    // Precondition: the bar really is drawn on this column (removing the
-    // bar would fail here).
+    let bar = app
+        .layout
+        .sidebar_scrollbar_area
+        .expect("an overflowing tree draws its bar");
+    assert_eq!(
+        bar,
+        Rect::new(sidebar_width(100) - 2, area.y + 1, 1, area.height - 2),
+        "the bar is the panel's last inner column"
+    );
+    let rows: Vec<std::path::PathBuf> = app
+        .sidebar
+        .as_ref()
+        .unwrap()
+        .rows()
+        .iter()
+        .map(|row| row.node.path.clone())
+        .collect();
+    let len = rows.len();
+    assert_eq!(len, 40);
+    let opened = app.viewer.path.clone();
+    app.focus = Focus::Sidebar;
+    let selected = |app: &App| app.sidebar.as_ref().unwrap().selected.clone();
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(selected(&app), Some(rows[0].clone()), "top row → first row");
+    assert_eq!(app.focus, Focus::Sidebar, "the press does not move focus");
+    assert_eq!(app.viewer.path, opened, "the press never opens the row");
+
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(
+        selected(&app),
+        Some(rows[len - 1].clone()),
+        "last track row → last list row"
+    );
+    assert_eq!(app.viewer.path, opened);
+
+    let offset = bar.height / 2;
+    app.handle_press(bar.x, bar.y + offset);
+    assert_eq!(
+        selected(&app),
+        Some(rows[bar_row_at(offset, len, bar.height)].clone()),
+        "a middle track row names that fraction of the list"
+    );
+    assert_eq!(app.viewer.path, opened);
+}
+
+/// A sidebar bar drag follows the pointer's row (even after the column is
+/// left), and the release that ends it is not a click: the note row under
+/// the pointer does not open.
+#[test]
+fn sidebar_bar_drag_follows_the_pointer_and_its_release_opens_nothing() {
+    let vault_dir = TempDir::new("ui-bar-tree-drag");
+    for i in 0..40 {
+        std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
+    }
+    let file = ui_viewer("ui-bar-tree-drag.md", "x\n");
+    let mut app = app_for(&file, Some(vault_dir.path()));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let rows: Vec<std::path::PathBuf> = app
+        .sidebar
+        .as_ref()
+        .unwrap()
+        .rows()
+        .iter()
+        .map(|row| row.node.path.clone())
+        .collect();
+    let opened = app.viewer.path.clone();
+    let selected = |app: &App| app.sidebar.as_ref().unwrap().selected.clone();
+
+    app.handle_press(bar.x, bar.y);
+    app.handle_drag(1, bar.bottom() - 1);
+    assert_eq!(
+        selected(&app),
+        Some(rows[rows.len() - 1].clone()),
+        "the drag follows the pointer past the bar column"
+    );
+    app.handle_drag(1, bar.y);
+    assert_eq!(selected(&app), Some(rows[0].clone()));
+
+    // Release over the first note row's text: the drag's release is consumed.
+    app.handle_release(area.x + 1, bar.y);
+    assert_eq!(app.viewer.path, opened, "the drag's release opens nothing");
+    assert_eq!(selected(&app), Some(rows[0].clone()));
+
+    // Control: the same release without a drag is a row click and opens it.
+    app.handle_release(area.x + 1, bar.y);
+    assert_eq!(
+        app.viewer.path, rows[0],
+        "a plain click still opens the row"
+    );
+}
+
+/// The tag list shares the sidebar panel: its bar moves the tag selection,
+/// and the release that ends a press does not toggle the tag's expansion
+/// (a click there would).
+#[test]
+fn tag_list_bar_press_positions_the_selection_and_release_is_not_a_click() {
+    let vault_dir = TempDir::new("ui-bar-tags-pos");
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("t{i:02}.md")),
+            format!("---\ntags: [tag{i:02}]\n---\nx\n"),
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-tags-pos.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('t')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let len = app.tags.rows().len();
+    assert_eq!(len, 30);
+    app.focus = Focus::Sidebar;
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.tags.selection_index(), Some(0), "top → first tag row");
+    assert_eq!(app.focus, Focus::Sidebar, "the press does not move focus");
+
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(
+        app.tags.selection_index(),
+        Some(len - 1),
+        "last track row → last tag row"
+    );
+
+    let offset = bar.height / 2;
+    app.handle_press(bar.x, bar.y + offset);
+    assert_eq!(
+        app.tags.selection_index(),
+        Some(bar_row_at(offset, len, bar.height)),
+        "a middle track row names that fraction of the tags"
+    );
+
+    // The release that ends the press is consumed: the tag under the pointer
+    // must not toggle (a tag-row click would expand it).
+    app.tags.expanded.clear();
+    app.handle_press(bar.x, bar.y);
+    app.handle_release(bar.x, bar.y);
     assert!(
-        column_has_bar(terminal.backend().buffer(), bar_col, 1..23),
-        "bar drawn on the click column"
+        app.tags.expanded.is_empty(),
+        "the bar's release is not a tag toggle"
     );
-    let (target, second) = {
-        let rows = app.sidebar.as_ref().unwrap().rows();
-        (rows[0].node.path.clone(), rows[1].node.path.clone())
-    };
-    app.handle_click(bar_col, area.y + 1);
+}
+
+/// The outline shares the sidebar panel: its bar moves the outline cursor
+/// and never jumps the note to the heading (that is Enter/click semantics).
+#[test]
+fn outline_bar_press_positions_the_selection_without_jumping_the_note() {
+    let headings: String = (0..30)
+        .map(|i| format!("## heading {i}\n\nbody\n\n"))
+        .collect();
+    let vault_dir = TempDir::new("ui-bar-outline-pos");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-bar-outline-pos.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
+    let len = crate::app::outline_rows(&app.base, &app.viewer).len();
+    assert_eq!(len, 30);
+    assert_eq!(app.viewer.scroll, 0, "the note opens at the top");
+    app.focus = Focus::Sidebar;
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.outline.selected, 0, "top → first heading");
+    assert_eq!(app.viewer.scroll, 0, "the press does not jump the note");
+    assert_eq!(app.focus, Focus::Sidebar, "the press does not move focus");
+
+    app.handle_press(bar.x, bar.bottom() - 1);
     assert_eq!(
-        app.sidebar.as_ref().unwrap().selected.as_deref(),
-        Some(target.as_path()),
-        "bar-column click on row 0 selects row 0"
+        app.outline.selected,
+        len - 1,
+        "last track row → last heading"
     );
-    app.handle_click(bar_col, area.y + 2);
     assert_eq!(
-        app.sidebar.as_ref().unwrap().selected.as_deref(),
-        Some(second.as_path()),
-        "bar-column click on row 1 selects row 1"
+        app.viewer.scroll, 0,
+        "the selection moves, the note does not"
+    );
+
+    let offset = bar.height / 2;
+    app.handle_press(bar.x, bar.y + offset);
+    assert_eq!(
+        app.outline.selected,
+        bar_row_at(offset, len, bar.height),
+        "a middle track row names that fraction of the headings"
+    );
+    assert_eq!(app.viewer.scroll, 0);
+}
+
+/// The backlinks panel's bar moves its selection; the press never opens a
+/// backlink and the release that ends it does not either.
+#[test]
+fn backlinks_bar_press_positions_the_selection_without_opening() {
+    let vault_dir = TempDir::new("ui-bar-backlinks-pos");
+    std::fs::write(vault_dir.path().join("target.md"), "target\n").unwrap();
+    for i in 0..30 {
+        std::fs::write(
+            vault_dir.path().join(format!("src{i:02}.md")),
+            "[[target]]\n",
+        )
+        .unwrap();
+    }
+    let file = ui_viewer("ui-bar-backlinks-pos.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.open_note(&vault_dir.path().join("target.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('b')));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .backlinks_scrollbar_area
+        .expect("an overflowing panel draws its bar");
+    let len = app.backlinks.len();
+    assert_eq!(len, 30);
+    let opened = app.viewer.path.clone();
+    assert_eq!(app.focus, Focus::Backlinks);
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.backlink_sel, 0, "top → first backlink");
+    assert_eq!(app.focus, Focus::Backlinks, "the press does not move focus");
+    assert_eq!(app.viewer.path, opened, "the press never opens a link");
+
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(app.backlink_sel, len - 1, "last track row → last backlink");
+    assert_eq!(app.viewer.path, opened);
+
+    let offset = bar.height / 2;
+    app.handle_press(bar.x, bar.y + offset);
+    assert_eq!(
+        app.backlink_sel,
+        bar_row_at(offset, len, bar.height),
+        "a middle track row names that fraction of the backlinks"
+    );
+
+    // The release that ends the press is consumed: the link under the
+    // pointer does not open (a backlink-row click would).
+    app.handle_press(bar.x, bar.y);
+    app.handle_release(bar.x, bar.y);
+    assert_eq!(app.viewer.path, opened, "the bar's release opens nothing");
+}
+
+/// Mouse capture off (`m`) disables every bar: the app ignores the mouse
+/// even when the terminal forwards the events.
+#[test]
+fn mouse_capture_off_disables_the_bar_position_controls() {
+    let vault_dir = TempDir::new("ui-bar-capture-off");
+    for i in 0..40 {
+        std::fs::write(vault_dir.path().join(format!("n{i:02}.md")), "x\n").unwrap();
+    }
+    let file = ui_viewer("ui-bar-capture-off.md", &long_note(200));
+    let mut app = app_for(&file, Some(vault_dir.path()));
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let note_bar = app.layout.note_scrollbar_area.expect("note bar drawn");
+    let side_bar = app
+        .layout
+        .sidebar_scrollbar_area
+        .expect("sidebar bar drawn");
+    let selected = app.sidebar.as_ref().unwrap().selected.clone();
+    assert_eq!(app.viewer.scroll, 0);
+
+    // Control with capture on: the same middle press moves the note.
+    app.handle_press(note_bar.x, note_bar.y + note_bar.height / 2);
+    assert!(app.viewer.scroll > 0, "the bar works with capture on");
+    app.handle_press(note_bar.x, note_bar.y);
+    assert_eq!(app.viewer.scroll, 0);
+
+    app.handle_key(key(KeyCode::Char('m')));
+    assert!(!app.mouse_capture, "m turns capture off");
+    app.handle_press(note_bar.x, note_bar.y + note_bar.height / 2);
+    assert_eq!(
+        app.viewer.scroll, 0,
+        "the note bar is inert with capture off"
+    );
+    app.handle_press(side_bar.x, side_bar.bottom() - 1);
+    assert_eq!(
+        app.sidebar.as_ref().unwrap().selected,
+        selected,
+        "the sidebar bar is inert with capture off"
+    );
+}
+
+/// A popup that opens mid-drag owns the pointer: the drag must stop moving
+/// the pane behind it (unit 24's review finding for `handle_drag`).
+#[test]
+fn drag_stops_when_a_popup_owns_the_pointer() {
+    let file = ui_viewer("ui-bar-popup-drag.md", &long_note(200));
+    let mut app = app_for(&file, None);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app.layout.note_scrollbar_area.expect("bar drawn");
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.viewer.scroll, 0);
+    app.viewer.help_open = true;
+    app.handle_drag(10, bar.y + bar.height / 2);
+    assert_eq!(
+        app.viewer.scroll, 0,
+        "the note behind the popup does not follow the drag"
+    );
+    app.viewer.help_open = false;
+    app.handle_drag(10, bar.y + bar.height / 2);
+    assert!(
+        app.viewer.scroll > 0,
+        "closing the popup lets the same drag continue"
     );
 }
 

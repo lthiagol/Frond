@@ -7,21 +7,25 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Unit 24 is in flight: the note pane's scrollbar becomes a position
-  control (a press on the bar jumps the note, a drag follows the pointer).
-  It is the first item of the parked list (TODO.md 5.8, leaf's scrollbar
-  interaction); the human asked for the parked items to be done, one unit
-  each, through this flow. The hover highlight needs a new theme role
-  across 18 theme tables and is a separate unit; the list panels' bars,
-  the `.base` table's bar and the help popup's bar are not interactive yet
-  (a follow-up unit).
+  Unit 25 is in flight: the list panels' scrollbars (the sidebar tree, the
+  tag list, the outline, the backlinks panel) position that panel's
+  *selection* - the sidebar's scroll is a selection cursor, not a document
+  position. It continues the parked list's interactive scrollbar (TODO.md
+  5.8): unit 24 (committed) did the note pane's bar. Two lows from unit
+  24's review are folded into this unit: `handle_drag` needs the popup
+  guard `handle_press` has, and no test pins that mouse capture off
+  disables the bar.
 
   The spec line is written (SPEC.md, section Scrollbars, plus a key-table
   row), with the changelog's Unreleased section. The builder's brief is at
-  `/tmp/opencode/frond/unit-24-kickoff.md` (plus three more files). Round 1:
-  builder tab `frond-build-unit-24`.
+  `/tmp/opencode/frond/unit-25-kickoff.md` (plus three more files).
 
-  Before this unit: unit 23 (the selection bar) is committed - the selected
+  Before this unit: unit 24 (the note pane's scrollbar is a position
+  control) is committed. Round 1 was clean on both axes (0 blocking, 2
+  low); the merged findings are at
+  `/tmp/opencode/frond/review2/round1-findings.md`.
+
+  Before that: unit 23 (the selection bar) is committed - the selected
   row of every list panel is one full-width bar, and its text is painted in
   the panel's own background colour. Round 1 was clean on both axes (0
   blocking, 3 low); the merged findings are at

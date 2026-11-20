@@ -9,6 +9,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   the note to that point in the document, and a drag keeps the note
   following the pointer until the button is released. Until now a click on
   the bar did nothing.
+- The list panels' scrollbars (the sidebar tree, the tag list, the outline
+  and the backlinks panel) position that panel's selection: a press on the
+  bar moves the selection to that row of the list, and a drag keeps the
+  selection following the pointer. A press on the bar is not a row click
+  any more - it never opens the row it lands on.
 
 ### Fixed
 

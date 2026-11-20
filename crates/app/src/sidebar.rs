@@ -291,6 +291,19 @@ impl Sidebar {
         self.scroll = self.scroll.min(len.saturating_sub(self.viewport.min(len)));
     }
 
+    /// Moves the selection cursor to `index` without activating it (the
+    /// scrollbar's position control: it selects, never opens, toggles or
+    /// jumps elsewhere) and keeps the row visible. Out-of-range indices are
+    /// ignored.
+    pub fn select(&mut self, index: usize) {
+        let rows = self.rows();
+        let Some(row) = rows.get(index) else {
+            return;
+        };
+        self.selected = Some(row.node.path.clone());
+        self.scroll_selection_into_view();
+    }
+
     /// Click on the row at `index` (from mouse support): selects it, and
     /// mirrors Enter's semantics — a folder toggles its expansion, a note
     /// reports its path to open.

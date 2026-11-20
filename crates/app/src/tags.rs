@@ -148,14 +148,14 @@ impl TagList {
         }
     }
 
-    fn move_selection(&mut self, delta: isize) {
+    /// Moves the selection cursor to `index` without activating it (the
+    /// scrollbar's position control: it selects, never opens or toggles)
+    /// and keeps the row visible. Out-of-range indices are ignored.
+    pub fn select(&mut self, index: usize) {
         let rows = self.rows();
-        if rows.is_empty() {
+        let Some(row) = rows.get(index) else {
             return;
-        }
-        let cur = self.selection_index().unwrap_or(0);
-        let next = (cur as isize + delta).clamp(0, rows.len() as isize - 1) as usize;
-        let row = &rows[next];
+        };
         self.selected = Some(match row.note {
             Some(note) => Selection::Note {
                 tag: row.group.tag.clone(),
@@ -164,6 +164,16 @@ impl TagList {
             None => Selection::Tag(row.group.tag.clone()),
         });
         self.scroll_selection_into_view();
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        let rows = self.rows();
+        if rows.is_empty() {
+            return;
+        }
+        let cur = self.selection_index().unwrap_or(0);
+        let next = (cur as isize + delta).clamp(0, rows.len() as isize - 1) as usize;
+        self.select(next);
     }
 
     pub fn move_down(&mut self, n: usize) {
