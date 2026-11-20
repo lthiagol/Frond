@@ -2,7 +2,8 @@
 
 frond is a read-only Obsidian-style terminal markdown viewer (Rust; ratatui
 0.30 + crossterm 0.29). Workspace crates: `engine` (vendored markdown
-renderer), `vault` (index, wikilinks, git status), `app` (the TUI).
+renderer), `vault` (index, frontmatter, wikilinks, `.base` tables, the
+watcher, git status, and the one guarded write), `app` (the TUI).
 
 ## The loop you run in
 
@@ -10,6 +11,10 @@ This project runs the orchestration flow. Load the global skill
 `orchestration-flow` (by its ID) for the loop mechanics — the hub-and-spoke
 topology, the review gate, the round cap, and who commits. A builder never
 commits; the orchestrator commits after a clean review.
+
+The project's name in the flow's own words is `frond` — the same as the
+prefix in `.orchestration.json`, and the title on the toast that announces a
+closed unit.
 
 ## Read before you touch code
 
@@ -31,18 +36,29 @@ commits; the orchestrator commits after a clean review.
 
 ## Project rules
 
-- The app is read-only. The one write path is the checkbox toggle
-  (`crates/app/src/tasks.rs`), and it is guarded.
+- The app never writes into the vault. The one write path is the checkbox
+  toggle: `vault::tasks::write_toggle` in `crates/vault/src/tasks.rs`,
+  called from `crates/app/src/app.rs`. It is guarded (the note's mtime and
+  size, its repository's cleanliness, a re-scan of the marker's state) and
+  the write is atomic. `crates/app/src/tasks.rs` only renders the
+  checkboxes — it writes nothing. The app does write its own session
+  state, under `~/.local/state/frond/`, outside the vault.
 - The gate is `make check` = `fmt` + `clippy` + `test` + `smoke`. The smoke
   suites drive the TUI through a pty (`uv run --with pyte`); they are slow
-  and they are part of the gate.
+  and they are part of the gate. CI (`.github/workflows/ci.yml`) runs the
+  same gates, with `fmt` as `--check`.
 - `crates/engine` is vendored from leaf and keeps its module-wide
-  `#![allow(dead_code)]`. Keep that allow; do not tidy the vendored engine.
+  `#![allow(dead_code)]` (in `crates/engine/src/markdown/mod.rs`). Keep that
+  allow; do not tidy the vendored engine.
 - **A rule written in more than one place drifts.** Give it one home, and
   find the other copies by *grepping for the pattern* — never by line
   number: a brief that enumerated instances by line number missed one twice
   in a row, and the review caught both.
 - Match the surrounding code: one concern per module under
-  `crates/app/src/`, `ui.rs` for the frame and `ui/tests.rs` for the widget
-  tests. Comments explain *why*, not what the line does.
-- Rust 2021; workspace-wide dependencies live in the root `Cargo.toml`.
+  `crates/app/src/`. A module with a large suite keeps it in
+  `<module>/tests.rs` — `ui.rs` for the frame and `ui/tests.rs` for its
+  widgets, `app.rs` for the app state and `app/tests.rs` for its tests.
+  Comments explain *why*, not what the line does.
+- Rust 2021; a dependency used by more than one crate is declared once in
+  the root `Cargo.toml` (`[workspace.dependencies]`) and taken with
+  `x.workspace = true`.

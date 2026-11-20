@@ -35,6 +35,19 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - The agents' notes were audited against the tree and corrected: the
+    write path is `vault::tasks::write_toggle` in `crates/vault/src/tasks.rs`
+    (the app crate's `tasks.rs` only renders the checkboxes), the engine's
+    `#![allow(dead_code)]` is named, the test-file convention generalised to
+    every module, CI is mentioned, and `unicode-width` moved into the
+    workspace dependencies - it was declared in two crates at once, the drift
+    the notes warn about.
+  - The flow's role configs are retired: `flow/builder.json` and
+    `flow/reviewer.json` are gone, and `.orchestration.json` carries only
+    the prefix. The skill generates the role config per session, outside
+    the repository, so the repo's copy was a second home for a rule the
+    skill owns, and it had already drifted from the skill's documented
+    shape.
   - Unit 32 — the 0.6.5 cut: `Cargo.toml` + `Cargo.lock` bumped 0.6.4 ->
     0.6.5, the changelog released as `## [0.6.5] — 2026-11-20` with a
     fresh empty `## [Unreleased]` above it, and the `v0.6.5` tag. The
