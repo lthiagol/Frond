@@ -1402,9 +1402,10 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             ));
         }
     }
-    // Message precedence: an error (red; `last_error` or a `.base` parse
-    // warning) wins; while one is shown the info status waits. A live info
-    // message (neutral color) shows only when no error does.
+    // Message precedence: the real error (red; `last_error` or a `.base`
+    // parse warning) wins, then the walk warning, then the info status.
+    // While any of them is shown the info status waits; the walk warning
+    // has its own slot, so it never overwrote the real error.
     let mut error_shown = false;
     if let Some(err) = &app.viewer.last_error {
         spans.push(Span::styled(
@@ -1423,6 +1424,15 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             ));
             error_shown = true;
         }
+    }
+    // The watch walk's unreadable-directory state: error-ish, but it
+    // outlives a transient info message and clears with the condition.
+    if let Some(warning) = &app.walk_warning {
+        spans.push(Span::styled(
+            format!(" · {warning}"),
+            Style::new().fg(ui.status_error_fg),
+        ));
+        error_shown = true;
     }
     let info = if error_shown {
         None

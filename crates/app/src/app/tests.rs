@@ -1775,6 +1775,93 @@ fn vault_watcher_reindexes_and_reparses() {
     );
 }
 
+/// A directory that becomes unreadable after startup: the watch walk
+/// reports it, and the app puts the warning in its own status-bar slot (the
+/// startup index keeps the same warning to itself; mid-session the bar is
+/// the channel the user can see). It is state: it stays while the
+/// condition lasts and clears on the walk that finds the directory readable
+/// again — no unrelated action needed.
+#[test]
+fn a_directory_locked_after_startup_surfaces_a_warning_that_clears() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    let sub = vault_dir.path().join("sub");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    app.poll();
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("the unreadable directory is silent"));
+    assert!(
+        message.contains("sub"),
+        "names the directory, vault-relative: {message:?}"
+    );
+    assert!(
+        message.contains("unreadable"),
+        "says what happened: {message:?}"
+    );
+    assert!(
+        app.viewer.last_error.is_none(),
+        "the walk warning has its own slot, not the error one: {:?}",
+        app.viewer.last_error
+    );
+
+    // Still unreadable: the next scan keeps the same state (no rewrite
+    // into a new event).
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert_eq!(app.walk_warning.as_deref(), Some(message.as_str()));
+
+    // Readable again: the warning clears itself on the next walk.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert!(
+        app.walk_warning.is_none(),
+        "a readable vault clears the warning without an unrelated action: {:?}",
+        app.walk_warning
+    );
+}
+
+/// A real error the user still needs survives the background walk warning:
+/// the warning lives in its own slot, so the scan tick cannot replace the
+/// error with a stale "unreadable" notice.
+#[test]
+fn a_walk_warning_does_not_replace_a_real_error() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.viewer.last_error = Some("not writing: changed on disk".to_string());
+    let sub = vault_dir.path().join("sub");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    app.poll();
+    assert!(
+        app.walk_warning
+            .as_deref()
+            .is_some_and(|w| w.contains("unreadable")),
+        "the condition is still recorded: {:?}",
+        app.walk_warning
+    );
+    assert_eq!(
+        app.viewer.last_error.as_deref(),
+        Some("not writing: changed on disk"),
+        "the background warning left the newer error alone"
+    );
+    // Restore so the fixture's TempDir can clean up.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
 // --- M4: global search --------------------------------------------
 
 fn search_vault() -> TempDir {
