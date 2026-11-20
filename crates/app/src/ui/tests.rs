@@ -1063,6 +1063,33 @@ fn backlinks_text_never_runs_under_the_bar() {
 }
 
 #[test]
+fn backlinks_selected_row_is_a_full_width_inverse_video_bar() {
+    let vault_dir = backlinks_vault("ui-bl-band", 2);
+    let mut app = backlinks_app(&vault_dir);
+    app.theme_ui.sidebar_bg = Color::Rgb(7, 7, 7);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let panel = full_panel(&app);
+    let buffer = terminal.backend().buffer();
+    let y = panel.y + 1;
+    // The first backlink is selected: inverted text, and the bar reaches
+    // the panel's inner right edge (x = 98; border at 99).
+    assert_eq!(buffer[(1, y)].bg, Color::Rgb(5, 5, 5), "backlinks bar");
+    assert_eq!(
+        buffer[(1, y)].fg,
+        Color::Rgb(7, 7, 7),
+        "backlinks selected text is the panel background"
+    );
+    assert_eq!(
+        buffer[(98, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "backlinks bar reaches the inner right edge"
+    );
+}
+
+#[test]
 fn backlinks_scrollbar_tracks_the_drawn_scroll() {
     let vault_dir = backlinks_vault("ui-bl-pos", 12);
     let mut app = backlinks_app(&vault_dir);
@@ -1115,6 +1142,39 @@ fn tag_sidebar_renders_and_counts() {
 }
 
 #[test]
+fn tag_selected_row_is_a_full_width_inverse_video_bar() {
+    let vault_dir = TempDir::new("ui-tags-bar-row");
+    std::fs::write(
+        vault_dir.path().join("a.md"),
+        "---\ntags: [mocktag]\n---\na\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-tags-bar-row.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.theme_ui.sidebar_bg = Color::Rgb(7, 7, 7);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    app.handle_key(key(KeyCode::Char('t')));
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    // The first tag row is selected: inverted text, bar to the inner right
+    // edge (border at x = 29).
+    assert_eq!(buffer[(1, 1)].bg, Color::Rgb(5, 5, 5), "tag bar starts");
+    assert_eq!(
+        buffer[(1, 1)].fg,
+        Color::Rgb(7, 7, 7),
+        "tag selected text is the panel background"
+    );
+    assert_eq!(
+        buffer[(28, 1)].bg,
+        Color::Rgb(5, 5, 5),
+        "tag bar reaches the inner right edge"
+    );
+}
+
+#[test]
 fn outline_sidebar_renders_headings_indented_by_level() {
     let vault_dir = TempDir::new("ui-outline");
     std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
@@ -1155,6 +1215,37 @@ fn outline_sidebar_renders_headings_indented_by_level() {
         Some(4),
         "the level-3 heading is two 2-cell steps in: {deep:?}"
     );
+}
+
+#[test]
+fn outline_selected_row_is_a_full_width_inverse_video_bar() {
+    let vault_dir = TempDir::new("ui-outline-bar-row");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-outline-bar-row.md", "# Top\n\nbody\n\n## Deep\n\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.theme_ui.sidebar_bg = Color::Rgb(7, 7, 7);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    app.handle_key(key(KeyCode::Char('o')));
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    // The first heading is the selected row: inverted text and a bar out
+    // to the panel's inner right edge (border at x = 29).
+    assert_eq!(buffer[(1, 1)].bg, Color::Rgb(5, 5, 5), "outline bar starts");
+    assert_eq!(
+        buffer[(1, 1)].fg,
+        Color::Rgb(7, 7, 7),
+        "outline selected text is the panel background"
+    );
+    assert_eq!(
+        buffer[(28, 1)].bg,
+        Color::Rgb(5, 5, 5),
+        "outline bar reaches the inner right edge"
+    );
+    // The second heading is not selected.
+    assert_eq!(buffer[(28, 2)].bg, Color::Rgb(7, 7, 7));
 }
 
 #[test]
@@ -1246,6 +1337,37 @@ fn outline_scrollbar_only_when_the_headings_overflow() {
     assert!(
         border_drawn(buffer, sidebar_width(100) - 1, 1..22),
         "the border is drawn"
+    );
+}
+
+#[test]
+fn selected_bar_stops_before_the_scrollbar_column() {
+    let vault_dir = TempDir::new("ui-outline-bar-stop");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let mut body = String::new();
+    for i in 0..40 {
+        body.push_str(&format!("# Heading {i}\n\n"));
+    }
+    let file = ui_viewer("ui-outline-bar-stop.md", &body);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.theme_ui.sidebar_bg = Color::Rgb(7, 7, 7);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    app.handle_key(key(KeyCode::Char('o')));
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    // 40 headings overflow, so the scrollbar owns the last inner column.
+    let bar_x = sidebar_width(100) - 2;
+    assert_eq!(
+        buffer[(bar_x - 1, 1)].bg,
+        Color::Rgb(5, 5, 5),
+        "the bar reaches the text area's right edge"
+    );
+    assert_ne!(
+        buffer[(bar_x, 1)].bg,
+        Color::Rgb(5, 5, 5),
+        "the bar never runs into the scrollbar column"
     );
 }
 
@@ -1563,6 +1685,54 @@ fn search_popup_renders_prompt_results_and_highlight() {
     app.search.hits.clear();
     let screen = render(&mut app);
     assert!(screen.contains("no matches"));
+}
+
+#[test]
+fn search_selected_row_is_a_full_width_bar_and_keeps_the_match_highlight() {
+    let vault_dir = TempDir::new("ui-search-band");
+    std::fs::write(vault_dir.path().join("hay.md"), "top\nneedle here\nmore\n").unwrap();
+    let file = ui_viewer("ui-search-band.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    app.handle_key(key(KeyCode::Char('s')));
+    for ch in "needle".chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = crate::search::popup_geometry(
+        Rect::new(0, 0, 100, 24),
+        app.search.mode,
+        app.search.hits.len(),
+    );
+    let y = popup.y + 1;
+    // `hay.md:2: ` is 10 cells; the match starts at the first snippet cell.
+    let match_x = popup.x + 1 + 10;
+    assert_eq!(
+        buffer[(match_x, y)].bg,
+        app.theme_ui.popup_match_bg,
+        "the match span keeps its colour inside the bar"
+    );
+    assert_eq!(
+        buffer[(match_x + 6, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "the rest of the row carries the bar"
+    );
+    assert_eq!(
+        buffer[(match_x + 6, y)].fg,
+        Color::Rgb(9, 9, 9),
+        "selected popup text is the popup background"
+    );
+    assert_eq!(
+        buffer[(popup.right() - 2, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "search bar reaches the popup's inner right edge"
+    );
 }
 
 #[test]
@@ -2028,11 +2198,22 @@ fn sidebar_selection_keeps_selection_bg_over_sidebar_bg() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     // Inner row 2 = `alpha.md` (selected): selection_bg wins on top of
-    // the sidebar_bg base.
+    // the sidebar_bg base, and the text is inverted to the panel colour.
     assert_eq!(
         buffer[(2, 2)].bg,
         Color::Rgb(5, 5, 5),
         "selected row keeps selection_bg"
+    );
+    assert_eq!(
+        buffer[(2, 2)].fg,
+        Color::Rgb(7, 7, 7),
+        "selected row text is the panel background"
+    );
+    // The bar reaches the panel's inner right edge (x = 28: border at 29).
+    assert_eq!(
+        buffer[(28, 2)].bg,
+        Color::Rgb(5, 5, 5),
+        "selected bar reaches the inner right edge"
     );
     // A blank sidebar row below still carries sidebar_bg.
     assert_eq!(buffer[(10, 20)].bg, Color::Rgb(7, 7, 7));
@@ -2941,6 +3122,48 @@ fn quick_switcher_reports_no_matches() {
     assert!(
         screen.contains("↑/↓ move · Enter open · Esc close"),
         "the empty state keeps its footer: {screen}"
+    );
+}
+
+#[test]
+fn quick_selected_row_is_a_full_width_bar_and_keeps_the_match_highlight() {
+    let vault_dir = TempDir::new("ui-quick-band");
+    std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
+    let file = ui_viewer("ui-quick-band.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    app.open_quick();
+    app.quick.push_char('a');
+    app.quick.push_char('l');
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = crate::quick::popup_geometry(Rect::new(0, 0, 100, 24), app.quick.items.len());
+    // The prompt is the first inner row; the selected match is the second.
+    let y = popup.y + 2;
+    assert_eq!(
+        buffer[(popup.x + 1, y)].bg,
+        app.theme_ui.popup_match_bg,
+        "the match span keeps its colour inside the bar"
+    );
+    // `al` is matched; `p` is the first unmatched character of `alpha.md`.
+    assert_eq!(
+        buffer[(popup.x + 3, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "the unmatched text carries the bar"
+    );
+    assert_eq!(
+        buffer[(popup.x + 3, y)].fg,
+        Color::Rgb(9, 9, 9),
+        "selected popup text is the popup background"
+    );
+    assert_eq!(
+        buffer[(popup.right() - 2, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "quick-switcher bar reaches the popup's inner right edge"
     );
 }
 

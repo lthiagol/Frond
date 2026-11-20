@@ -238,6 +238,19 @@ own keys, and they take them instead of the app:
   listed warning (never silently). `[diff]` has no diff view. An unknown
   `base` preset is a hard load error (the file is skipped and named), and
   so is a missing or invalid `appearance`.
+- **The selected row** of every list panel (the sidebar tree, the outline,
+  the tag view, the backlinks panel, and the search, quick-switch and
+  disambiguation popups) is one full-width bar: its background is
+  `selection_bg` across the panel's whole inner width (up to the scrollbar
+  column when one is drawn), and its text is painted in the panel's own
+  background colour (`sidebar_bg` for the sidebar family, `content_bg` for
+  the popups). This is the app's inverse-video rule, the same one the link
+  focus highlight uses (`crates/app/src/links.rs`): the selection background
+  and the row's text colour are never the same colour, so the selected row
+  stays legible in every theme. The selected row's own colours are dropped:
+  the status glyph, the changed marker and the dimmed name keep their shape,
+  not their colour. A search or quick-switch match highlight inside the
+  selected row is kept as it is.
 - **Theme dirs:** `~/.config/frond/themes/` (frond-format TOML files only; the
   leaf compat directory is no longer read). `FROND_THEMES` overrides the
   directory (tests and smokes only).
