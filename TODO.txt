@@ -6,29 +6,39 @@ HOW TO RESUME
   order is under NEXT. The loop mechanics are the global skill
   `orchestration-flow`.
 
+  The per-round review findings of the last cycle live in
+  `/tmp/opencode/frond/review*/` - that is /tmp, so it does not survive a
+  restart; what matters is copied into OPEN and DONE below. The briefs of
+  the last cycle are in `/tmp/opencode/frond/unit-*.md` (the same story).
+  The per-unit history is in the git log (`git log v0.6.4..v0.6.5`).
+
 WHERE WE ARE
-  Nothing is in flight. **0.6.5 is tagged** (`v0.6.5`) and committed: this
-  cycle shipped the selection bar, the interactive scrollbars, the
-  scrollbar hover, the link hover, the regex search, the match-next, the
-  line-number gutter and the startup warnings - the release notes cover
-  every one of them.
+  Nothing is in flight. **0.6.5 is tagged** (`v0.6.5`) and committed, not
+  pushed (pushing is the human's call): this cycle shipped the selection
+  bar, the interactive scrollbars, the scrollbar hover, the link hover,
+  the regex search, the match-next, the line-number gutter and the startup
+  warnings - the release notes cover every one of them.
 
   Every unit went builder -> two fresh-context reviewers (a delta reviewer
   on the fix round) -> verdict -> commit, and the gate was run by the
   orchestrator, never taken on trust. The parked list is empty; what is
   left sits under OPEN.
 
-  Before that: the whole-project audit is done and released:
+  Before this cycle: the whole-project audit is done and released:
   **0.6.4 is tagged and pushed** (`v0.6.4`), CI is green on the push, and
-  `main` is in sync with `origin/main`. The audit's four blocking findings
-  and their lows are closed.
+  `main` was in sync with `origin/main`. The audit's four blocking
+  findings and their lows are closed.
 
-  The next cycle starts from the human's requests. Before starting
-  any of it, note that the flow's own rules are what made this session
-  work: every unit went builder → two fresh-context reviewers → verdict →
-  commit, and the gate was run by the orchestrator, never taken on trust.
+  The next cycle starts from the human's requests. The flow's own rules
+  are what made this session work - keep them: one unit at a time, a
+  fresh builder and fresh reviewers per unit, the gate run by the
+  orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 32 — the 0.6.5 cut: `Cargo.toml` + `Cargo.lock` bumped 0.6.4 ->
+    0.6.5, the changelog released as `## [0.6.5] — 2026-11-20` with a
+    fresh empty `## [Unreleased]` above it, and the `v0.6.5` tag. The
+    release notes cover all nine units of the cycle.
   - Unit 31 — the startup warnings reach the user: the warnings the index
     records while it walks the vault at startup (an unreadable file or
     directory) are surfaced in the status bar through the walk warnings'
@@ -64,10 +74,6 @@ DONE
     before the scrollbar column. One helper owns the rule; the two inline
     copies (the quick-switcher and the search results) are gone. The spec
     line, `docs/COLORS.md` and the changelog came with it.
-  The whole-project audit — three reviewers over the whole project (the
-  `crates/app` TUI, the `crates/vault` crate, and the documentation against
-  the code): **4 blocking and 13 low findings**, all closed.
-
   - Unit 22 — 0.6.4 cut: `Cargo.toml` + `Cargo.lock` bumped, the changelog
     released as `## [0.6.4] — 2026-11-19` with a fresh empty
     `## [Unreleased]` above it, and the `v0.6.4` tag. Round 1 came back
@@ -100,6 +106,10 @@ DONE
   - Round S — the audit's documentation findings, in the orchestrator's own
     files: the status bar's segment list, the keybindings section, the icon
     examples, README's index.md claim, COLORS.md's scrollbar role.
+
+  The whole-project audit — three reviewers over the whole project (the
+  `crates/app` TUI, the `crates/vault` crate, and the documentation against
+  the code): **4 blocking and 13 low findings**, all closed.
 
   Before the audit: the scrollbar's thumb geometry (unit 1), the scroll
   position in the status bar (unit 2), a status bar that stops moving while
@@ -144,6 +154,14 @@ HAPPENED
     rule one home pulled the disambiguation popup into it, and the spec and
     the changelog still named six panels. Both reviewers caught it from
     their own lenses; the enumeration is part of the rule.
+  - Two gates at once fail each other: the smoke suites append to fixed
+    paths (`/tmp/watchtest.md`), so a concurrent `make check` makes the
+    other's line-count check fail. The orchestrator's gate and the
+    builder's gate must not overlap - one gate at a time.
+  - A review brief can describe the code's polarity backwards (the unit 30
+    brief said the bare `re:` case replaced the active search where the
+    code clears it). The builders follow the code, and the reviewers said
+    so; write the brief from the code, not from memory.
 
 OPEN
   - From unit 23's review (both lows, carried): the search popup's
@@ -163,11 +181,9 @@ OPEN
       becomes unreadable mid-session is recorded by `reindex_one` but
       never surfaced, while the spec's never-silent sentence is scoped to
       the startup walk.
-  - Parked: an interactive scrollbar (click to jump, drag — TODO.md §5.8),
-      a link hover preview, regex + match-next in the search popup, a
-      line-number gutter. And a scroll position for the sidebar tree — the
-      recommendation is to **drop** it: the sidebar's scroll is a selection
-      cursor, not a document position.
+  - Parked: a scroll position for the sidebar tree — the recommendation is
+      to **drop** it: the sidebar's scroll is a selection cursor, not a
+      document position.
 
 NEXT
   1. The parked list is done (the interactive scrollbar, the link hover,

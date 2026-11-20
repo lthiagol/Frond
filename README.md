@@ -11,6 +11,7 @@ main engine of this project (vendored into `crates/engine`).
 
 - Rendered markdown (leaf's engine, vendored): tables, lists, callouts, syntax highlighting, LaTeX, Mermaid
 - Collapsible folder-tree sidebar (resizable with `<`/`>` or the config) with status glyphs and changed-file markers, plus a tag view
+- The selected row of every panel is one full-width bar, legible in every theme
 - Click-to-open everywhere — sidebar rows, backlink rows, in-note links — with opened notes revealing in the tree and focus following the reader
 - Wikilink navigation: resolution per Obsidian rules, heading anchors, disambiguation popup, back/forward history with scroll restore
 - Backlinks panel; global vault search with jump-to-line, and a regular-expression mode (`re:` prefix)
