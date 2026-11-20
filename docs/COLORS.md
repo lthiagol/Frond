@@ -88,7 +88,7 @@ carries the family's intended role:
   the community convention for chrome), borders/match = **bg1**/**bg2**,
   dimmed = **gray**, selection = **orange** (a bright accent).
 - **Presets** (arctic/ocean/forest/solarized): leaf's own hand-tuned `UiTheme`
-  constants (`/tmp/leaf/src/theme/presets.rs`), taken verbatim.
+  constants (`src/theme/presets.rs` in leaf v1.29.2), taken verbatim.
 
 ## Deliberate deviations
 

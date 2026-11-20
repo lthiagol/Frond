@@ -1,7 +1,9 @@
 # VENDORED.md — deviations from upstream leaf
 
 Source: https://github.com/rivolink/leaf (MIT), v1.29.2, `src/markdown/` +
-markdown-relevant parts of `src/theme/`. Reference clone: `/tmp/leaf`.
+markdown-relevant parts of `src/theme/`. A reference clone of that tag is
+needed to diff against upstream — the old `/tmp/leaf` copy does not survive
+a restart, so re-clone the tag when a merge is due.
 
 Goal: keep the vendored code as close to upstream as practical so future leaf
 improvements can be merged. Every intentional change is listed here.
