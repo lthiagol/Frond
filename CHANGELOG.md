@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+
+### Fixed
+
+### Changed
+
+## [0.6.5] — 2026-11-20
+
+### Added
 - The note pane's scrollbar is a position control: a press on the bar jumps
   the note to that point in the document, and a drag keeps the note
   following the pointer until the button is released. Until now a click on
@@ -16,7 +24,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   any more - it never opens the row it lands on.
 - A scrollbar's thumb highlights in the theme's accent while the mouse is
   over it, so the bar says it is draggable. The colour is a new theme
-  role, `scrollbar_hover_fg`.
+  role, `scrollbar_hover_fg`: a custom theme file may set it, and a file
+  that does not takes the accent - the one it inherits, or the one the
+  file itself sets.
 - The link under the mouse is highlighted in the theme's `link_hover`
   colour, so you can see which link you are about to open. The link focus
   does not move, and clicking the link still opens it.
@@ -25,15 +35,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   query can match a shape and not only a literal string. An invalid
   pattern is reported in the popup and searches nothing.
 - The last search stays active: `n` and `N` in the note pane move to the
-  next and the previous occurrence of it in the open note, so you can walk
-  through the hits of a note you just opened.
+  next and the previous occurrence of it in the open note, wrapping at both
+  ends, so you can walk through the hits of a note you just opened.
 - The note pane can show a line-number gutter: with the new config key
   `line_numbers` on, a column left of the text shows the note's source
   line numbers (a wrapped line's continuation shows an empty cell).
 - The warnings the vault index records while it walks the vault at
   startup (an unreadable file or directory) now reach the status bar.
   They used to be silent, so a note that was skipped was a note you could
-  not find and had no way of knowing about.
+  not find and had no way of knowing about. The messages are vault-relative
+  and deduplicated, and a file that reads again is reindexed before its
+  warning goes, so search, tags and backlinks find it again.
 
 ### Fixed
 
