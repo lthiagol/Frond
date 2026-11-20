@@ -5,7 +5,7 @@
 //! Port rules (per file): `base` and `syntax` kept; the `[markdown]` section
 //! copied verbatim (field names are the engine's `MarkdownTheme`); the
 //! `[ui]` keys mapped onto our `UiTheme` vocabulary:
-//! `toc_accent` → sidebar_border_focused + selection_bg,
+//! `toc_accent` → sidebar_border_focused + selection_bg + scrollbar_hover_fg,
 //! `toc_border` → sidebar_border_unfocused + popup_border_fg,
 //! `toc_bg` → sidebar_bg,
 //! `status_bg` → status_bg,
@@ -101,6 +101,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x73, 0x79, 0x94),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xe5, 0xc8, 0x90),         // status_search_fg
             popup_match_bg: Color::Rgb(0x41, 0x45, 0x59),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xba, 0xbb, 0xf1),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x51, 0x57, 0x6d)),
@@ -177,6 +178,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x9c, 0xa0, 0xb0),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xdf, 0x8e, 0x1d),         // status_search_fg
             popup_match_bg: Color::Rgb(0xe8, 0xe7, 0xe2),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0x72, 0x87, 0xfd),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0xbc, 0xc0, 0xcc)),
@@ -253,6 +255,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x6e, 0x73, 0x8d),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xee, 0xd4, 0x9f),         // status_search_fg
             popup_match_bg: Color::Rgb(0x36, 0x3a, 0x4f),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xb7, 0xbd, 0xf8),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x49, 0x4d, 0x64)),
@@ -329,6 +332,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x6c, 0x70, 0x86),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xf9, 0xe2, 0xaf),         // status_search_fg
             popup_match_bg: Color::Rgb(0x31, 0x32, 0x44),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xb4, 0xbe, 0xfe),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x45, 0x47, 0x5a)),
@@ -405,6 +409,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x62, 0x72, 0xa4),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xf1, 0xfa, 0x8c),         // status_search_fg
             popup_match_bg: Color::Rgb(0x42, 0x44, 0x50),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xbd, 0x93, 0xf9),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x44, 0x47, 0x5a)),
@@ -481,6 +486,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x6c, 0x66, 0x4b),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0x84, 0x6e, 0x15),         // status_search_fg
             popup_match_bg: Color::Rgb(0xec, 0xea, 0xdf),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0x64, 0x4a, 0xc9),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0xcf, 0xcf, 0xde)),
@@ -557,6 +563,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x92, 0x83, 0x74),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xfa, 0xbd, 0x2f),         // status_search_fg
             popup_match_bg: Color::Rgb(0x3c, 0x38, 0x36),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xfe, 0x80, 0x19),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x66, 0x5c, 0x54)),
@@ -633,6 +640,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x4c, 0x56, 0x6a),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xeb, 0xcb, 0x8b),         // status_search_fg
             popup_match_bg: Color::Rgb(0x43, 0x4c, 0x5e),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0x88, 0xc0, 0xd0),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x4c, 0x56, 0x6a)),
@@ -709,6 +717,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x6e, 0x6a, 0x86),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xf6, 0xc1, 0x77),         // status_search_fg
             popup_match_bg: Color::Rgb(0x26, 0x23, 0x3a),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xeb, 0xbc, 0xba),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x40, 0x3d, 0x52)),
@@ -785,6 +794,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x98, 0x93, 0xa5),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xea, 0x9d, 0x34),         // status_search_fg
             popup_match_bg: Color::Rgb(0xf2, 0xe9, 0xe1),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xd7, 0x82, 0x7e),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0xdf, 0xda, 0xd9)),
@@ -861,6 +871,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x6e, 0x6a, 0x86),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xf6, 0xc1, 0x77),         // status_search_fg
             popup_match_bg: Color::Rgb(0x39, 0x35, 0x52),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0xea, 0x9a, 0x97),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x44, 0x41, 0x5a)),
@@ -937,6 +948,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x89, 0x90, 0xb3),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0x8c, 0x6c, 0x3e),         // status_search_fg
             popup_match_bg: Color::Rgb(0xc4, 0xc8, 0xda),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0x2e, 0x7d, 0xe9),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0xb7, 0xc1, 0xe3)),
@@ -1013,6 +1025,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x56, 0x5f, 0x89),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xe0, 0xaf, 0x68),         // status_search_fg
             popup_match_bg: Color::Rgb(0x29, 0x2e, 0x42),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0x7a, 0xa2, 0xf7),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x54, 0x5c, 0x7e)),
@@ -1089,6 +1102,7 @@ pub(crate) const BUILTIN_THEMES: &[BuiltinTheme] = &[
             popup_dimmed_fg: Color::Rgb(0x73, 0x7a, 0xa2),        // status_shortcut_fg
             popup_match_fg: Color::Rgb(0xe0, 0xaf, 0x68),         // status_search_fg
             popup_match_bg: Color::Rgb(0x29, 0x2e, 0x42),         // status_search_bg
+            scrollbar_hover_fg: Color::Rgb(0x7a, 0xa2, 0xf7),     // toc_accent
         },
         md: &[
             (md::search_highlight_bg, Color::Rgb(0x41, 0x48, 0x68)),

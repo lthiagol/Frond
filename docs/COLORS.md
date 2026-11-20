@@ -47,8 +47,9 @@ checks every preset and built-in, so a mislabelled theme fails the suite.
 | `status_ahead_fg` / `status_behind_fg` | Ahead `↑n` / behind `↓n` | `status_success_fg` / `status_error_fg` |
 | `status_error_fg` | Reload/write/base-warnings in the status bar | `status_error_fg` |
 | `popup_border_fg` | Popup borders; `.base` header/group accents | `toc_border` |
-| `popup_dimmed_fg` | Popup footers, "no matches", every scrollbar's track and thumb | `status_shortcut_fg` |
+| `popup_dimmed_fg` | Popup footers, "no matches", every scrollbar's track (its thumb takes `scrollbar_hover_fg` while the mouse is over the bar) | `status_shortcut_fg` |
 | `popup_match_fg` / `popup_match_bg` | Search-match and quick-switcher match highlight; help-pane key labels (`popup_match_fg`) | `status_search_fg` / `status_search_bg` |
+| `scrollbar_hover_fg` | A scrollbar's thumb while the mouse is over the bar (the accent of the theme) | `toc_accent` |
 
 Note: `status_ahead_fg`, `status_watch_off_fg`, and `popup_dimmed_fg` have
 their own app roles (ahead arrow, `watch off` indicator, popup footers/empty

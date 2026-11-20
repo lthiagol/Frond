@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use vault::{GitStatus, SearchResults};
 
 use crate::config::ConfigWatch;
@@ -213,6 +213,12 @@ pub struct App {
     /// the release that ends it is consumed instead of being handled as a
     /// click. See [`Self::handle_press`].
     bar_drag: Option<BarTarget>,
+    /// The pointer's last known cell. `None` until the first mouse event and
+    /// again while mouse capture is off: no events arrive then, so a stale
+    /// cell must not keep a bar's hover lit. Drives the scrollbar thumb
+    /// hover (`ui::draw_scrollbar`); every mouse event reports it, not just
+    /// the presses, so the highlight follows the pointer.
+    pub pointer: Option<Position>,
     /// Sidebar width override in terminal columns (`None` = the default
     /// 30% of the terminal, clamped 24–60; see `ui::sidebar_width`). Set
     /// by `<`/`>` and the config `sidebar_width` key, clamped 24–120.
@@ -306,6 +312,7 @@ impl App {
             watcher,
             mouse_capture: true,
             bar_drag: None,
+            pointer: None,
             sidebar_width: None,
             layout: Layout::default(),
             last_rescan: None,
@@ -998,6 +1005,19 @@ impl App {
         if let Some(index) = bar_list_index(area, row, self.backlinks.len()) {
             self.select_backlink(index);
         }
+    }
+
+    /// Remembers where the pointer is. Every mouse event carries its cell
+    /// (the terminal's any-motion mode reports moves with no button held),
+    /// and the bars' hover highlight is decided from this in
+    /// `ui::draw_scrollbar`. With mouse capture off no events arrive, and
+    /// the cell is dropped rather than kept (see
+    /// [`Self::toggle_mouse_capture`]).
+    pub fn on_mouse_position(&mut self, col: u16, row: u16) {
+        if !self.mouse_capture {
+            return;
+        }
+        self.pointer = Some(Position::new(col, row));
     }
 
     /// Left-button press. On any scrollbar column (the note pane, the
@@ -2147,9 +2167,14 @@ impl App {
     /// event loop owns the terminal and executes the actual
     /// `EnableMouseCapture`/`DisableMouseCapture` when it sees the change.
     /// Off, the terminal handles the mouse natively (text selection/copy)
-    /// and the app ignores clicks/wheels; the status bar shows `mouse off`.
+    /// and the app ignores clicks/wheels and drops the pointer it had
+    /// tracked (no events arrive to move a stale cell, and a bar must not
+    /// stay highlighted); the status bar shows `mouse off`.
     pub fn toggle_mouse_capture(&mut self) {
         self.mouse_capture = !self.mouse_capture;
+        if !self.mouse_capture {
+            self.pointer = None;
+        }
     }
 
     /// `<` / `>`: narrow/widen the sidebar by 2 columns. The override is

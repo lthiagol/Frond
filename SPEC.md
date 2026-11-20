@@ -172,6 +172,11 @@ frontmatter at all — the whole file is body.
   that ends a drag is not a click. Mouse capture off (`m`) disables it.
   The bar column of the `.base` table and the help popup is not
   interactive yet.
+- The **scrollbar's thumb highlights under the mouse**: while the pointer
+  is over a bar column, that bar's thumb is painted in `scrollbar_hover_fg`
+  (a new theme role; every theme's value is its accent). The track is
+  unchanged, and the thumb does not move. Mouse capture off (`m`) disables
+  the hover, like every other mouse action.
 
 ## Keybindings (v1)
 
@@ -240,9 +245,11 @@ own keys, and they take them instead of the app:
   `status_watch_off_fg`, `status_success_fg`, `status_dirty_fg`,
   `status_ahead_fg`, `status_behind_fg`, `status_error_fg`,
   `popup_border_fg`, `popup_dimmed_fg`, `popup_match_fg`,
-  `popup_match_bg` — the sidebar (and backlinks panel) paint
-  `sidebar_bg`, the status bar paints `status_bg`, popups paint
-  `content_bg`; see `docs/COLORS.md` for roles and sources. Four paired
+  `popup_match_bg`, `scrollbar_hover_fg` — the sidebar (and backlinks
+  panel) paint `sidebar_bg`, the status bar paints `status_bg`, popups
+  paint `content_bg`, and a scrollbar's thumb paints `scrollbar_hover_fg`
+  while the mouse is over it; see `docs/COLORS.md` for roles and sources.
+  Four paired
   presets (arctic/forest/ocean/solarized) reuse leaf's
   preset values; **14 built-in themes** (catppuccin-latte/frappé/macchiato/
   mocha, dracula, dracula-alucard, gruvbox, nord, rose-pine,

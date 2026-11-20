@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::{Instant, SystemTime};
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
@@ -26,17 +26,32 @@ pub fn sidebar_width(total: u16) -> u16 {
     (u32::from(total) * 3 / 10).clamp(24, 60) as u16
 }
 
-/// Right-edge vertical scrollbar shared by the note, list and help paths.
-/// Drawn into a single-column `bar_area`; callers only invoke it when the
-/// content overflows, and shrink their text area by that one column.
-fn draw_scrollbar(
-    f: &mut Frame,
-    bar_area: Rect,
+/// What a bar shows, as the thumb needs it: the content's extent (lines or
+/// rows), the current offset, and how many rows of it the pane shows.
+/// `viewport` is explicit because the track is taller than the text viewport
+/// whenever the pane has a vertical margin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BarSpan {
     total: usize,
     position: usize,
     viewport: usize,
-    fg: Color,
+}
+
+/// Right-edge vertical scrollbar shared by the note, list and help paths.
+/// Drawn into a single-column `bar_area`; callers only invoke it when the
+/// content overflows, and shrink their text area by that one column.
+///
+/// The track is painted in `popup_dimmed_fg`; while the pointer is over the
+/// bar column the thumb takes the theme's accent (`scrollbar_hover_fg`) so
+/// the bar reads as draggable. The pointer test lives here, in the one
+/// helper every bar is drawn through, and it only ever changes a colour.
+fn draw_scrollbar(
+    f: &mut Frame,
+    bar_area: Rect,
+    span: BarSpan,
     bg: Color,
+    ui: UiTheme,
+    pointer: Option<Position>,
 ) {
     // ratatui wants the scroll *range* here, not the line count: its
     // denominator is `content_length - 1 + viewport`, so feeding it the
@@ -44,15 +59,21 @@ fn draw_scrollbar(
     // The viewport is passed explicitly because the track is taller than
     // the text viewport whenever the pane has a vertical margin; the thumb
     // must stay proportional to the visible fraction of the content.
-    let range = total.saturating_sub(viewport);
+    let range = span.total.saturating_sub(span.viewport);
     let mut state = ScrollbarState::new(range)
-        .position(position)
-        .viewport_content_length(viewport);
+        .position(span.position)
+        .viewport_content_length(span.viewport);
+    let thumb_fg = if pointer.is_some_and(|pointer| bar_area.contains(pointer)) {
+        ui.scrollbar_hover_fg
+    } else {
+        ui.popup_dimmed_fg
+    };
     // Leaf's symbols: a thin track and a solid thumb, no arrow heads, so the
     // track spans the whole bar column (the heads used to eat two rows).
     f.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .style(Style::new().fg(fg).bg(bg))
+            .style(Style::new().fg(ui.popup_dimmed_fg).bg(bg))
+            .thumb_style(Style::new().fg(thumb_fg).bg(bg))
             .begin_symbol(None)
             .end_symbol(None)
             .track_symbol(Some("│"))
@@ -67,6 +88,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     // The chrome palette: every hardcoded shell color below comes from
     // the active theme (see `theme.rs`).
     let ui = app.theme_ui;
+    // The pointer's cell decides the bars' hover highlight (read once: the
+    // draw borrows parts of `app` mutably below).
+    let pointer = app.pointer;
     // Feed the actual frame height back into the viewer: single source of
     // truth for the viewport height (also clamps the scroll to it).
     let view_height = area.height.saturating_sub(1);
@@ -205,11 +229,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             draw_scrollbar(
                 f,
                 bar,
-                app.viewer.lines.len(),
-                app.viewer.scroll as usize,
-                text_rows,
-                ui.popup_dimmed_fg,
+                BarSpan {
+                    total: app.viewer.lines.len(),
+                    position: app.viewer.scroll as usize,
+                    viewport: text_rows,
+                },
                 ui.content_bg,
+                ui,
+                pointer,
             );
         } else {
             app.layout.note_scrollbar_area = None;
@@ -239,6 +266,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 ui,
                 app.focus == Focus::Sidebar,
                 index.as_deref(),
+                pointer,
             );
         } else if app.sidebar_mode == SidebarMode::Outline {
             let focused = app.focus == Focus::Sidebar;
@@ -252,7 +280,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             } = app;
             let entries = crate::app::outline_rows(base, viewer);
             outline.sync(entries.len());
-            sidebar_bar = draw_outline(f, sidebar_rect, outline, entries, ui, focused);
+            sidebar_bar = draw_outline(f, sidebar_rect, outline, entries, ui, focused, pointer);
         } else if let Some(sidebar) = &mut app.sidebar {
             sidebar_bar = draw_sidebar(
                 f,
@@ -260,8 +288,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 sidebar,
                 ui,
                 app.focus == Focus::Sidebar,
-                index.as_deref(),
-                app.git.as_ref(),
+                RowFacts {
+                    index: index.as_deref(),
+                    git: app.git.as_ref(),
+                },
+                pointer,
             );
         }
     }
@@ -309,6 +340,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 /// rule + rows, scrolled. Click regions are recorded on the state for
 /// the click handler, which maps clicks with the same geometry.
 fn draw_base_table(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
+    let pointer = app.pointer;
     let Some(base) = &mut app.base else {
         return;
     };
@@ -363,11 +395,14 @@ fn draw_base_table(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         draw_scrollbar(
             f,
             bar,
-            base.line_count(),
-            base.scroll,
-            inner.height as usize,
-            ui.popup_dimmed_fg,
+            BarSpan {
+                total: base.line_count(),
+                position: base.scroll,
+                viewport: inner.height as usize,
+            },
             ui.content_bg,
+            ui,
+            pointer,
         );
     }
 }
@@ -450,14 +485,24 @@ fn highlight_selection(line: &mut Line<'_>, text_width: usize, panel_bg: Color, 
     }
 }
 
+/// The two vault readings a sidebar row is decorated with: the note's
+/// frontmatter status (its glyph) and the working tree's changed files (the
+/// `*` marker). Each is optional — no index means no glyph, no git status
+/// means no marker.
+#[derive(Clone, Copy)]
+struct RowFacts<'a> {
+    index: Option<&'a VaultIndex>,
+    git: Option<&'a GitStatus>,
+}
+
 fn draw_sidebar(
     f: &mut Frame,
     area: Rect,
     sidebar: &mut crate::sidebar::Sidebar,
     ui: UiTheme,
     focused: bool,
-    index: Option<&VaultIndex>,
-    git: Option<&GitStatus>,
+    facts: RowFacts<'_>,
+    pointer: Option<Position>,
 ) -> Option<Rect> {
     let inner_height = area.height.saturating_sub(2) as usize;
     sidebar.on_viewport_height(inner_height.max(1));
@@ -479,10 +524,13 @@ fn draw_sidebar(
         .map(|row| {
             let expanded = sidebar.expanded.contains(&row.node.path);
             let selected = sidebar.selected.as_deref() == Some(row.node.path.as_path());
-            let glyph = index
+            let glyph = facts
+                .index
                 .and_then(|index| index.note(&row.node.path))
                 .and_then(|note| status_glyph(note.status.as_deref()));
-            let changed = git.is_some_and(|git| git.changed_files.contains(&row.node.path));
+            let changed = facts
+                .git
+                .is_some_and(|git| git.changed_files.contains(&row.node.path));
             sidebar_line(row, expanded, inner_width, selected, glyph, changed, ui)
         })
         .collect();
@@ -500,6 +548,7 @@ fn draw_sidebar(
         },
         window,
         ui,
+        pointer,
     )
 }
 
@@ -524,6 +573,7 @@ fn render_list_panel(
     panel: ListPanel,
     window: Vec<Line<'static>>,
     ui: UiTheme,
+    pointer: Option<Position>,
 ) -> Option<Rect> {
     let border = if panel.focused {
         ui.sidebar_border_focused
@@ -547,11 +597,14 @@ fn render_list_panel(
         draw_scrollbar(
             f,
             bar,
-            panel.rows_total,
-            panel.scroll,
-            panel.area.height.saturating_sub(2) as usize,
-            ui.popup_dimmed_fg,
+            BarSpan {
+                total: panel.rows_total,
+                position: panel.scroll,
+                viewport: panel.area.height.saturating_sub(2) as usize,
+            },
             ui.sidebar_bg,
+            ui,
+            pointer,
         );
         Some(bar)
     } else {
@@ -663,6 +716,7 @@ fn draw_outline(
     entries: &[engine::TocEntry],
     ui: UiTheme,
     focused: bool,
+    pointer: Option<Position>,
 ) -> Option<Rect> {
     let inner_height = area.height.saturating_sub(2) as usize;
     let rows_total = entries.len();
@@ -700,6 +754,7 @@ fn draw_outline(
         },
         window,
         ui,
+        pointer,
     )
 }
 
@@ -732,6 +787,7 @@ fn draw_tag_list(
     ui: UiTheme,
     focused: bool,
     index: Option<&VaultIndex>,
+    pointer: Option<Position>,
 ) -> Option<Rect> {
     let inner_height = area.height.saturating_sub(2) as usize;
     tags.on_viewport_height(inner_height.max(1));
@@ -766,6 +822,7 @@ fn draw_tag_list(
         },
         window,
         ui,
+        pointer,
     )
 }
 
@@ -869,6 +926,7 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
         },
         window,
         ui,
+        app.pointer,
     );
 }
 
@@ -1833,11 +1891,14 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         draw_scrollbar(
             f,
             bar_area,
-            total,
-            scroll,
-            body_height as usize,
-            ui.popup_dimmed_fg,
+            BarSpan {
+                total,
+                position: scroll,
+                viewport: body_height as usize,
+            },
             ui.content_bg,
+            ui,
+            app.pointer,
         );
     }
 
