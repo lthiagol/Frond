@@ -812,6 +812,8 @@ impl App {
         // only known once the frame is measured); no clamp here.
         state.scroll = scroll;
         self.base = Some(state);
+        // The note is hidden behind the table: its link hover cannot stay lit.
+        self.viewer.clear_hover_link();
         Ok(())
     }
 
@@ -946,6 +948,9 @@ impl App {
                     selected: 0,
                     heading: wikilink.heading.clone(),
                 });
+                // The popup owns the pointer now: no link behind it may stay
+                // highlighted.
+                self.viewer.clear_hover_link();
             }
             LinkState::Resolved(path) => {
                 self.open_wikilink_target(path, wikilink.heading.as_deref());
@@ -1018,6 +1023,37 @@ impl App {
             return;
         }
         self.pointer = Some(Position::new(col, row));
+        self.sync_link_hover();
+    }
+
+    /// The link under the pointer, mapped through the last frame's note
+    /// viewport and the viewer's scroll: the screen cell's row offset is a
+    /// rendered line, its column offset a display column. `None` outside
+    /// the note pane, while a popup owns the pointer, while a `.base` table
+    /// covers the note, and while mouse capture is off.
+    fn hovered_link_at_pointer(&self) -> Option<usize> {
+        if !self.mouse_capture || self.base.is_some() {
+            return None;
+        }
+        if self.quick.open || self.search.open || self.any_popup_open() {
+            return None;
+        }
+        let pointer = self.pointer?;
+        let area = self.layout.note_viewport;
+        if !point_in_rect(pointer.x, pointer.y, area) {
+            return None;
+        }
+        let line = self.viewer.scroll as usize + usize::from(pointer.y - area.y);
+        let col = usize::from(pointer.x - area.x);
+        self.viewer.link_at(line, col)
+    }
+
+    /// Pushes the link under the pointer into the viewer, which restyles
+    /// only when the hovered link changes. A pointer that stays over one
+    /// link therefore costs no re-render.
+    fn sync_link_hover(&mut self) {
+        let hovered = self.hovered_link_at_pointer();
+        self.viewer.set_hover_link(hovered);
     }
 
     /// Left-button press. On any scrollbar column (the note pane, the
@@ -1235,11 +1271,7 @@ impl App {
             self.focus = Focus::Content;
             return;
         }
-        let index = self.viewer.links.iter().position(|link| {
-            link.regions
-                .iter()
-                .any(|r| r.line == line && col >= r.start && col < r.end)
-        });
+        let index = self.viewer.link_at(line, col);
         if let Some(index) = index {
             self.viewer.set_focus_link(Some(index));
             self.activate_focused_link();
@@ -1885,6 +1917,11 @@ impl App {
             KeyCode::Enter if plain && self.focus == Focus::Backlinks => self.open_from_backlinks(),
             _ => {}
         }
+        // A key may have opened a popup (`?`, `s`, Ctrl+P): the popup owns
+        // the pointer, so no link behind it may stay highlighted.
+        if self.quick.open || self.search.open || self.any_popup_open() {
+            self.viewer.clear_hover_link();
+        }
         Flow::Continue
     }
 
@@ -2174,6 +2211,7 @@ impl App {
         self.mouse_capture = !self.mouse_capture;
         if !self.mouse_capture {
             self.pointer = None;
+            self.viewer.clear_hover_link();
         }
     }
 

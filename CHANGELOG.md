@@ -17,6 +17,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 - A scrollbar's thumb highlights in the theme's accent while the mouse is
   over it, so the bar says it is draggable. The colour is a new theme
   role, `scrollbar_hover_fg`.
+- The link under the mouse is highlighted in the theme's `link_hover`
+  colour, so you can see which link you are about to open. The link focus
+  does not move, and clicking the link still opens it.
 
 ### Fixed
 

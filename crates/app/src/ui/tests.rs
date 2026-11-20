@@ -1566,6 +1566,130 @@ fn wikilink_line_renders_link_text() {
     );
 }
 
+// --- link hover -----------------------------------------------------
+
+/// The screen cell of the `target` link's first region, from the layout and
+/// scroll of the last draw (the same mapping `on_mouse_position` uses).
+fn link_cell(app: &App, target: &str) -> (u16, u16) {
+    let viewport = app.layout.note_viewport;
+    let link = app
+        .viewer
+        .links
+        .iter()
+        .find(|l| l.wikilink.as_ref().is_some_and(|w| w.target == target))
+        .expect("the link is rendered");
+    let region = link.regions[0];
+    (
+        viewport.x + region.start as u16,
+        viewport.y + (region.line as u32 - app.viewer.scroll) as u16,
+    )
+}
+
+/// A link hover fixture: a resolved wikilink in the note pane and a frame
+/// drawn once (the mouse mapping uses the last frame's geometry). The
+/// returned temp file/vault keep the fixture alive for the test.
+fn hover_app(name: &str) -> (App, Terminal<TestBackend>, TempFile, TempDir) {
+    let vault_dir = TempDir::new(name);
+    std::fs::write(vault_dir.path().join("goal.md"), "goal body\n").unwrap();
+    std::fs::write(vault_dir.path().join("other.md"), "other body\n").unwrap();
+    let file = ui_viewer(&format!("{name}.md"), "See [[goal]] now.\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    (app, terminal, file, vault_dir)
+}
+
+/// End position 1: the link's cells carry `link_hover` while the pointer is
+/// over them, and the normal link colour before it arrives and after it
+/// leaves. The hover moves no focus.
+#[test]
+fn link_under_the_pointer_is_painted_in_the_hover_colour() {
+    let (mut app, mut terminal, _file, vault) = hover_app("ui-link-hover");
+    let (col, row) = link_cell(&app, "goal");
+    let hover = engine::default_markdown_theme().link_hover;
+    let normal = terminal.backend().buffer()[(col, row)].fg;
+    assert_ne!(normal, hover, "the fixture separates link and hover colour");
+
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    let cell = &terminal.backend().buffer()[(col, row)];
+    assert_eq!(cell.fg, hover, "the hovered link is painted in link_hover");
+    assert_eq!(app.viewer.focus_link, None, "the hover moves no focus");
+
+    draw_with_pointer(&mut terminal, &mut app, Some((col - 1, row)));
+    let after = terminal.backend().buffer()[(col, row)].fg;
+    assert_eq!(after, normal, "leaving the link restores its colour");
+
+    draw_with_pointer(&mut terminal, &mut app, None);
+    assert_eq!(
+        terminal.backend().buffer()[(col, row)].fg,
+        normal,
+        "no pointer, no hover"
+    );
+
+    // The hover is a colour only: a click on the very same link still opens.
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    app.handle_release(col, row);
+    assert_eq!(
+        app.viewer.path,
+        vault.path().join("goal.md"),
+        "clicking the hovered link still opens it"
+    );
+}
+
+/// End position 2: the focus highlight still wins when the pointer sits on
+/// the focused link — the inverse-video style is exactly what it is without
+/// a pointer.
+#[test]
+fn focus_highlight_wins_over_the_hover_on_the_focused_link() {
+    let (mut app, mut terminal, _file, _vault) = hover_app("ui-link-hover-focus");
+    let (col, row) = link_cell(&app, "goal");
+    app.viewer.set_focus_link(Some(0));
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let focused = terminal.backend().buffer()[(col, row)].clone();
+
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    let hovered = &terminal.backend().buffer()[(col, row)];
+    assert_eq!(hovered.fg, focused.fg, "the focus text colour wins");
+    assert_eq!(hovered.bg, focused.bg, "the focus background wins");
+    assert_eq!(app.viewer.focus_link, Some(0), "the hover moves no focus");
+}
+
+/// The hover is dropped when the note changes, when a popup opens and when
+/// mouse capture goes off.
+#[test]
+fn link_hover_is_cleared_by_state_changes() {
+    let (mut app, mut terminal, _file, vault) = hover_app("ui-link-hover-clear");
+    let note = app.viewer.path.clone();
+    let (col, row) = link_cell(&app, "goal");
+
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    assert_eq!(app.viewer.hover_link, Some(0), "hover while over the link");
+
+    // A note change replaces the link list: the old index must not survive.
+    let other = vault.path().join("other.md");
+    app.open_note(&other).unwrap();
+    assert_eq!(app.viewer.hover_link, None, "note change clears the hover");
+
+    // Back to the link note; hover it again, then open the help popup.
+    app.open_note(&note).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let (col, row) = link_cell(&app, "goal");
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    assert_eq!(app.viewer.hover_link, Some(0));
+    app.handle_key(key(KeyCode::Char('?')));
+    assert!(app.viewer.help_open);
+    assert_eq!(app.viewer.hover_link, None, "a popup clears the hover");
+
+    app.viewer.help_open = false;
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let (col, row) = link_cell(&app, "goal");
+    draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
+    assert_eq!(app.viewer.hover_link, Some(0));
+    app.handle_key(key(KeyCode::Char('m')));
+    assert!(!app.mouse_capture);
+    assert_eq!(app.viewer.hover_link, None, "capture off means no hover");
+}
+
 // --- M4: git segment, changed markers, search popup -----------------
 
 /// Commits everything in `dir` (fixture setup only; the app's own git
