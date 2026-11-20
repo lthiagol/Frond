@@ -7,12 +7,17 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  The audit is done: the documentation (round S), the app crate (units 17,
-  18 and 21) and the vault crate (units 19 and 20). All four blocking
-  findings are fixed and the lows are closed or recorded. What is left is
-  the release and the parked list.
+  The audit is done and released: **0.6.4 is tagged and pushed**
+  (`v0.6.4`), and CI is green on the push. The whole-project audit's four
+  blocking findings and their lows are closed; nothing is in flight.
 
 DONE
+  - Unit 22 — 0.6.4 cut: `Cargo.toml` + `Cargo.lock` bumped, the
+    changelog released as `## [0.6.4] — 2026-11-19` with a fresh empty
+    `## [Unreleased]` above it, and the `v0.6.4` tag. The notes cover the
+    whole audit, including the documentation corrections. Round 1 came
+    back changes-needed (an audit round had shipped unnoted — the
+    orchestrator's own changelog); the delta review was clean.
   - Unit 21 — the two app-crate leftovers: the quick switcher strips the
     extension case-insensitively (through the vault's helper), and the
     watch path reports a directory it cannot read. The warning has its own
@@ -173,5 +178,8 @@ OPEN
       drag — TODO.md §5.8).
 
 NEXT
-  1. Push `main`, then cut 0.6.4 with the audit fixes.
-  2. Then the parked list.
+  1. The parked list: an interactive scrollbar (click and drag), a link
+     hover preview, regex + match-next in the search popup, a line-number
+     gutter. And the sidebar scroll position — the recommendation is to
+     drop it.
+  2. The open startup-warnings item, whenever the next cycle has room.
