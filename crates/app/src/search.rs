@@ -12,7 +12,7 @@
 //! ([`crate::ui::draw_search`]).
 
 use unicode_width::UnicodeWidthChar;
-use vault::{SearchHit, SearchResults};
+use vault::{SearchHit, SearchPattern, SearchResults};
 
 use crate::ui::PopupChrome;
 
@@ -105,9 +105,16 @@ impl SearchState {
     /// A query starting with `re:` is matched as a regular expression; an
     /// invalid pattern is reported in `error`, nothing is searched, and
     /// the popup stays in the input mode with the query intact.
-    pub fn run(&mut self, search: impl FnOnce(SearchQuery<'_>) -> Result<SearchResults, String>) {
+    ///
+    /// Returns `true` when the query ran (the popup is in results mode),
+    /// `false` when it never ran — the app keeps only executed searches as
+    /// its active search.
+    pub fn run(
+        &mut self,
+        search: impl FnOnce(SearchQuery<'_>) -> Result<SearchResults, String>,
+    ) -> bool {
         if self.query.trim().is_empty() {
-            return;
+            return false;
         }
         match search(SearchQuery::parse(&self.query)) {
             Ok(results) => {
@@ -116,6 +123,7 @@ impl SearchState {
                 self.mode = SearchMode::Results;
                 self.selected = 0;
                 self.error = None;
+                true
             }
             Err(message) => {
                 self.hits.clear();
@@ -123,6 +131,7 @@ impl SearchState {
                 self.selected = 0;
                 self.mode = SearchMode::Input;
                 self.error = Some(message);
+                false
             }
         }
     }
@@ -137,6 +146,35 @@ impl SearchState {
 
     pub fn selected_hit(&self) -> Option<&SearchHit> {
         self.hits.get(self.selected)
+    }
+}
+
+/// The last executed search, kept after the popup closes so the note
+/// pane's `n`/`N` can walk its occurrences in the open note. The pattern is
+/// the vault's own search rule ([`vault::SearchPattern`]), so a query finds
+/// the same lines in the note as it does in the vault.
+#[derive(Clone, Debug)]
+pub struct ActiveSearch {
+    pattern: SearchPattern,
+}
+
+impl ActiveSearch {
+    /// The active search for a query the popup executed, or `None` when
+    /// the query can never match: a blank query, a bare `re:`, or a
+    /// regular expression that does not compile (it ran with a fresh build,
+    /// so the last case should not happen).
+    pub fn from_query(query: &str) -> Option<Self> {
+        let pattern = match SearchQuery::parse(query) {
+            SearchQuery::Literal(text) => SearchPattern::literal(text),
+            SearchQuery::Regex(regex) => SearchPattern::regex(regex).ok()?,
+        };
+        (!pattern.is_empty()).then_some(Self { pattern })
+    }
+
+    /// The 0-based source lines of `source` the search finds, in line
+    /// order.
+    pub fn occurrences(&self, source: &str) -> Vec<usize> {
+        self.pattern.matching_lines(source)
     }
 }
 
@@ -391,6 +429,24 @@ mod tests {
         s.run(|_| Ok(SearchResults::default()));
         assert_eq!(s.mode, SearchMode::Results);
         assert_eq!(s.error, None);
+    }
+
+    #[test]
+    fn active_search_keeps_only_queries_that_can_match() {
+        assert!(ActiveSearch::from_query("").is_none());
+        assert!(
+            ActiveSearch::from_query("re:").is_none(),
+            "a bare re: searches nothing"
+        );
+        assert!(
+            ActiveSearch::from_query("re:(").is_none(),
+            "a pattern that does not compile never ran"
+        );
+
+        let literal = ActiveSearch::from_query("needle").unwrap();
+        assert_eq!(literal.occurrences("a\nNeedle\nb\nneedle\n"), vec![1, 3]);
+        let regex = ActiveSearch::from_query("re:nee\\w+").unwrap();
+        assert_eq!(regex.occurrences("a\nNeedle\nb\n"), vec![1]);
     }
 
     #[test]

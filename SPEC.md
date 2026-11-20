@@ -202,6 +202,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | Press / drag on the note pane's scrollbar | Jump the note to that position; a drag follows the pointer until the button is released |
 | Press / drag on a list panel's scrollbar | Move that panel's selection to that position; a drag follows the pointer until the button is released |
 | Hover over a link (note pane) | Highlights the link in the theme's `link_hover` colour; the link focus does not move |
+| `n` / `N` (note pane) | Move to the next / previous occurrence of the last search in the open note |
 | Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a row of the search or quick-switcher popup selects it (a second click on the selected row opens it), while the disambiguation popup takes no clicks at all; a click on a popup's chrome — its borders, the quick switcher's prompt, its footer — does nothing |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
@@ -242,6 +243,14 @@ own keys, and they take them instead of the app:
   The matches are highlighted in the results exactly as the substring
   matches are. An empty pattern (a bare `re:`) searches nothing: the
   popup shows its results list with no matches.
+  The last executed search stays as the **active search**. In the note
+  pane `n` moves to the next occurrence of the active search in the open
+  note and `N` to the previous one, scrolling the occurrence into view;
+  the search wraps around at both ends. The occurrences are the ones the
+  search itself finds — in the note's source text, not in the rendered
+  text — so a query finds the same places in the note as in the vault.
+  With no active search, or with a note that has no occurrence, `n` and
+  `N` do nothing.
 - **Quick switcher (`Ctrl+P`)** — a query line over the vault's notes:
   `Enter` opens the selected note, `Backspace` edits the query, `j`/`k`
   (or the arrows) and PgUp/PgDn move the selection, any typed character

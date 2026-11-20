@@ -1973,6 +1973,76 @@ fn search_popup_reports_an_invalid_regex_and_keeps_the_query() {
 }
 
 #[test]
+fn search_popup_bare_re_shows_the_empty_results_list() {
+    let vault_dir = TempDir::new("ui-search-regex-empty");
+    std::fs::write(vault_dir.path().join("hay.md"), "needle\n").unwrap();
+    let file = ui_viewer("ui-search-regex-empty.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('s')));
+    for ch in "re:".chars() {
+        app.handle_key(key(KeyCode::Char(ch)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        app.search.mode,
+        crate::search::SearchMode::Results,
+        "a bare re: runs as a search that matches nothing"
+    );
+    assert!(
+        app.search.hits.is_empty(),
+        "an empty pattern matches nothing"
+    );
+    let screen = render(&mut app);
+    assert!(
+        screen.contains("0 hits"),
+        "the results list is shown with no matches: {screen}"
+    );
+    assert!(screen.contains("no matches"), "the empty state: {screen}");
+}
+
+#[test]
+fn search_popup_clamps_a_long_error_footer_to_its_inner_width() {
+    let vault_dir = TempDir::new("ui-search-error-clamp");
+    let file = ui_viewer("ui-search-error-clamp.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.search.open = true;
+    app.search.mode = crate::search::SearchMode::Input;
+    app.search.error = Some(
+        "invalid regex: this diagnostic is far too long to fit inside the popup's footer"
+            .to_string(),
+    );
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = crate::search::popup_geometry(
+        Rect::new(0, 0, 100, 24),
+        app.search.mode,
+        app.search.hits.len(),
+    );
+    // The footer is the popup's last inner row.
+    let y = popup.y + popup.height - 2;
+    let inner: String = (popup.x + 1..popup.right() - 1)
+        .map(|x| buffer[(x, y)].symbol())
+        .collect();
+    let shown = inner.trim_end();
+    assert!(
+        shown.ends_with('…'),
+        "a long footer is elided at the inner edge, not cut by the border: {shown:?}"
+    );
+    assert!(
+        shown.chars().count() <= popup.width as usize - 2,
+        "the footer stays inside the popup's inner width"
+    );
+    assert!(
+        !shown.contains("footer"),
+        "the tail of the diagnostic is dropped whole: {shown:?}"
+    );
+}
+
+#[test]
 fn search_selected_row_is_a_full_width_bar_and_keeps_the_match_highlight() {
     let vault_dir = TempDir::new("ui-search-band");
     std::fs::write(vault_dir.path().join("hay.md"), "top\nneedle here\nmore\n").unwrap();
@@ -4312,17 +4382,27 @@ fn help_grid_is_single_column_spaced_when_it_fits() {
     assert!(short.rows < tall.rows);
 }
 
-/// The whole body is on the first screen at the 100x30 smoke size, so
-/// every key stays visible without scrolling.
+/// The first screen at the 100x30 smoke size carries the navigation keys
+/// (the `n`/`N` row included); the body now scrolls for the theme group.
 #[test]
-fn help_fits_first_screen_at_smoke_size() {
+fn help_first_screen_at_smoke_size_shows_the_navigation_keys() {
     let file = ui_viewer("ui-help-fit.md", "x\n");
     let mut app = app_for(&file, None);
     app.viewer.help_open = true;
     let screen = render_help(&mut app);
+    assert!(
+        screen.contains("next/previous search match"),
+        "n / N entry on screen"
+    );
     assert!(screen.contains("refresh git status"), "u entry on screen");
-    assert!(screen.contains("cycle theme"), "Shift+T entry on screen");
     assert_eq!(app.viewer.help_scroll, 0);
+
+    app.viewer.help_scroll = usize::MAX;
+    let screen = render_help(&mut app);
+    assert!(
+        screen.contains("cycle theme"),
+        "Shift+T entry reached by scrolling"
+    );
 }
 
 /// The popup dims everything outside it and keeps its own cells crisp:

@@ -1985,6 +1985,194 @@ fn search_cancel_untouched_state_and_backspace_edits() {
     assert_eq!(app.focus, Focus::Content);
 }
 
+// --- Unit 29: `n` / `N` walk the active search in the open note ------
+
+/// Runs `query` through the search popup and closes it, leaving it as the
+/// active search.
+fn run_search(app: &mut App, query: &str) {
+    app.handle_key(key(KeyCode::Char('s')));
+    for c in query.chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
+    app.handle_key(key(KeyCode::Enter));
+    app.handle_key(key(KeyCode::Esc));
+}
+
+/// The 0-based source lines of the open note the active search finds.
+fn active_lines(app: &App) -> Vec<usize> {
+    app.active_search
+        .as_ref()
+        .map(|active| active.occurrences(&app.viewer.source))
+        .unwrap_or_default()
+}
+
+/// Where a jump to the rendered line containing `marker` lands: the line
+/// with two context rows above it, clamped to the scroll range. Computed
+/// from the rendered text, independently of the source-line map.
+fn landing(app: &App, marker: &str) -> u32 {
+    let rendered = app
+        .viewer
+        .lines
+        .iter()
+        .position(|line| line.spans.iter().any(|s| s.content.contains(marker)))
+        .unwrap_or_else(|| panic!("no rendered line contains {marker:?}"));
+    (rendered.saturating_sub(2) as u32).min(app.viewer.max_scroll())
+}
+
+/// A note long enough to scroll, whose paragraphs 20 and 45 carry the
+/// needle.
+fn needle_note() -> String {
+    (0..60)
+        .map(|i| match i {
+            20 | 45 => format!("needle {i}\n\n"),
+            _ => format!("para {i}\n\n"),
+        })
+        .collect()
+}
+
+#[test]
+fn n_and_big_n_walk_the_active_search_and_wrap() {
+    let vault_dir = TempDir::new("app-search-walk");
+    let body = needle_note();
+    std::fs::write(vault_dir.path().join("walk.md"), &body).unwrap();
+    let mut app = App::new(
+        Viewer::open(&vault_dir.path().join("walk.md"), 80).unwrap(),
+        Some(vault_dir.path().to_path_buf()),
+        Some(shared_index(&vault_dir)),
+    )
+    .unwrap();
+    app.viewer.viewport_height = 10;
+
+    // No search has run: `n` and `N` do nothing.
+    app.viewer.set_scroll(5);
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(app.viewer.scroll, 5, "no active search: no move");
+    app.handle_key(key(KeyCode::Char('N')));
+    assert_eq!(app.viewer.scroll, 5, "no active search: no move");
+
+    run_search(&mut app, "needle");
+    assert!(app.active_search.is_some(), "the search stays active");
+    app.viewer.scroll_top();
+
+    let first = landing(&app, "needle 20");
+    let second = landing(&app, "needle 45");
+    assert!(
+        first > 0 && second > first,
+        "the fixture scrolls: {first}, {second}"
+    );
+
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(app.viewer.scroll, first, "n goes to the first occurrence");
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(app.viewer.scroll, second, "n goes to the next one");
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(app.viewer.scroll, first, "n wraps to the first at the end");
+
+    app.handle_key(key(KeyCode::Char('N')));
+    assert_eq!(app.viewer.scroll, second, "N wraps to the last at the top");
+    app.handle_key(key(KeyCode::Char('N')));
+    assert_eq!(app.viewer.scroll, first, "N goes to the previous one");
+    app.handle_key(key(KeyCode::Char('N')));
+    assert_eq!(app.viewer.scroll, second, "N wraps again");
+
+    // The position is the scroll, not the last match: from between the two
+    // occurrences, `n` finds the later one again.
+    app.viewer.set_scroll(second - 1);
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(
+        app.viewer.scroll, second,
+        "n works from where the reader is"
+    );
+}
+
+#[test]
+fn n_and_big_n_do_nothing_without_an_occurrence_in_the_open_note() {
+    // The vault has the needle; the open note has none.
+    let vault_dir = search_vault();
+    let file = TempFile::new("app-search-none.md", &"para\n\n".repeat(40));
+    let mut app = App::new(
+        Viewer::open(file.path(), 80).unwrap(),
+        Some(vault_dir.path().to_path_buf()),
+        Some(shared_index(&vault_dir)),
+    )
+    .unwrap();
+    app.viewer.viewport_height = 10;
+    run_search(&mut app, "needle");
+    assert!(app.active_search.is_some());
+    assert!(active_lines(&app).is_empty(), "the open note has no match");
+
+    app.viewer.set_scroll(10);
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(app.viewer.scroll, 10, "no occurrence: no move");
+    app.handle_key(key(KeyCode::Char('N')));
+    assert_eq!(app.viewer.scroll, 10, "no occurrence: no move");
+
+    // The keys are the note pane's: with the sidebar focused they are not
+    // `n`/`N` for the note.
+    app.focus = Focus::Sidebar;
+    app.handle_key(key(KeyCode::Char('n')));
+    assert_eq!(app.viewer.scroll, 10, "not the note pane: no move");
+}
+
+#[test]
+fn each_executed_search_replaces_the_active_one() {
+    let vault_dir = TempDir::new("app-search-replace");
+    let body = "alpha one\n\nbeta two\n\nalpha three\n";
+    std::fs::write(vault_dir.path().join("note.md"), body).unwrap();
+    let mut app = App::new(
+        Viewer::open(&vault_dir.path().join("note.md"), 80).unwrap(),
+        Some(vault_dir.path().to_path_buf()),
+        Some(shared_index(&vault_dir)),
+    )
+    .unwrap();
+
+    run_search(&mut app, "alpha");
+    assert_eq!(active_lines(&app), vec![0, 4]);
+    run_search(&mut app, "beta");
+    assert_eq!(active_lines(&app), vec![2], "a new search replaces it");
+
+    // A query that never ran (an invalid pattern) keeps the previous one.
+    run_search(&mut app, "re:(");
+    assert_eq!(active_lines(&app), vec![2]);
+
+    // A bare `re:` runs but matches nothing, so it replaces the active
+    // search with one that has no occurrences.
+    run_search(&mut app, "re:");
+    assert!(active_lines(&app).is_empty());
+}
+
+/// The occurrences are the search's own: a hit in the source text counts
+/// even when the rendered text no longer carries it (a heading's `##`).
+/// And a regular-expression search is walked the same way.
+#[test]
+fn n_follows_a_regex_search_in_the_note_source_text() {
+    let vault_dir = TempDir::new("app-search-regex-walk");
+    let body: String = (0..30)
+        .map(|i| format!("para {i}\n\n"))
+        .chain(["## needle heading\n\n".to_string()])
+        .chain((30..60).map(|i| format!("para {i}\n\n")))
+        .collect();
+    std::fs::write(vault_dir.path().join("head.md"), &body).unwrap();
+    let mut app = App::new(
+        Viewer::open(&vault_dir.path().join("head.md"), 80).unwrap(),
+        Some(vault_dir.path().to_path_buf()),
+        Some(shared_index(&vault_dir)),
+    )
+    .unwrap();
+    app.viewer.viewport_height = 10;
+
+    run_search(&mut app, "re:## needle");
+    app.viewer.scroll_top();
+    app.handle_key(key(KeyCode::Char('n')));
+
+    let target = landing(&app, "needle heading");
+    assert!(target > 0, "the heading is deep in the note");
+    assert_eq!(
+        app.viewer.scroll, target,
+        "the source-only match is a hit (the rendered line drops the ##)"
+    );
+}
+
 // --- M4: git sync status ------------------------------------------
 
 /// A real (tiny) git repository as a vault fixture. Fixture setup only:
