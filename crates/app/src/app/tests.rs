@@ -2154,6 +2154,42 @@ fn clicking_cycles_through_all_three_states() {
 }
 
 #[test]
+fn toggle_without_an_updated_field_reports_through_the_info_channel() {
+    let dir = TempDir::new("app-tasks-no-updated");
+    std::fs::write(
+        dir.path().join("note.md"),
+        "---\nstatus: active\n---\n\n- [ ] alpha task\n\n",
+    )
+    .unwrap();
+    let mut app = task_app(&dir);
+
+    app.toggle_task(0);
+
+    // The write succeeded: the notice about the missing `updated:` field
+    // is neutral and expiring, not the red never-expiring error channel.
+    assert!(
+        app.viewer.last_error.is_none(),
+        "a successful write is not an error: {:?}",
+        app.viewer.last_error
+    );
+    assert_eq!(
+        app.live_status_at(Instant::now()),
+        Some("toggled (no updated: field in frontmatter to bump)"),
+        "the notice goes through the info channel"
+    );
+    assert!(
+        std::fs::read_to_string(dir.path().join("note.md"))
+            .unwrap()
+            .contains("- [~] alpha task"),
+        "the marker toggle still stands"
+    );
+
+    // It expires like every other info message.
+    app.expire_status_at(Instant::now() + STATUS_MESSAGE_TTL);
+    assert!(app.last_status.is_none());
+}
+
+#[test]
 fn toggle_refuses_when_the_file_changed_since_parse() {
     let (dir, mut app) = task_vault();
     let path = dir.path().join("note.md");
@@ -2169,6 +2205,10 @@ fn toggle_refuses_when_the_file_changed_since_parse() {
             .is_some_and(|e| e.contains("not writing")),
         "refusal surfaced: {:?}",
         app.viewer.last_error
+    );
+    assert!(
+        app.last_status.is_none(),
+        "a refusal stays an error, never an info message"
     );
     assert!(
         std::fs::read_to_string(&path).unwrap().contains("renamed"),
@@ -2732,17 +2772,32 @@ fn footer_click_is_a_no_op_when_the_results_overflow_the_popup() {
     // window does not jump. (Selection 8 → anchor 6, so the footer row
     // would map to hit 9 here — a hidden row, as above.)
     app.search.selected = 8;
-    let list = crate::ui::PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len());
+    let list = crate::ui::PopupList::new(
+        popup,
+        crate::ui::PopupChrome::FOOTER,
+        app.search.selected,
+        app.search.hits.len(),
+    );
     assert_eq!(list.start, 6, "precondition: the window is scrolled");
     app.handle_click(40, list.first_row);
     assert_eq!(app.search.selected, 6, "the top visible row is hit 6");
-    let before =
-        crate::ui::PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len()).start;
+    let before = crate::ui::PopupList::new(
+        popup,
+        crate::ui::PopupChrome::FOOTER,
+        app.search.selected,
+        app.search.hits.len(),
+    )
+    .start;
     assert_eq!(before, 4);
     app.handle_click(40, popup.y + 4); // footer row
     assert_eq!(app.search.selected, 6, "footer click is still inert");
-    let after =
-        crate::ui::PopupList::new(popup, 0, 1, app.search.selected, app.search.hits.len()).start;
+    let after = crate::ui::PopupList::new(
+        popup,
+        crate::ui::PopupChrome::FOOTER,
+        app.search.selected,
+        app.search.hits.len(),
+    )
+    .start;
     assert_eq!(after, before, "the list did not jump");
 }
 
@@ -3696,6 +3751,33 @@ fn ctrl_p_without_a_vault_does_nothing() {
     let mut app = App::new(viewer, None, None).unwrap();
     app.handle_key(ctrl(KeyCode::Char('p')));
     assert!(!app.quick.open);
+}
+
+/// A quick-switcher popup of height 4 (a terminal six rows or fewer) has
+/// no room for a list row: the footer row is chrome, so clicking it must
+/// not select (and then open) the first note.
+#[test]
+fn a_degenerate_quick_popup_ignores_clicks_on_its_footer() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.handle_key(ctrl(KeyCode::Char('p')));
+    let area = Rect::new(0, 0, 100, 4);
+    let popup = crate::quick::popup_geometry(area, app.quick.items.len());
+    assert_eq!(popup.height, 4, "precondition: borders + prompt + footer");
+    app.layout.quick_area = Some(popup);
+    let before = app.current_path();
+
+    for row in popup.y..popup.y + popup.height {
+        app.handle_click(popup.x + 2, row);
+    }
+
+    assert!(app.quick.open, "no click opened a note");
+    assert_eq!(
+        app.current_path(),
+        before,
+        "nothing behind the popup opened"
+    );
 }
 
 /// A click on a switcher row selects it; a second click on the selected

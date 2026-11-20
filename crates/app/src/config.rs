@@ -1,7 +1,9 @@
 //! `~/.config/frond/config.toml`: persistent settings read at startup.
 //!
 //! Keys: `theme` (string), `vault` (path), `watch` (bool), `mouse` (bool),
-//! `sidebar_width` (columns), `metadata` (bool). Missing file = defaults;
+//! `sidebar_width` (columns), `metadata` (bool), `theme_rotation`
+//! ("all"/"light"/"dark"), `margin` (columns), `margin_y` (rows), `icons`
+//! ("nerd"/"unicode"). Missing file = defaults;
 //! malformed file = warning + defaults (never a crash). Unknown keys are
 //! ignored but reported (never silently). The `FROND_CONFIG` env var overrides the path
 //! (tests and smokes only — they must never write to the real `~/.config`).
@@ -420,9 +422,11 @@ mod tests {
         assert_eq!(config.margin_y, Some(3));
     }
 
-    #[test]
-    fn config_show_template_matches_the_real_vocabulary() {
-        let active: String = DEFAULT_CONFIG_TEMPLATE
+    /// The template's `# key = value` lines with the leading `# `
+    /// removed; the value lines the drift test below feeds back to the
+    /// loader. Lines that are not key assignments stay empty.
+    fn template_active_lines() -> Vec<String> {
+        DEFAULT_CONFIG_TEMPLATE
             .lines()
             .map(|line| {
                 match line
@@ -441,8 +445,24 @@ mod tests {
                     _ => String::new(),
                 }
             })
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect()
+    }
+
+    /// The keys the `--config-show` template documents. The drift test
+    /// pins the template to the loader; the module-header guard takes its
+    /// expected list from here, so a new key cannot pass the guard with a
+    /// stale header.
+    fn template_keys() -> Vec<String> {
+        template_active_lines()
+            .iter()
+            .filter_map(|line| line.split_once('='))
+            .map(|(key, _)| key.trim().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn config_show_template_matches_the_real_vocabulary() {
+        let active = template_active_lines().join("\n");
         let dir = TempDir::new("cfg-show");
         std::fs::write(dir.path().join("config.toml"), &active).unwrap();
         let (config, warnings) = load_at(&dir, "config.toml");
@@ -457,6 +477,28 @@ mod tests {
         assert_eq!(config.mouse, Some(true));
         assert_eq!(config.metadata, Some(true));
         assert_eq!(config.margin_y, Some(1));
+    }
+
+    #[test]
+    fn module_header_names_every_loader_key() {
+        // The module header is the first thing a future key change reads;
+        // pin it to the loader's vocabulary so it cannot fall behind. The
+        // expected list comes from the `--config-show` template (already
+        // pinned to the loader above), not a hand-kept copy.
+        let source = include_str!("config.rs");
+        let header: String = source
+            .lines()
+            .take_while(|line| line.starts_with("//!"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let keys = template_keys();
+        assert!(!keys.is_empty(), "the template documents no keys");
+        for key in keys {
+            assert!(
+                header.contains(&format!("`{key}`")),
+                "the module header omits the `{key}` key"
+            );
+        }
     }
 
     #[test]
