@@ -224,9 +224,11 @@ pub fn popup_geometry(
 
 /// A snippet of `text` around the `[start, end)` byte-range match, laid
 /// out as spans with the match highlighted, truncated to `width` display
-/// cells (unicode-aware). When the line does not fit, a window centered
-/// on the match is shown with `…` markers on the cut sides. The match
-/// highlight style is themed (`popup_match_fg`/`popup_match_bg`).
+/// cells (unicode-aware). The result never exceeds `width` cells. When the
+/// line does not fit, a window centered on the match is shown with `…`
+/// markers on the cut sides; a match wider than the window is itself cut,
+/// so the highlight covers its visible part. The match highlight style is
+/// themed (`popup_match_fg`/`popup_match_bg`).
 pub fn snippet_line(
     text: &str,
     start: usize,
@@ -254,21 +256,37 @@ pub fn snippet_line(
         (0, chars.len(), false, false)
     } else {
         let budget = width.saturating_sub(2 * ellipsis);
+        if budget < ellipsis {
+            // Too narrow for content and both cut markers: one marker
+            // stands for the elided line.
+            return ratatui::text::Line::from(Span::raw("…".to_string()));
+        }
         // Expand from the match outward, alternating, until the budget is
-        // spent; always include the whole match.
+        // spent. A character is added only when its cells fit: the window
+        // must never exceed the budget, or the selection bar would stop
+        // short of the popup's edge.
         let mut left = match_start;
         let mut right = match_end.max(match_start + 1).min(chars.len());
-        let mut used = widths[left..right].iter().sum::<usize>().max(1);
+        let mut used = widths[left..right].iter().sum::<usize>();
+        // The match alone can be wider than the budget: drop its right
+        // edge so the visible part still fits.
+        while used > budget && right > left {
+            right -= 1;
+            used -= widths[right];
+        }
         while used < budget {
-            if left > 0 {
+            let mut grew = false;
+            if left > 0 && used + widths[left - 1] <= budget {
                 left -= 1;
-                used += widths[left].max(1);
+                used += widths[left];
+                grew = true;
             }
-            if used < budget && right < chars.len() {
-                used += widths[right].max(1);
+            if used < budget && right < chars.len() && used + widths[right] <= budget {
+                used += widths[right];
                 right += 1;
+                grew = true;
             }
-            if left == 0 && right == chars.len() {
+            if !grew {
                 break;
             }
         }
@@ -302,6 +320,7 @@ pub fn snippet_line(
 mod tests {
     use super::*;
     use ratatui::style::Style;
+    use unicode_width::UnicodeWidthStr;
 
     /// The themed match highlight used across these tests (ui.rs passes
     /// the theme's `popup_match_fg`/`popup_match_bg`).
@@ -311,6 +330,14 @@ mod tests {
 
     fn spans_text(line: &ratatui::text::Line<'_>) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// The display width of a rendered line, the way the popup lays it out.
+    fn rendered_width(line: &ratatui::text::Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .sum()
     }
 
     fn highlighted_text(line: &ratatui::text::Line<'_>) -> String {
@@ -480,6 +507,60 @@ mod tests {
             0,
             "no width: nothing"
         );
+    }
+
+    /// The window adds a character only when its cells fit. A two-cell
+    /// character added at the budget's edge used to overshoot by one cell,
+    /// and the popup's selection bar then stopped short of its inner right
+    /// edge.
+    #[test]
+    fn snippet_never_exceeds_its_width_with_wide_characters() {
+        let texts = [
+            format!("{}needle{}", "漢".repeat(50), "漢".repeat(50)),
+            format!("{}needle{}", "x".repeat(40), "漢".repeat(40)),
+            format!("{}needle{}", "漢".repeat(40), "x".repeat(40)),
+            "漢".repeat(60),
+            "abc漢def".repeat(12),
+        ];
+        for text in texts {
+            let (start, end) = match text.find("needle") {
+                Some(start) => (start, start + "needle".len()),
+                None => (0, text.len()),
+            };
+            for width in 1..=60 {
+                let line = snippet_line(&text, start, end, width, MATCH);
+                assert!(
+                    rendered_width(&line) <= width,
+                    "width {width} overshot with {text:?}: {:?}",
+                    spans_text(&line)
+                );
+            }
+        }
+    }
+
+    /// A match wider than the window is cut to the window's budget; the
+    /// visible part stays highlighted and the cut side gets its marker.
+    #[test]
+    fn snippet_cuts_a_match_wider_than_the_window() {
+        let text = "漢".repeat(30);
+        let line = snippet_line(&text, 0, text.len(), 10, MATCH);
+        assert_eq!(rendered_width(&line), 9, "8 cells of match plus the marker");
+        assert_eq!(highlighted_text(&line), "漢漢漢漢");
+        assert!(spans_text(&line).ends_with('…'));
+    }
+
+    /// The regression's shape at the popup's real snippet width: a wide
+    /// character at the budget's edge, with both sides cut.
+    #[test]
+    fn snippet_fits_the_budget_with_a_wide_character_at_its_edge() {
+        let text = format!("{}needle{}", "漢".repeat(50), "漢".repeat(50));
+        let start = "漢".repeat(50).len();
+        let line = snippet_line(&text, start, start + 6, 58, MATCH);
+        assert!(rendered_width(&line) <= 58);
+        assert_eq!(highlighted_text(&line), "needle");
+        let rendered = spans_text(&line);
+        assert!(rendered.starts_with('…'), "{rendered}");
+        assert!(rendered.ends_with('…'), "{rendered}");
     }
 
     #[test]
