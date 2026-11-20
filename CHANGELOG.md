@@ -7,6 +7,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Added
 
 ### Fixed
+
+### Changed
+
+## [0.6.4] — 2026-11-19
+
+### Added
+
+### Fixed
 - A dirty vault could report clean: a changed file whose name starts with
   `~` was dropped from the git status, so the guarded write's "the
   repository must be clean" check passed on a dirty tree.
@@ -26,15 +34,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 - A frontmatter tag containing a comma was split into two tags, and
   `file.hasTag("a, b")` could never match it.
 - A directory the vault scan could not read made its notes vanish from
-  the index without a warning.
-- A note opened with a UTF-8 BOM never had its `updated:` field bumped.
+  the index without a warning; the watch path now reports it on the status
+  bar (at startup the index still records it silently).
+- A note opened with a UTF-8 BOM — or with a repeated `\r` at the fence —
+  never had its `updated:` field bumped.
 - The watch path reported a directory it could not read through the
   sticky error slot: the message never cleared, and it replaced newer
-  errors the user still needed.
+  errors the user still needed. It has its own slot now: it clears when
+  the condition ends, and it never replaces a real error.
+- The quick switcher matched an `X.MD` note against its kept `.MD`
+  suffix, so the typed highlight landed on the extension.
 
 ### Changed
 - The popups' list geometry lives in one helper, so the drawn window and
-  the clickable window cannot drift apart.
+  the clickable window cannot drift apart — the disambiguation popup's
+  clicks are affected too: its height reserved a blank row its list
+  window rejected.
+- The documentation now matches the code: the status bar's segment list
+  names the `mouse off` and `metadata off` notices, the keybindings
+  section lists the modal popups' own keys and marks the content-pane
+  keys, the icon examples say they show the unicode set, README's
+  "index.md is shown first" is qualified by the session restore, and
+  `docs/COLORS.md` records that every scrollbar draws in
+  `popup_dimmed_fg`.
 
 ## [0.6.3] — 2026-11-19
 
