@@ -7,8 +7,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Added
 
 ### Fixed
+- A dirty vault could report clean: a changed file whose name starts with
+  `~` was dropped from the git status, so the guarded write's "the
+  repository must be clean" check passed on a dirty tree.
+- Toggling a checkbox in a large note froze the app: the `updated:` field
+  scan indexed every line of the file, rescanning from the start for each
+  one — 96 seconds for a 100,000-line note. It is now one pass that stops
+  at the frontmatter.
+- Clicking the search popup's footer selected a hit that was not on
+  screen (when the results overflowed the popup), and a later `Enter`
+  opened that never-seen row.
+- A successful checkbox write was reported in red like a refusal, and it
+  never expired.
+- The quick switcher dropped its footer when there were no matches, so the
+  only `Enter`/`Esc` hint disappeared exactly when it was needed.
+- A note named `X.MD` could not be linked with `[[X.MD]]` or
+  `[[dir/X]]`, although the matching is case-insensitive everywhere else.
+- A frontmatter tag containing a comma was split into two tags, and
+  `file.hasTag("a, b")` could never match it.
+- A directory the vault scan could not read made its notes vanish from
+  the index without a warning.
+- A note opened with a UTF-8 BOM never had its `updated:` field bumped.
+- The watch path reported a directory it could not read through the
+  sticky error slot: the message never cleared, and it replaced newer
+  errors the user still needed.
 
 ### Changed
+- The popups' list geometry lives in one helper, so the drawn window and
+  the clickable window cannot drift apart.
 
 ## [0.6.3] — 2026-11-19
 
