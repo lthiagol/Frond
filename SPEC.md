@@ -72,6 +72,20 @@ An unresolved link keeps the link's own colour, struck through and
 dimmed; it can still be focused with `x`/`X`, but activating it is an
 error (`unresolved link: <target>`), never a guess.
 
+## Frontmatter
+
+A note's frontmatter is the leading `---` fenced block. The fences follow
+the reader's own rules: a CRLF `---` fence counts, a UTF-8 BOM before the
+first fence is ignored, and an **unterminated** fence means there is no
+frontmatter at all — the whole file is body.
+
+- `status:` maps to the sidebar's status glyph; `tags:` to the tag view.
+- A tag list is a list: `tags: [a, b]` and the block form (`tags:` with
+  `- a` lines) give the same tags, and a tag may contain a comma
+  (`- "mocktag, weird"` is **one** tag).
+- A `#` comment after a value is not part of it — in the inline form and
+  in a block item alike.
+
 ## Layout
 
 ```
@@ -156,7 +170,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | PgUp / PgDn | Half page (content pane) |
 | `g` / `G`, Home / End | Top / bottom (content pane) |
 | Mouse wheel | Scroll the content pane; over the sidebar, the backlinks panel or a popup it moves that pane's selection instead |
-| Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a popup row selects it (a second click on the selected row opens it) |
+| Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a row of the search or quick-switcher popup selects it (a second click on the selected row opens it), while the disambiguation popup takes no clicks at all; a click on a popup's chrome — its borders, the quick switcher's prompt, its footer — does nothing |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
 | `o` | Sidebar mode: the open note's headings (the outline); `o` again returns to the tree |
@@ -314,7 +328,10 @@ own keys, and they take them instead of the app:
 - Clicking the note-name segment copies the vault-relative path via OSC 52
   (`copied: <rel>`); a failed write shows an error instead.
 - Info messages (`theme: <name>`, `copied: …`) show in a neutral color for
-  3 s, cleared by the poll tick. Errors (red) win over them.
+  3 s, cleared by the poll tick. The message slot's order is: the real
+  error (red), then the `.base` parse warnings, then the walk warning
+  (red), and only then the info message — each of the first three hides
+  the info message.
 - Keyboard hints (`Tab sidebar · ⇧T theme · ? help`) sit at the right edge
   only when they fit whole, and are hidden while a message is shown.
 

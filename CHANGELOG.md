@@ -9,6 +9,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Fixed
 
 ### Changed
+- The documentation gained what the audit showed was missing: a
+  "Frontmatter" section in `SPEC.md` (the fence rules, the tag list, and
+  the comment handling), a sentence on which popup rows are chrome and
+  therefore not clickable, the status bar's message precedence, and
+  `README.md`'s feature list now naming the outline (`o`) and the status
+  bar's scroll position.
 
 ## [0.6.4] — 2026-11-19
 
