@@ -35,6 +35,13 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 33 - the search popup's selected row reaches the popup's inner
+    right edge: `snippet_line` never returns a line wider than its budget
+    (a wide character at the window's edge no longer overshoots it; a match
+    wider than the window is cut to it, its visible part still highlighted).
+    The bar had stopped short of the edge because an over-wide row got no
+    padding and ratatui's span render broke on the trailing half of the
+    wide character. Two reviewers, 0 blocking, 2 low (both carried).
   - The agents' notes were audited against the tree and corrected: the
     write path is `vault::tasks::write_toggle` in `crates/vault/src/tasks.rs`
     (the app crate's `tasks.rs` only renders the checkboxes), the engine's
@@ -177,6 +184,13 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 33's review (two lows, carried): the search snippet's test
+      helper `rendered_width` re-implements ratatui's `Line::width()` - the
+      helper can go in favour of it; and the comment on
+      `snippet_fits_the_budget_with_a_wide_character_at_its_edge` claims the
+      fixture is the regression's shape at the popup's real snippet width,
+      but it passes on the old code (the UI test is what pins the
+      regression there) - the comment overstates what the fixture proves.
   - From unit 23's review (both lows, carried): the search popup's
       `snippet_line` (`crates/app/src/search.rs`) can overshoot its width
       budget by a cell with wide characters, so a selected row's bar misses
