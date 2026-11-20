@@ -7,7 +7,22 @@ HOW TO RESUME
   `orchestration-flow`.
 
 WHERE WE ARE
-  Nothing is in flight. The whole-project audit is done and released:
+  Nothing is in flight. Unit 23 (the selection bar) is committed: the
+  selected row of every list panel is one full-width bar, and its text is
+  painted in the panel's own background colour. The human reported that the
+  sidebar highlight was too bright and too close to the colour of the text
+  it sits on (the accent at full opacity under the terminal default
+  foreground, about 1.1 contrast), and that the bar stopped at the end of
+  the text instead of reaching the other edge of the panel. The human chose
+  the look: the bar keeps the theme accent as its background and the row
+  text is painted in the panel's own background colour (inverse video, the
+  rule the link focus highlight in `crates/app/src/links.rs` already uses),
+  and it applies to every list panel (tree, outline, tags, backlinks, quick
+  switcher, search results, disambiguation), not only the two the report
+  named. Round 1 was clean on both axes (0 blocking, 3 low); the merged
+  findings are at `/tmp/opencode/frond/review1/round1-findings.md`.
+
+  Before this unit: the whole-project audit is done and released:
   **0.6.4 is tagged and pushed** (`v0.6.4`), CI is green on the push, and
   `main` is in sync with `origin/main`. The audit's four blocking findings
   and their lows are closed.
@@ -18,6 +33,15 @@ WHERE WE ARE
   commit, and the gate was run by the orchestrator, never taken on trust.
 
 DONE
+  - Unit 23 — the selection bar: the selected row of every list panel (the
+    sidebar tree, the outline, the tag view, the backlinks panel, and the
+    search, quick-switch and disambiguation popups) is one full-width bar —
+    the theme accent as its background, the panel's own background colour
+    as its text (inverse video, the rule the link focus highlight already
+    uses), the bar reaching the panel's inner right edge and stopping
+    before the scrollbar column. One helper owns the rule; the two inline
+    copies (the quick-switcher and the search results) are gone. The spec
+    line, `docs/COLORS.md` and the changelog came with it.
   The whole-project audit — three reviewers over the whole project (the
   `crates/app` TUI, the `crates/vault` crate, and the documentation against
   the code): **4 blocking and 13 low findings**, all closed.
@@ -94,6 +118,10 @@ HAPPENED
     against the findings list, not against the diff.
   - The Makefile assumed `cargo` was on the PATH. It now falls back to
     rustup's default location.
+  - A rule that grows has to grow its enumeration too: giving the selection
+    rule one home pulled the disambiguation popup into it, and the spec and
+    the changelog still named six panels. Both reviewers caught it from
+    their own lenses; the enumeration is part of the rule.
 
 OPEN
   - The **startup** warnings never reach the user: the index records them
@@ -101,6 +129,13 @@ OPEN
       an unreadable file or directory found at startup is silent — the
       mid-session case was fixed in unit 21, the startup case was not
       (audit, unit 21, SPEC low 2).
+  - From unit 23's review (both lows, carried): the search popup's
+      `snippet_line` (`crates/app/src/search.rs`) can overshoot its width
+      budget by a cell with wide characters, so a selected row's bar misses
+      the popup's inner right edge — the root cause is pre-existing, and
+      the fix belongs in `snippet_line`, not in the selection rule. And the
+      disambiguation popup's bar has no test pinning its end position (the
+      other six panels have one).
   - Parked: an interactive scrollbar (click to jump, drag — TODO.md §5.8),
       a link hover preview, regex + match-next in the search popup, a
       line-number gutter. And a scroll position for the sidebar tree — the

@@ -408,10 +408,35 @@ pub fn status_glyph(status: Option<&str>) -> Option<(&'static str, StatusStyle)>
     }
 }
 
-/// Paints the selected-row highlight over every span of a list row.
-fn highlight_selection(spans: &mut [Span<'_>], ui: UiTheme) {
-    for span in spans {
-        span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
+/// Paints a list row as the selection bar: `selection_bg` across the panel's
+/// whole inner width, the text in the panel's own background colour
+/// (inverse video — the rule `links.rs` uses for the focused span), and a
+/// space pad carrying the same background out to `text_width`. A popup
+/// match span keeps the match highlight; the row's own colours (the status
+/// glyph, the changed marker, the dimmed name) keep their shape, not their
+/// colour.
+fn highlight_selection(line: &mut Line<'_>, text_width: usize, panel_bg: Color, ui: UiTheme) {
+    for span in &mut line.spans {
+        if span.style.bg == Some(ui.popup_match_bg) {
+            continue;
+        }
+        span.style = span
+            .style
+            .fg(panel_bg)
+            .bg(ui.selection_bg)
+            .add_modifier(Modifier::BOLD);
+    }
+    let used: usize = line
+        .spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum();
+    let pad = text_width.saturating_sub(used);
+    if pad > 0 {
+        line.spans.push(Span::styled(
+            " ".repeat(pad),
+            Style::new().fg(panel_bg).bg(ui.selection_bg),
+        ));
     }
 }
 
@@ -601,10 +626,11 @@ fn sidebar_line(
     if changed {
         spans.push(Span::styled(" *", Style::new().fg(ui.changed_marker_fg)));
     }
+    let mut line = Line::from(spans);
     if selected {
-        highlight_selection(&mut spans, ui);
+        highlight_selection(&mut line, inner_width, ui.sidebar_bg, ui);
     }
-    Line::from(spans)
+    line
 }
 
 /// The outline panel (`o`): the open note's headings, indented relative to
@@ -672,10 +698,11 @@ fn outline_line(
         spans.push(Span::raw(indent));
     }
     spans.push(Span::raw(title));
+    let mut line = Line::from(spans);
     if selected {
-        highlight_selection(&mut spans, ui);
+        highlight_selection(&mut line, inner_width, ui.sidebar_bg, ui);
     }
-    Line::from(spans)
+    line
 }
 
 fn draw_tag_list(
@@ -740,7 +767,7 @@ fn tag_line(
     };
     let mut line = Line::from(Span::styled(truncate_ellipsis(&text, inner_width), style));
     if selected {
-        highlight_selection(&mut line.spans, ui);
+        highlight_selection(&mut line, inner_width, ui.sidebar_bg, ui);
     }
     line
 }
@@ -797,7 +824,7 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
                     inner_width,
                 )));
                 if selected {
-                    highlight_selection(&mut line.spans, ui);
+                    highlight_selection(&mut line, inner_width, ui.sidebar_bg, ui);
                 }
                 line
             })
@@ -937,7 +964,12 @@ fn draw_disambiguation(
                 width.saturating_sub(2) as usize,
             )));
             if selected {
-                highlight_selection(&mut line.spans, ui);
+                highlight_selection(
+                    &mut line,
+                    width.saturating_sub(2) as usize,
+                    ui.content_bg,
+                    ui,
+                );
             }
             line
         })
@@ -1063,14 +1095,9 @@ fn quick_item_line(
     }
     let mut line = Line::from(truncated);
     if selected {
-        // The selection tint replaces the background of the *unmatched*
-        // spans only: the matched characters keep the match highlight (the
+        // The bar leaves the matched characters' highlight intact (the
         // same rule the search popup uses).
-        for span in &mut line.spans {
-            if span.style.bg != Some(ui.popup_match_bg) {
-                span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
-            }
-        }
+        highlight_selection(&mut line, inner_width, ui.content_bg, ui);
     }
     line
 }
@@ -1171,7 +1198,7 @@ fn search_hit_line(
         // Extremely narrow popup: just the truncated prefix.
         let mut line = Line::from(Span::raw(truncate_ellipsis(&prefix, inner_width)));
         if selected {
-            highlight_selection(&mut line.spans, ui);
+            highlight_selection(&mut line, inner_width, ui.content_bg, ui);
         }
         return line;
     }
@@ -1186,14 +1213,12 @@ fn search_hit_line(
     );
     let mut spans = vec![Span::raw(prefix)];
     spans.extend(line.spans);
+    let mut line = Line::from(spans);
     if selected {
-        for span in &mut spans {
-            if span.style.bg != Some(ui.popup_match_bg) {
-                span.style = span.style.bg(ui.selection_bg).add_modifier(Modifier::BOLD);
-            }
-        }
+        // The bar leaves the match snippet's own highlight intact.
+        highlight_selection(&mut line, inner_width, ui.content_bg, ui);
     }
-    Line::from(spans)
+    line
 }
 
 /// Centered popup rectangle with sane clamping.

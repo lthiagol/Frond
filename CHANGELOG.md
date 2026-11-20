@@ -9,6 +9,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Fixed
 
 ### Changed
+- The selected row of every list panel (the sidebar tree, the outline, the
+  tag view, the backlinks panel, and the search, quick-switch and
+  disambiguation popups) is now one full-width bar: it keeps the theme
+  accent as its background, and its text is painted in the panel's own
+  background colour, so the selected row is legible in every theme (the
+  accent and the text were the same colour, which made the row hard to
+  read).
 - The documentation gained what the audit showed was missing: a
   "Frontmatter" section in `SPEC.md` (the fence rules, the tag list, and
   the comment handling), a sentence on which popup rows are chrome and

@@ -36,7 +36,7 @@ checks every preset and built-in, so a mislabelled theme fails the suite.
 | `sidebar_bg` | Sidebar (tree/tags) + backlinks panel background | `toc_bg` |
 | `sidebar_border_focused` | Focused sidebar/tag/backlinks border; the status-bar name when the sidebar is focused | `toc_accent` |
 | `sidebar_border_unfocused` | Unfocused sidebar/tag/backlinks border; `.base` table border | `toc_border` |
-| `selection_bg` | Selected row highlight (full-opacity accent) | `toc_accent` |
+| `selection_bg` | Selected row bar (full-opacity accent); the row text is the panel background colour | `toc_accent` |
 | `changed_marker_fg` | Sidebar ` *` changed-file marker | `status_warning_fg` |
 | `dimmed_fg` | Dimmed sidebar names, backlinks empty state, `.base` rule line | `status_shortcut_fg` |
 | `content_bg` | Note content, `.base` table, and all popup backgrounds | `content_bg` |
@@ -96,6 +96,12 @@ carries the family's intended role:
   and this app after it — uses the accent color at full opacity instead.
   Every theme family follows this one rule (Nord uses frost **nord8**, not
   a muted polar-night tint; gruvbox uses bright orange, not bg2).
+- **The selected row is inverse video.** The bar is the accent at full
+  opacity (the rule above), and the row text is the panel background colour
+  (`sidebar_bg` for the sidebar family, `content_bg` for the popups). The
+  accent is usually the same colour as the text it would sit on (contrast
+  ~1.1, the same reason the link focus highlight in `crates/app/src/links.rs`
+  is inverse video), so the text is inverted rather than the bar muted.
 - **Dimmed/border picks are leaf's choices**, kept verbatim: Catppuccin
   uses **Overlay 0** (not Overlay 1) for dimmed text and **Surface 1** for
   borders; Nord uses **nord3** (not nord5) for dimmed/borders; Dracula
