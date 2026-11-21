@@ -1642,6 +1642,52 @@ fn disambiguation_popup_renders_candidates() {
     assert!(screen.contains("x/dup.md") && screen.contains("y/dup.md"));
 }
 
+/// The selected candidate's row is one bar reaching the popup's inner right
+/// edge, like every other list panel's (the disambiguation popup was the one
+/// without a test pinning its end position).
+#[test]
+fn disambiguation_selected_row_is_a_full_width_bar() {
+    let vault_dir = TempDir::new("ui-disamb-band");
+    std::fs::create_dir_all(vault_dir.path().join("x")).unwrap();
+    std::fs::create_dir_all(vault_dir.path().join("y")).unwrap();
+    std::fs::write(vault_dir.path().join("x/dup.md"), "x\n").unwrap();
+    std::fs::write(vault_dir.path().join("y/dup.md"), "y\n").unwrap();
+    let file = ui_viewer("ui-disamb-band.md", "x\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.theme_ui.content_bg = Color::Rgb(9, 9, 9);
+    app.theme_ui.selection_bg = Color::Rgb(5, 5, 5);
+    app.disambiguation = Some(crate::app::Disambiguation {
+        candidates: vec![
+            vault_dir.path().join("x/dup.md"),
+            vault_dir.path().join("y/dup.md"),
+        ],
+        selected: 1,
+        heading: None,
+    });
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = centered(
+        Rect::new(0, 0, 100, 24),
+        60,
+        DISAMBIGUATION_CHROME.height(2),
+    );
+    // No chrome above the list: the second candidate is the second inner row.
+    let y = popup.y + 2;
+    assert_eq!(
+        buffer[(popup.x + 1, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "the selected candidate carries the bar"
+    );
+    assert_eq!(
+        buffer[(popup.right() - 2, y)].bg,
+        Color::Rgb(5, 5, 5),
+        "disambiguation bar reaches the popup's inner right edge"
+    );
+}
+
 /// With more candidates than fit the terminal, the popup list scrolls
 /// so the selection stays visible (previously it silently truncated).
 #[test]
