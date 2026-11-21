@@ -35,6 +35,12 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 34 - the disambiguation popup's bar is pinned: every list panel
+    had a test that holds the selected row's bar to the panel's inner right
+    edge, and the disambiguation popup had none (found in a review). The
+    popup holds - it draws its rows through the same `highlight_selection` -
+    so the unit was test-only. Two reviewers, 0 blocking, 3 low (2 distinct,
+    one found on both axes; carried).
   - Unit 33 - the search popup's selected row reaches the popup's inner
     right edge: `snippet_line` never returns a line wider than its budget
     (a wide character at the window's edge no longer overshoots it; a match
@@ -184,6 +190,13 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 34's review (two lows, carried): the new disambiguation test
+      hardcodes the popup's width constant (60) that `draw_disambiguation`
+      clamps, where the sibling popup tests go through a shared geometry
+      helper - extracting one for this popup is a small refactor of its own;
+      and the test pins the bar's background but not the inverse-video text
+      colour the sibling popup tests also pin, so the row's fg half of unit
+      23's rule stays untested.
   - From unit 33's review (two lows, carried): the search snippet's test
       helper `rendered_width` re-implements ratatui's `Line::width()` - the
       helper can go in favour of it; and the comment on
