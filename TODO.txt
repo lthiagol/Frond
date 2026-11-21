@@ -35,6 +35,12 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 35 - the duplicated doc comment is gone: `TagList::row_matches` carried
+    the same comment twice, the second line with the extra clause; the
+    redundant line is gone and the survivor keeps both. One line, one file.
+    Two reviewers, 0 blocking, 0 low - both checked the pattern rather than
+    the line the brief named, and no other pair of consecutive identical
+    doc-comment lines exists in the tree.
   - Unit 34 - the disambiguation popup's bar is pinned: every list panel
     had a test that holds the selected row's bar to the panel's inner right
     edge, and the disambiguation popup had none (found in a review). The
