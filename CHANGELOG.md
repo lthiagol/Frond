@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Added
 
 ### Fixed
+- A file that becomes unreadable while frond is running is now reported on
+  the status bar, the way an unreadable file found at startup already was.
+  The reindex that failed to read it recorded the problem, but nothing
+  surfaced it, so the note was missing from the index with no word about
+  it. The report stays until the file reads again, and the note returns to
+  the index with it.
 - The status bar's warning for a directory the vault cannot read no longer
   disappears when the vault walk itself fails. A walk that could not look
   is not evidence that every directory reads, so the warning stays until a

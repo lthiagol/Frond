@@ -1609,8 +1609,9 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         }
     }
     // The vault's unreadable-path state (a directory the walk cannot read,
-    // a file the startup index could not read): error-ish, but it outlives
-    // a transient info message and clears with the condition.
+    // a file the index could not read — at startup or in a later reindex):
+    // error-ish, but it outlives a transient info message and clears with
+    // the condition.
     if let Some(warning) = &app.walk_warning {
         spans.push(Span::styled(
             format!(" · {warning}"),

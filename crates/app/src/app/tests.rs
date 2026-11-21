@@ -2054,6 +2054,107 @@ fn a_startup_unreadable_file_stays_until_it_reads_again() {
     );
 }
 
+/// A file that becomes unreadable while the app runs is surfaced like a
+/// startup skip: the reindex that could not read it records an
+/// `Unreadable` warning on the index, and the bar reports it
+/// vault-relative for as long as the condition lasts. A permission fix
+/// changes no stamp, so the watcher never re-feeds the path — the report's
+/// end must put the note back itself.
+#[test]
+fn a_file_that_becomes_unreadable_mid_session_is_surfaced_and_heals() {
+    let vault_dir = vault();
+    let note = vault_dir.path().join("a.md");
+    let lock = |mode: u32| {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&note, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let file = TempFile::new("app-mid-session.md", &"MAIN\n\n".repeat(50));
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let index = shared_index(&vault_dir);
+    let mut app = App::new(
+        viewer,
+        Some(vault_dir.path().to_path_buf()),
+        Some(index.clone()),
+    )
+    .unwrap();
+    assert!(app.walk_warning.is_none());
+    assert!(index.borrow().notes().any(|n| n.path == note));
+
+    // Modified and locked before the next scan: the walk sees a new stamp,
+    // the reindex cannot read the file, and the index records why.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(&note, "A changed\n\n").unwrap();
+    lock(0o000);
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("the mid-session unreadable file is silent"));
+    assert!(
+        message.contains("a.md: unreadable"),
+        "names the file, vault-relative: {message:?}"
+    );
+    assert!(
+        !message.contains(&vault_dir.path().display().to_string()),
+        "the vault root is not part of the message: {message:?}"
+    );
+    assert!(
+        app.viewer.last_error.is_none(),
+        "the file's warning has its own slot, not the error one: {:?}",
+        app.viewer.last_error
+    );
+    {
+        let index = index.borrow();
+        assert!(
+            !index.notes().any(|n| n.path == note),
+            "the unreadable note left the index"
+        );
+        // The reindex's unreadable branch is the producer no other test
+        // pins: a wrong kind there would silently drop the report. One
+        // report for the path, not a stale one plus the new one.
+        let warnings: Vec<_> = index.warnings().iter().filter(|w| w.path == note).collect();
+        assert_eq!(warnings.len(), 1, "one report for the path: {warnings:?}");
+        assert_eq!(warnings[0].kind, vault::WarningKind::Unreadable);
+    }
+
+    // Still unreadable: the next scan keeps the same one message.
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert_eq!(app.walk_warning.as_deref(), Some(message.as_str()));
+    assert_eq!(
+        message.matches("unreadable").count(),
+        1,
+        "the same condition is one message, not two: {message:?}"
+    );
+
+    // Readable again with no stamp change: the report ends and the note
+    // comes back with it. The healed note's frontmatter diagnostic stays
+    // out of the slot — it is about a note the reader has, not a lost one.
+    lock(0o644);
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert!(
+        app.walk_warning.is_none(),
+        "a readable file ends the report: {:?}",
+        app.walk_warning
+    );
+    let index = index.borrow();
+    assert!(
+        index.notes().any(|n| n.path == note),
+        "the healed file is back in the index, not just out of the warning"
+    );
+    assert!(
+        index
+            .warnings()
+            .iter()
+            .any(|w| w.path == note && w.kind == vault::WarningKind::Frontmatter),
+        "the healed note's frontmatter diagnostic is the index's, and stayed out of the slot: {:?}",
+        index.warnings()
+    );
+}
+
 /// A vault the walk skipped nothing in shows no warning. The fixture's plain
 /// notes carry a frontmatter diagnostic in the index; that is not a note the
 /// reader lost, so it does not reach the bar.
