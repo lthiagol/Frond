@@ -35,6 +35,22 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 41 - the review lows are closed: nine of them, from the cycle's own
+    reviews. Five were the same shape - the code was right and its
+    description had drifted (a test name stating the opposite of its
+    guarantee, a comment claiming more than its fixture proved, an old
+    test describing a rule the code had moved past, a helper duplicating
+    ratatui's `Line::width()`, and an overclaim in the changelog). The
+    rest were corners nothing pinned: the disambiguation bar's text
+    colour, a directory locked at startup when the root then fails, the
+    heal that waits for a successful walk, and the help popup's chrome.
+    The disambiguation popup's geometry has one home now. Two reviewers,
+    0 blocking, 1 low (carried).
+  - From unit 41's review (one low, carried): an older test
+    (`popups_paint_content_bg_over_the_terminal_default`) still encodes
+    the disambiguation popup's derived geometry in hardcoded coordinates,
+    so a future width change breaks it instead of flowing through the new
+    helper.
   - Unit 40 - the help popup's scrollbar is a position control: it was the
     last bar that was display only. A press jumps the popup's body to that
     row, a drag follows the pointer, and the release that ends the drag
