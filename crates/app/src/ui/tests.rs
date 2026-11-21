@@ -1416,8 +1416,34 @@ fn outline_sidebar_renders_headings_indented_by_level() {
         "the panel is titled outline: {:?}",
         row(area.y)
     );
-    let top = row(area.y + 1);
-    let deep = row(area.y + 2);
+    // The label is chrome above the list: a blank row, the label, the rule,
+    // then the headings (leaf's header chunk).
+    assert_eq!(
+        OUTLINE_HEADER_ROWS, 3,
+        "the header is a blank row, the label and its rule"
+    );
+    assert!(
+        row(area.y + 2).contains("TABLE OF CONTENTS"),
+        "the TOC label sits above the headings: {:?}",
+        row(area.y + 2)
+    );
+    assert!(
+        row(area.y + 3).starts_with("──"),
+        "a rule underlines the label: {:?}",
+        row(area.y + 3)
+    );
+    assert_eq!(
+        buffer[(area.right() - 1, area.y + 3)].symbol(),
+        "┤",
+        "the rule tees into the panel's right border, leaf's header shape"
+    );
+    assert_eq!(
+        buffer[(area.x + 2, area.y + 2)].fg,
+        app.theme_ui.dimmed_fg,
+        "the label uses the existing dimmed role (there is no header key)"
+    );
+    let top = row(area.y + 1 + OUTLINE_HEADER_ROWS);
+    let deep = row(area.y + 2 + OUTLINE_HEADER_ROWS);
     assert_eq!(top.trim_end(), "Top", "the level-1 heading is flush left");
     assert_eq!(
         deep.find("Deep"),
@@ -1440,21 +1466,52 @@ fn outline_selected_row_is_a_full_width_inverse_video_bar() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
-    // The first heading is the selected row: inverted text and a bar out
-    // to the panel's inner right edge (border at x = 29).
-    assert_eq!(buffer[(1, 1)].bg, Color::Rgb(5, 5, 5), "outline bar starts");
+    // The first heading is the selected row (below the TOC header): inverted
+    // text and a bar out to the panel's inner right edge (border at x = 29).
+    let first = 1 + OUTLINE_HEADER_ROWS;
     assert_eq!(
-        buffer[(1, 1)].fg,
+        buffer[(1, first)].bg,
+        Color::Rgb(5, 5, 5),
+        "outline bar starts"
+    );
+    assert_eq!(
+        buffer[(1, first)].fg,
         Color::Rgb(7, 7, 7),
         "outline selected text is the panel background"
     );
     assert_eq!(
-        buffer[(28, 1)].bg,
+        buffer[(28, first)].bg,
         Color::Rgb(5, 5, 5),
         "outline bar reaches the inner right edge"
     );
     // The second heading is not selected.
-    assert_eq!(buffer[(28, 2)].bg, Color::Rgb(7, 7, 7));
+    assert_eq!(buffer[(28, first + 1)].bg, Color::Rgb(7, 7, 7));
+}
+
+#[test]
+fn outline_panel_carries_the_toc_label_only_in_outline_mode() {
+    let vault_dir = TempDir::new("ui-outline-label");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-outline-label.md", "# Top\n\nbody\n");
+    let mut app = app_with_index(&file, &vault_dir);
+
+    let tree = render(&mut app);
+    assert!(
+        !tree.contains("TABLE OF CONTENTS"),
+        "the tree has no TOC label: {tree}"
+    );
+    app.handle_key(key(KeyCode::Char('t')));
+    let tags = render(&mut app);
+    assert!(
+        !tags.contains("TABLE OF CONTENTS"),
+        "the tag view has no TOC label: {tags}"
+    );
+    app.handle_key(key(KeyCode::Char('o')));
+    let outline = render(&mut app);
+    assert!(
+        outline.contains("TABLE OF CONTENTS"),
+        "the outline panel says what it is: {outline}"
+    );
 }
 
 #[test]
@@ -1534,17 +1591,21 @@ fn outline_scrollbar_only_when_the_headings_overflow() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let bar_x = sidebar_width(100) - 2;
-    assert!(column_has_bar(buffer, bar_x, 1..22), "outline bar drawn");
+    let list_top = 1 + OUTLINE_HEADER_ROWS;
     assert!(
-        scrollbar_thumb_rows(buffer, sidebar_width(100) - 1, 1..22).is_empty(),
+        column_has_bar(buffer, bar_x, list_top..22),
+        "outline bar drawn below the TOC header"
+    );
+    assert!(
+        scrollbar_thumb_rows(buffer, sidebar_width(100) - 1, list_top..22).is_empty(),
         "the border column holds no thumb"
     );
     assert!(
-        !scrollbar_thumb_rows(buffer, bar_x, 1..22).is_empty(),
+        !scrollbar_thumb_rows(buffer, bar_x, list_top..22).is_empty(),
         "the bar column holds the thumb"
     );
     assert!(
-        border_drawn(buffer, sidebar_width(100) - 1, 1..22),
+        border_drawn(buffer, sidebar_width(100) - 1, list_top..22),
         "the border is drawn"
     );
 }
@@ -1568,13 +1629,14 @@ fn selected_bar_stops_before_the_scrollbar_column() {
     let buffer = terminal.backend().buffer();
     // 40 headings overflow, so the scrollbar owns the last inner column.
     let bar_x = sidebar_width(100) - 2;
+    let first = 1 + OUTLINE_HEADER_ROWS;
     assert_eq!(
-        buffer[(bar_x - 1, 1)].bg,
+        buffer[(bar_x - 1, first)].bg,
         Color::Rgb(5, 5, 5),
         "the bar reaches the text area's right edge"
     );
     assert_ne!(
-        buffer[(bar_x, 1)].bg,
+        buffer[(bar_x, first)].bg,
         Color::Rgb(5, 5, 5),
         "the bar never runs into the scrollbar column"
     );
@@ -4286,7 +4348,9 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let area = app.layout.sidebar_area.expect("sidebar visible");
     let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
-    let inner_height = area.height as usize - 2;
+    // The TOC header sits above the list, so the bar is shorter than the
+    // panel's inner height: its rows are the visible heading rows.
+    let list_height = bar.height as usize;
     app.handle_press(bar.x, bar.bottom() - 1);
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -4294,7 +4358,7 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
     assert_eq!(app.outline.selected, len - 1);
     assert_eq!(
         app.outline.scroll,
-        len - inner_height,
+        len - list_height,
         "the outline window ends on its last row"
     );
     assert!(

@@ -617,6 +617,7 @@ fn draw_sidebar(
         f,
         ListPanel {
             area,
+            list_area: area,
             text_area,
             title: " vault ".into(),
             focused,
@@ -633,7 +634,12 @@ fn draw_sidebar(
 /// Geometry and chrome of one bordered list panel (sidebar tree, tag
 /// list, backlinks) for [`render_list_panel`].
 struct ListPanel {
+    /// The whole bordered panel.
     area: Rect,
+    /// The panel rect whose inner rows are the list. It differs from `area`
+    /// only when a header sits above the rows (the outline's TOC label):
+    /// the bar's track and its row mapping start below it.
+    list_area: Rect,
     text_area: Rect,
     title: String,
     focused: bool,
@@ -671,14 +677,14 @@ fn render_list_panel(
         panel.text_area,
     );
     if panel.overflow {
-        let bar = list_scrollbar_area(panel.area);
+        let bar = list_scrollbar_area(panel.list_area);
         draw_scrollbar(
             f,
             bar,
             BarSpan {
                 total: panel.rows_total,
                 position: panel.scroll,
-                viewport: panel.area.height.saturating_sub(2) as usize,
+                viewport: panel.list_area.height.saturating_sub(2) as usize,
             },
             ui.sidebar_bg,
             ui,
@@ -784,6 +790,38 @@ fn sidebar_line(
     line
 }
 
+/// The outline panel's `TABLE OF CONTENTS` header, top to bottom: a blank
+/// row, the label, and the rule under it — leaf's `render/toc.rs` header
+/// chunk. The list (its viewport, its bar and its row clicks) starts below
+/// these rows.
+enum OutlineHeaderRow {
+    Blank,
+    Label,
+    Rule,
+}
+
+const OUTLINE_HEADER: [OutlineHeaderRow; 3] = [
+    OutlineHeaderRow::Blank,
+    OutlineHeaderRow::Label,
+    OutlineHeaderRow::Rule,
+];
+
+/// Rows the header takes above the list. Derived from the row sequence so
+/// the renderer, the viewport and the click mapping cannot disagree.
+pub(crate) const OUTLINE_HEADER_ROWS: u16 = OUTLINE_HEADER.len() as u16;
+
+/// The panel rect whose inner rows are the outline's headings: the panel
+/// minus the TOC header. `list_row_at` adds the top border itself, so this
+/// skips the header only; the bar drawn from it starts below the rule.
+pub(crate) fn outline_list_area(area: Rect) -> Rect {
+    let header = OUTLINE_HEADER_ROWS.min(area.height.saturating_sub(2));
+    Rect {
+        y: area.y.saturating_add(header),
+        height: area.height.saturating_sub(header),
+        ..area
+    }
+}
+
 /// The outline panel (`o`): the open note's headings, indented relative to
 /// its shallowest heading level. The empty state covers both no note and a
 /// note without headings.
@@ -796,12 +834,13 @@ fn draw_outline(
     focused: bool,
     pointer: Option<Position>,
 ) -> Option<Rect> {
-    let inner_height = area.height.saturating_sub(2) as usize;
+    let list_area = outline_list_area(area);
+    let list_height = list_area.height.saturating_sub(2) as usize;
     let rows_total = entries.len();
-    outline.on_viewport_height(inner_height.max(1), rows_total);
+    outline.on_viewport_height(list_height.max(1), rows_total);
 
-    let overflow = rows_total > inner_height;
-    let text_area = list_text_area(area, overflow);
+    let overflow = rows_total > list_height;
+    let text_area = list_text_area(list_area, overflow);
     let inner_width = text_area.width as usize;
 
     let rows = crate::outline::rows(entries);
@@ -814,15 +853,16 @@ fn draw_outline(
         rows.iter()
             .enumerate()
             .skip(outline.scroll)
-            .take(inner_height)
+            .take(list_height)
             .map(|(i, row)| outline_line(row, i == outline.selected, inner_width, ui))
             .collect()
     };
 
-    render_list_panel(
+    let bar = render_list_panel(
         f,
         ListPanel {
             area,
+            list_area,
             text_area,
             title: " outline ".into(),
             focused,
@@ -833,7 +873,73 @@ fn draw_outline(
         window,
         ui,
         pointer,
-    )
+    );
+    // The header is chrome inside the border, so it paints after the rows
+    // (the list area starts below it; this keeps the label legible even if a
+    // future row count overshoots the panel).
+    draw_outline_header(f, area, ui, focused);
+    bar
+}
+
+/// Paints the outline's label and its rule inside the panel's top border,
+/// row for row from [`OUTLINE_HEADER`]: a blank row, a bold
+/// ` TABLE OF CONTENTS`, then a rule that tees into the panel's right
+/// border with leaf's `┤` corner. The rows come out of the list (see
+/// [`outline_list_area`]), never out of the headings.
+fn draw_outline_header(f: &mut Frame, area: Rect, ui: UiTheme, focused: bool) {
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+    if inner.width == 0 {
+        return;
+    }
+    let border = if focused {
+        ui.sidebar_border_focused
+    } else {
+        ui.sidebar_border_unfocused
+    };
+    let rule_style = Style::new().fg(border).bg(ui.sidebar_bg);
+    for (row, kind) in OUTLINE_HEADER.iter().enumerate() {
+        let y = inner.y + row as u16;
+        if y >= inner.bottom() {
+            break;
+        }
+        match kind {
+            OutlineHeaderRow::Blank => {}
+            OutlineHeaderRow::Label => {
+                let label = Rect {
+                    y,
+                    height: 1,
+                    ..inner
+                };
+                f.render_widget(
+                    Paragraph::new(Line::from(Span::styled(
+                        " TABLE OF CONTENTS",
+                        Style::new()
+                            .fg(ui.dimmed_fg)
+                            .bg(ui.sidebar_bg)
+                            .add_modifier(Modifier::BOLD),
+                    )))
+                    .style(Style::new().bg(ui.sidebar_bg)),
+                    label,
+                );
+            }
+            OutlineHeaderRow::Rule => {
+                f.buffer_mut().set_stringn(
+                    inner.x,
+                    y,
+                    "─".repeat(inner.width as usize),
+                    inner.width as usize,
+                    rule_style,
+                );
+                f.buffer_mut()
+                    .set_stringn(area.right().saturating_sub(1), y, "┤", 1, rule_style);
+            }
+        }
+    }
 }
 
 /// One outline row: the heading indented by its depth relative to the
@@ -891,6 +997,7 @@ fn draw_tag_list(
         f,
         ListPanel {
             area,
+            list_area: area,
             text_area,
             title: " tags ".into(),
             focused,
@@ -995,6 +1102,7 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
         f,
         ListPanel {
             area,
+            list_area: area,
             text_area,
             title: format!(" backlinks ({}) ", app.backlinks.len()),
             focused,

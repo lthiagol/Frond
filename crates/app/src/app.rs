@@ -1503,9 +1503,13 @@ impl App {
             }
             SidebarMode::Outline => {
                 let len = self.outline_len();
-                let Some(index) = crate::sidebar::list_row_at(row, area, self.outline.scroll, len)
+                // The TOC label's header rows are inside the panel, above
+                // the headings: the row mapping starts below them.
+                let list_area = crate::ui::outline_list_area(area);
+                let Some(index) =
+                    crate::sidebar::list_row_at(row, list_area, self.outline.scroll, len)
                 else {
-                    return false; // border row or past the last heading
+                    return false; // border/header row or past the last heading
                 };
                 self.outline.select(index, len);
                 self.jump_to_outline_heading();
