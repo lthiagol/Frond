@@ -1643,10 +1643,14 @@ mod tests {
         // diagnostic whose text happens to open with "unreadable: " is
         // still a diagnostic. This fixture pins the reader
         // (`is_unreadable`) only: it is built by hand because no producer
-        // can emit this text today — every producer names the kind, and
-        // every frontmatter diagnostic opens with a fixed phrase of its own
-        // ("no frontmatter", "frontmatter ..."), never the unreadable
-        // prefix. A producer-side text classifier would still pass it.
+        // can emit this text today — the kind is structural. Every index
+        // warning is recorded with its kind set at the site that pushes it
+        // (`WarningKind::Frontmatter` for a diagnostic about an indexed
+        // note, `WarningKind::Unreadable` for a path that could not be
+        // read), and `is_unreadable` compares that kind, never the message.
+        // To re-check it, grep the producers for `WarningKind::`, not for
+        // the message texts, which vary. A producer-side text classifier
+        // would still pass this fixture.
         let colliding = IndexWarning {
             path: vault.path().join("plain.md"),
             kind: WarningKind::Frontmatter,

@@ -5,7 +5,7 @@ use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use super::*;
-use crate::app::App;
+use crate::app::{App, SIDEBAR_MIN_WIDTH};
 use crate::testutil::{TempDir, TempFile};
 use crate::viewer::Viewer;
 
@@ -1713,6 +1713,53 @@ fn tree_and_tag_headers_name_the_vault_over_the_same_rule() {
             "the {mode} list starts below the header"
         );
     }
+}
+
+/// A vault name wider than the panel's inner row is cut at its right edge,
+/// here as narrow as the sidebar goes: the label starts at the left inner
+/// edge (too wide to centre) and fills the row up to the border, which
+/// stays intact — nothing spills past it.
+#[test]
+fn a_vault_name_wider_than_the_panel_is_truncated_at_the_inner_edge() {
+    let root = TempDir::new("ui-vault-long-name");
+    let vault_name = "a-vault-directory-name-wider-than-the-sidebar";
+    let vault_path = root.path().join(vault_name);
+    std::fs::create_dir_all(&vault_path).unwrap();
+    std::fs::write(vault_path.join("alpha.md"), "x\n").unwrap();
+    let file = ui_viewer("ui-vault-long-name.md", "x\n");
+    let index = Rc::new(RefCell::new(VaultIndex::build(&vault_path).unwrap()));
+    let mut app = App::new(sample_viewer(file.path()), Some(vault_path), Some(index)).unwrap();
+    app.sidebar_width = Some(SIDEBAR_MIN_WIDTH);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let inner_width = (area.width - 2) as usize;
+    assert!(
+        UnicodeWidthStr::width(vault_name) > inner_width,
+        "precondition: the name is wider than the {inner_width}-cell inner row"
+    );
+
+    // The label's row: a blank row under the border, then the name.
+    let y = area.y + 2;
+    let drawn: String = (area.x + 1..area.right() - 1)
+        .map(|x| buffer[(x, y)].symbol())
+        .collect();
+    assert_eq!(
+        drawn,
+        &vault_name[..inner_width],
+        "the name is cut at the inner right edge"
+    );
+    assert_eq!(
+        buffer[(area.x + 1, y)].symbol(),
+        "a",
+        "a too-wide label falls back to the left inner edge"
+    );
+    assert_eq!(
+        buffer[(area.right() - 1, y)].symbol(),
+        "│",
+        "the border is intact: nothing spills past the inner edge"
+    );
 }
 
 /// Every mode's header has the same shape - blank, label, blank, rule - so

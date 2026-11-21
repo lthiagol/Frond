@@ -45,6 +45,14 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 49 - the carried lows are closed: the pin's doc comment now states
+    what the pin *is* (a title plus its occurrence among the rows carrying
+    that title) and what it guarantees, instead of enumerating which case
+    lands where; the too-wide vault name is pinned by a narrow-sidebar test;
+    the drag guard's comment says why it is there; and the colliding
+    prefix fixture states the invariant and how to check it (grep the
+    producers for `WarningKind::`, not for the message texts, which vary).
+    Two reviewers, 0 blocking; one fix round; 1 low (carried).
   - Unit 48 - the sidebar's header sits square in the panel: a blank line,
     the label, another blank line, and the rule - the label has a line of
     space on each side, in every mode. The header takes one row more from
@@ -365,6 +373,16 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 49's delta review (one low, carried): the pin field's comment
+      states the drop condition in its title half only - the pin also drops
+      when the title survives but the stored occurrence no longer exists
+      (deleting the last occurrence of a title drops the pin rather than
+      sliding it onto an earlier duplicate). The exact rule is already
+      stated in `pinned_row`'s own doc, one function away. **The fix is to
+      point at that function rather than restate the rule here**: a
+      paraphrase is a second home that drifts, a pointer cannot. Three
+      rounds on this one comment taught that - each rewrite was
+      true-but-partial.
   - From unit 47's review (one low, carried): the too-wide-label path is
       reachable but unpinned - a vault directory whose name is longer than
       the panel's inner width truncates, and no test exercises it. The

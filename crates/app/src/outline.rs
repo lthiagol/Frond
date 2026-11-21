@@ -82,12 +82,15 @@ pub struct Outline {
     /// First visible row index.
     pub scroll: usize,
     /// Heading a jump pinned as active, until the reader scrolls the note.
-    /// Held by title and the heading's occurrence among the rows carrying
-    /// that title: the rows are rebuilt on every watch-triggered reparse,
-    /// and an edit that inserts or removes a heading above the pinned one
-    /// must not move the mark to a different heading (an index would). The
-    /// occurrence keeps two identically-titled headings apart. A heading
-    /// that is gone drops the pin.
+    /// The pin is the heading's title plus its occurrence among the rows
+    /// carrying that title, and every watch-triggered reparse rebuilds
+    /// those rows: the mark names the row at that occurrence, where a row
+    /// index would move with an insert above. An edit that adds or
+    /// removes a heading carrying the title can therefore move the mark
+    /// to a different heading of that title — no textual key can tell
+    /// same-titled headings apart after a reparse. The pin is dropped
+    /// when no row carries the title any more; the reader's next note
+    /// scroll releases it.
     pin: Option<(String, usize)>,
     /// Whether the window follows the active row (the note's scroll) or the
     /// selection. The reader's own cursor moves, a click and the panel's bar

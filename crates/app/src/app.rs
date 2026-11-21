@@ -1225,8 +1225,12 @@ impl App {
             return;
         }
         if target == BarTarget::Help {
-            // The inverse of the press guard; see `handle_press` for why
-            // the disambiguation state is defensive.
+            // The inverse of the press guard: the help bar's drag may only
+            // move the help popup's body. The disambiguation check is
+            // defensive: input routes to that popup first (keys in
+            // `handle_key`, clicks through `any_popup_open`), so help is
+            // never open beneath one today; it keeps a future path from
+            // dragging the wrong body.
             if !self.viewer.help_open || self.disambiguation.is_some() {
                 return;
             }
