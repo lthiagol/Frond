@@ -4,10 +4,9 @@
 //! order; the indentation is relative to the shallowest heading level in
 //! that note. This module owns the two cursors — the reader's selection and
 //! the active heading the note's scroll moves — and the one scroll window
-//! they share, which has three owners: the note's scroll, the reader's
-//! cursor, and the reader's wheel (the selection's shape is
-//! `tags::TagList`'s). The rows themselves stay in the viewer so the
-//! outline always follows the note on screen. Rendering lives in `ui.rs`.
+//! they share ([`WindowOwner`]). The selection's shape is `tags::TagList`'s.
+//! The rows themselves stay in the viewer so the outline always follows the
+//! note on screen. Rendering lives in `ui.rs`.
 
 use engine::TocEntry;
 
@@ -84,10 +83,11 @@ enum WindowOwner {
 pub struct Outline {
     /// Index of the selected row: the reader's cursor (`j`/`k`, a click,
     /// the panel's bar) and the thing `Enter` jumps to. A note scroll takes
-    /// it to the active row; until then it stays where the reader put it.
+    /// it to the active row ([`Self::note_scrolled`]); until then it stays
+    /// where the reader put it.
     pub selected: usize,
-    /// Index of the active row: the heading the reader is looking at, which
-    /// the note's scroll moves. It is marked, and a note scroll selects it.
+    /// Index of the active row: the heading the reader is looking at. The
+    /// note's scroll owns it ([`Self::follow_note`]).
     pub active: usize,
     /// Viewport height fed back from `ui::draw` (inner height in rows).
     pub viewport: usize,
@@ -100,15 +100,13 @@ pub struct Outline {
     /// or drops the pin lives in [`Self::pinned_row`], and the release
     /// belongs to [`Self::note_scrolled`].
     pin: Option<(String, usize)>,
-    /// Who positions the window. The note's scroll hands it to
-    /// [`WindowOwner::Note`], the reader's own cursor moves, a click and the
-    /// panel's bar to [`WindowOwner::Cursor`], and the wheel to
-    /// [`WindowOwner::Wheel`]; a note scroll hands it back to the note.
+    /// Who positions the window; the variants and their rules are
+    /// [`WindowOwner`]'s.
     owner: WindowOwner,
     /// A note scroll has happened and the selection must take the active
-    /// row on the next [`Self::follow_note`]: the bar marks the heading the
-    /// reader is looking at. A reader move or a note change cancels it, so a
-    /// redraw before the next scroll cannot pull a fresh cursor away.
+    /// row on the next [`Self::follow_note`]. Dropping it is
+    /// [`Self::clear_take_selection`]'s, so a redraw before the next scroll
+    /// cannot pull a fresh cursor away.
     take_selection: bool,
 }
 
@@ -158,7 +156,7 @@ impl Outline {
     pub fn on_note_change(&mut self, len: usize) {
         self.pin = None;
         self.owner = WindowOwner::Note;
-        self.take_selection = false;
+        self.clear_take_selection();
         self.selected = 0;
         self.active = 0;
         self.scroll = 0;
@@ -184,7 +182,7 @@ impl Outline {
     /// ([`Self::note_scrolled`]).
     pub fn wheel(&mut self, delta: isize, len: usize) {
         self.owner = WindowOwner::Wheel;
-        self.take_selection = false;
+        self.clear_take_selection();
         self.scroll = (self.scroll as isize + delta).max(0) as usize;
         self.clamp_scroll(len);
     }
@@ -226,11 +224,17 @@ impl Outline {
         self.active = active;
         if self.take_selection {
             self.selected = self.active;
-            self.take_selection = false;
+            self.clear_take_selection();
         }
         if self.owner == WindowOwner::Note {
             self.scroll_row_into_view(self.active, entries.len());
         }
+    }
+
+    /// Drops a pending selection take: the next [`Self::follow_note`] leaves
+    /// the selection where the reader put it.
+    fn clear_take_selection(&mut self) {
+        self.take_selection = false;
     }
 
     /// The pinned heading's row, matched by title and occurrence in
@@ -257,10 +261,7 @@ impl Outline {
         if index >= len {
             return;
         }
-        self.selected = index;
-        self.owner = WindowOwner::Cursor;
-        self.take_selection = false;
-        self.scroll_selection_into_view(len);
+        self.move_cursor_to(index, len);
     }
 
     pub fn move_down(&mut self, n: usize, len: usize) {
@@ -275,9 +276,16 @@ impl Outline {
         if len == 0 {
             return;
         }
-        self.selected = (self.selected as isize + delta).clamp(0, len as isize - 1) as usize;
+        let index = (self.selected as isize + delta).clamp(0, len as isize - 1) as usize;
+        self.move_cursor_to(index, len);
+    }
+
+    /// The reader's cursor move: selects `index`, hands the window to
+    /// [`WindowOwner::Cursor`], and keeps the row visible.
+    fn move_cursor_to(&mut self, index: usize, len: usize) {
+        self.selected = index;
         self.owner = WindowOwner::Cursor;
-        self.take_selection = false;
+        self.clear_take_selection();
         self.scroll_selection_into_view(len);
     }
 

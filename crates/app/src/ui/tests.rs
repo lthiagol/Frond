@@ -1000,10 +1000,10 @@ fn sidebar_visible_by_default_with_vault() {
     let file = ui_viewer("ui-tab.md", "x\n");
     let mut app = app_for(&file, Some(vault_dir.path()));
     assert!(app.sidebar_visible, "starts visible with --vault");
-    let screen = render(&mut app);
-    assert!(screen.contains("vault"), "sidebar title missing");
+    let sidebar = rendered_sidebar(&mut app);
+    assert!(sidebar.contains("vault"), "sidebar title missing");
     assert!(
-        screen.contains("alpha.md"),
+        sidebar.contains("alpha.md"),
         "sidebar should list vault notes"
     );
     // Content re-wrapped to the narrower area: 100 - 30 - 2 margins = 66.
@@ -1029,10 +1029,10 @@ fn sidebar_truncates_long_names_with_ellipsis() {
     std::fs::write(dir.path().join(long), "x\n").unwrap();
     let file = ui_viewer("ui-trunc.md", "x\n");
     let mut app = app_for(&file, Some(dir.path()));
-    let screen = render(&mut app);
-    assert!(screen.contains("…"), "truncated name should use ellipsis");
+    let sidebar = rendered_sidebar(&mut app);
+    assert!(sidebar.contains("…"), "truncated name should use ellipsis");
     assert!(
-        !screen.contains(long),
+        !sidebar.contains(long),
         "full long name must not appear in the sidebar"
     );
 }
@@ -1136,15 +1136,15 @@ fn tree_shows_status_glyphs() {
     .unwrap();
     let file = ui_viewer("ui-glyph.md", "x\n");
     let mut app = app_with_index(&file, &vault_dir);
-    let screen = render(&mut app);
-    assert!(screen.contains('●'), "complete glyph shown");
-    assert!(screen.contains('◐'), "in-progress glyph shown");
-    assert!(screen.contains('×'), "archived glyph shown");
-    assert!(screen.contains('◉'), "blocked glyph shown");
-    assert!(screen.contains('◌'), "draft glyph shown");
+    let sidebar = rendered_sidebar(&mut app);
+    assert!(sidebar.contains('●'), "complete glyph shown");
+    assert!(sidebar.contains('◐'), "in-progress glyph shown");
+    assert!(sidebar.contains('×'), "archived glyph shown");
+    assert!(sidebar.contains('◉'), "blocked glyph shown");
+    assert!(sidebar.contains('◌'), "draft glyph shown");
     // Active renders too (same ● as complete, styled green+bold).
-    assert_eq!(screen.matches('●').count(), 2, "active + complete");
-    assert!(!screen.contains('○'), "no pending/planned note in fixture");
+    assert_eq!(sidebar.matches('●').count(), 2, "active + complete");
+    assert!(!sidebar.contains('○'), "no pending/planned note in fixture");
 }
 
 #[test]
@@ -1155,19 +1155,19 @@ fn backlinks_panel_renders_with_empty_state() {
     let file = ui_viewer("ui-bl.md", "x\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('b')));
-    let screen = render(&mut app);
-    assert!(screen.contains("backlinks"), "panel title shown");
+    let panel = rendered_backlinks(&mut app);
+    assert!(panel.contains("backlinks"), "panel title shown");
     assert!(
-        screen.contains("no notes link here"),
+        panel.contains("no notes link here"),
         "empty state (no note open)"
     );
 
     // Open the linked-to note: the panel lists the linker.
     app.open_note(&vault_dir.path().join("target.md")).unwrap();
     app.refresh_backlinks();
-    let screen = render(&mut app);
-    assert!(screen.contains("linker.md"), "backlink listed");
-    assert!(!screen.contains("no notes link here"));
+    let panel = rendered_backlinks(&mut app);
+    assert!(panel.contains("linker.md"), "backlink listed");
+    assert!(!panel.contains("no notes link here"));
 }
 
 /// A vault where `target.md` has `count` linkers (`link00.md`, …).
@@ -1310,7 +1310,7 @@ fn backlinks_scrollbar_tracks_the_drawn_scroll() {
     let top_thumb = (panel.y + 1..panel.bottom() - 1)
         .find(|&y| terminal.backend().buffer()[(bar_x, y)].symbol() == "█")
         .expect("thumb at top");
-    let top_text = row_symbols(terminal.backend().buffer(), panel.y + 1);
+    let top_text = panel_row_symbols(terminal.backend().buffer(), panel, panel.y + 1);
     assert!(top_text.contains("link00"));
 
     // Select the last backlink: the scroll follows, the thumb moves down.
@@ -1319,7 +1319,7 @@ fn backlinks_scrollbar_tracks_the_drawn_scroll() {
     let bottom_thumb = (panel.y + 1..panel.bottom() - 1)
         .find(|&y| terminal.backend().buffer()[(bar_x, y)].symbol() == "█")
         .expect("thumb at bottom");
-    let bottom_text = row_symbols(terminal.backend().buffer(), panel.y + 1);
+    let bottom_text = panel_row_symbols(terminal.backend().buffer(), panel, panel.y + 1);
     assert!(!bottom_text.contains("link00"), "rows scrolled");
     assert!(bottom_thumb > top_thumb, "thumb moved with the scroll");
 }
@@ -1340,12 +1340,12 @@ fn tag_sidebar_renders_and_counts() {
     let file = ui_viewer("ui-tags.md", "x\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('t')));
-    let screen = render(&mut app);
-    assert!(screen.contains("tags"), "sidebar title switches to tags");
-    assert!(screen.contains("#mocktag (2)"), "tag row with count");
-    assert!(screen.contains("#rust (1)"));
+    let sidebar = rendered_sidebar(&mut app);
+    assert!(sidebar.contains("tags"), "sidebar title switches to tags");
+    assert!(sidebar.contains("#mocktag (2)"), "tag row with count");
+    assert!(sidebar.contains("#rust (1)"));
     assert!(
-        !screen.contains("alpha.md"),
+        !sidebar.contains("alpha.md"),
         "tree rows are gone in tag mode"
     );
 }
@@ -1392,13 +1392,13 @@ fn outline_sidebar_renders_headings_indented_by_level() {
     let file = ui_viewer("ui-outline.md", "# Top\n\nbody\n\n### Deep\n\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    let screen = render(&mut app);
+    let sidebar = rendered_sidebar(&mut app);
     assert!(
-        screen.contains("outline"),
+        sidebar.contains("outline"),
         "sidebar title switches to outline"
     );
     assert!(
-        !screen.contains("other.md"),
+        !sidebar.contains("other.md"),
         "tree rows are gone in outline mode"
     );
 
@@ -1834,9 +1834,9 @@ fn outline_empty_state_when_the_note_has_no_headings() {
     let file = ui_viewer("ui-outline-empty.md", "just a body\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    let screen = render(&mut app);
-    assert!(screen.contains("outline"), "outline panel drawn");
-    assert!(screen.contains("no headings"), "empty state: {screen}");
+    let sidebar = rendered_sidebar(&mut app);
+    assert!(sidebar.contains("outline"), "outline panel drawn");
+    assert!(sidebar.contains("no headings"), "empty state: {sidebar}");
 }
 
 #[test]
@@ -1895,24 +1895,28 @@ fn outline_follows_the_open_note() {
     let file = ui_viewer("ui-outline-follow.md", "# First\n\nbody\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    let screen = render(&mut app);
+    let sidebar = rendered_sidebar(&mut app);
     assert!(
-        screen.contains("First"),
+        sidebar.contains("First"),
         "the open note's heading is listed"
     );
 
     app.open_note(&vault_dir.path().join("other.md")).unwrap();
-    let screen = render(&mut app);
+    let sidebar = rendered_sidebar(&mut app);
     assert!(
-        !screen.contains("First"),
+        !sidebar.contains("First"),
         "the outline followed the new note (the old heading is gone)"
     );
-    assert!(screen.contains("Other"), "the new note's heading is listed");
+    assert!(
+        sidebar.contains("Other"),
+        "the new note's heading is listed"
+    );
 }
 
 /// The wheel over the outline scrolls what the panel shows, not what it
 /// marks: the drawn window moves, the selection and the status label stay,
-/// and the reader's next note scroll makes the panel follow again.
+/// and a note scroll (the reader's own, `Outline::note_scrolled`) makes the
+/// panel follow again.
 #[test]
 fn outline_wheel_scrolls_the_view_and_a_note_scroll_releases_it() {
     let vault_dir = TempDir::new("ui-outline-wheel");
@@ -1938,9 +1942,7 @@ fn outline_wheel_scrolls_the_view_and_a_note_scroll_releases_it() {
     assert_eq!(app.outline.scroll, 3, "the wheel moved the window");
     assert_eq!(app.outline.selected, 0, "the reading position stayed");
     // The panel's own columns: the note beside it starts with `heading 0`.
-    let first_row: String = (0..sidebar_width(100))
-        .map(|x| buffer[(x, list_top)].symbol().to_string())
-        .collect();
+    let first_row = panel_row_symbols(buffer, area, list_top);
     assert!(
         first_row.contains("heading 3"),
         "the window starts three headings down: {first_row:?}"
@@ -1955,8 +1957,8 @@ fn outline_wheel_scrolls_the_view_and_a_note_scroll_releases_it() {
         status_row(&terminal.backend().to_string())
     );
 
-    // The reader's own scroll of the note: the panel follows again, takes
-    // the selection with it, and scrolls the active heading into view.
+    // The reader's own scroll of the note: `Outline::note_scrolled` owns the
+    // panel's response (the follow, and the selection with it).
     app.handle_key(key(KeyCode::Char('l'))); // back to the note pane
     app.handle_key(key(KeyCode::PageDown));
     assert!(app.viewer.scroll > 0, "precondition: the note scrolled");
@@ -2015,9 +2017,7 @@ fn enter_after_a_wheeled_outline_brings_the_jump_back_into_view() {
     );
     let y = list_top + (app.outline.active - app.outline.scroll) as u16;
     // The panel's own columns: the note beside it also draws `heading 0`.
-    let drawn: String = (0..sidebar_width(100))
-        .map(|x| buffer[(x, y)].symbol().to_string())
-        .collect();
+    let drawn = panel_row_symbols(buffer, area, y);
     assert!(
         drawn.contains("heading 0"),
         "the jumped-to heading is drawn in the window: {drawn:?}"
@@ -2105,9 +2105,9 @@ fn outline_over_a_base_table_shows_no_headings() {
     let file = ui_viewer("ui-outline-base.md", "# Open\n\nbody\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    let screen = render(&mut app);
+    let sidebar = rendered_sidebar(&mut app);
     assert!(
-        screen.contains("Open"),
+        sidebar.contains("Open"),
         "precondition: the note's heading is listed"
     );
 
@@ -2115,15 +2115,16 @@ fn outline_over_a_base_table_shows_no_headings() {
     assert!(app.base.is_some(), "precondition: the table is open");
     // Focus the sidebar so the status bar carries the outline's label.
     app.handle_key(key(KeyCode::Char('h')));
+    let sidebar = rendered_sidebar(&mut app);
+    assert!(
+        sidebar.contains("no headings"),
+        "the panel's empty state: {sidebar}"
+    );
+    assert!(
+        !sidebar.contains("Open"),
+        "the hidden note's heading is not listed: {sidebar}"
+    );
     let screen = render(&mut app);
-    assert!(
-        screen.contains("no headings"),
-        "the panel's empty state: {screen}"
-    );
-    assert!(
-        !screen.contains("Open"),
-        "the hidden note's heading is not listed: {screen}"
-    );
     assert!(
         status_row(&screen).contains("(no headings)"),
         "the status label follows the empty outline: {}",
@@ -2168,12 +2169,13 @@ fn outline_scroll_takes_the_selection_and_the_active_heading_keeps_its_mark() {
     let title_x = area.x + 1 + outline_index_width() as u16;
     let active_y = list_top + (expected - app.outline.scroll) as u16;
     assert!(
-        row_symbols(buffer, active_y).contains(&format!("heading {expected}")),
+        panel_row_symbols(buffer, area, active_y).contains(&format!("heading {expected}")),
         "the active heading is drawn in the panel: {:?}",
-        row_symbols(buffer, active_y)
+        panel_row_symbols(buffer, area, active_y)
     );
-    // The bar marks it (inverse video), and the reader's cursor stays off
-    // the next scroll: moving it shows the active heading's own accent mark.
+    // The selection bar and the active heading's accent are `outline_line`'s;
+    // a cursor move (`Outline::move_cursor_to`) takes the window and drops a
+    // pending take, leaving the active heading alone.
     assert_eq!(
         buffer[(title_x, active_y)].bg,
         app.theme_ui.selection_bg,
@@ -2245,9 +2247,9 @@ fn outline_follows_the_note_to_its_end_and_scrolls_the_active_heading_into_view(
     );
     let y = list_top + (app.outline.active - app.outline.scroll) as u16;
     assert!(
-        row_symbols(buffer, y).contains(&format!("heading {}", len - 1)),
+        panel_row_symbols(buffer, area, y).contains(&format!("heading {}", len - 1)),
         "the last heading is on the panel: {:?}",
-        row_symbols(buffer, y)
+        panel_row_symbols(buffer, area, y)
     );
     let title_x = area.x + 1 + outline_index_width() as u16;
     assert_eq!(
@@ -2299,13 +2301,14 @@ fn outline_jump_pins_the_heading_until_the_reader_scrolls_the_note() {
         "the jump pins it as the selection too"
     );
     assert!(
-        row_symbols(buffer, y).contains(&format!("heading {}", len - 1)),
+        panel_row_symbols(buffer, area, y).contains(&format!("heading {}", len - 1)),
         "the pinned heading is marked in the panel: {:?}",
-        row_symbols(buffer, y)
+        panel_row_symbols(buffer, area, y)
     );
 
-    // The reader's own scroll releases the pin: the active heading follows
-    // the note again, and the selection goes with the scroll.
+    // The reader's own scroll: the pin's release is
+    // `Outline::note_scrolled`'s, and the follow (with the selection) is
+    // `Outline::follow_note`'s.
     app.handle_key(key(KeyCode::Char('k')));
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let computed = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false)
@@ -2320,9 +2323,10 @@ fn outline_jump_pins_the_heading_until_the_reader_scrolls_the_note() {
     );
 }
 
-/// Two headings share a title: the pin must name the one that was jumped
-/// to, not the first row carrying the title. `follow_note` runs on every
-/// frame, so the wrong mark would move on the very frame after the jump.
+/// Two headings share a title: the pin's resolution is
+/// `Outline::pinned_row`'s (the jumped occurrence, not the first row carrying
+/// the title). `follow_note` runs on every frame, so the wrong mark would
+/// move on the very frame after the jump.
 #[test]
 fn outline_jump_to_a_duplicate_title_pins_the_selected_occurrence() {
     let vault_dir = TempDir::new("ui-outline-dup-pin");
@@ -2857,9 +2861,9 @@ fn sidebar_marks_changed_files_with_asterisk() {
         behind: 0,
         changed_files: [vault_dir.path().join("alpha.md")].into(),
     });
-    let screen = render(&mut app);
-    assert!(screen.contains("alpha.md *"), "changed note marked");
-    assert!(!screen.contains("clean.md *"), "unchanged note unmarked");
+    let sidebar = rendered_sidebar(&mut app);
+    assert!(sidebar.contains("alpha.md *"), "changed note marked");
+    assert!(!sidebar.contains("clean.md *"), "unchanged note unmarked");
 }
 
 #[test]
@@ -3973,6 +3977,44 @@ fn row_symbols(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
         .collect()
 }
 
+/// Buffer symbols of a panel's own columns on row `y`. The note pane beside
+/// the panel can draw the same text, so a panel assertion must not read the
+/// whole terminal row.
+fn panel_row_symbols(buffer: &ratatui::buffer::Buffer, panel: Rect, y: u16) -> String {
+    (panel.x..panel.right())
+        .map(|x| buffer[(x, y)].symbol().to_string())
+        .collect()
+}
+
+/// Buffer symbols of a panel's own rows, top to bottom. A panel assertion
+/// that searched the whole screen could be satisfied by the note pane beside
+/// it, so it reads only the panel's rect.
+fn panel_symbols(buffer: &ratatui::buffer::Buffer, panel: Rect) -> String {
+    (panel.y..panel.bottom())
+        .map(|y| panel_row_symbols(buffer, panel, y))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The sidebar's own drawn rows on the test frame (`render`'s 100x24):
+/// the panel's columns, not the note pane beside them.
+fn rendered_sidebar(app: &mut App) -> String {
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    panel_symbols(terminal.backend().buffer(), area)
+}
+
+/// The backlinks panel's own drawn rows on the test frame.
+fn rendered_backlinks(app: &mut App) -> String {
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, app)).unwrap();
+    let panel = app.layout.backlinks_area.expect("backlinks panel drawn");
+    panel_symbols(terminal.backend().buffer(), panel)
+}
+
 /// Rows of column `x` drawn as the scrollbar's track or thumb: the extent a
 /// proportional thumb has to span. The drawn symbols are `│` (track) and `█`
 /// (thumb); there are no arrow heads.
@@ -4987,7 +5029,7 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
         "the tree window ends on its last row"
     );
     assert!(
-        row_symbols(buffer, area.bottom() - 2).contains("n39"),
+        panel_row_symbols(buffer, area, area.bottom() - 2).contains("n39"),
         "the last row is drawn on the last inner row"
     );
 
@@ -5019,7 +5061,7 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
         "the tag window ends on its last row"
     );
     assert!(
-        row_symbols(buffer, area.bottom() - 2).contains("tag29"),
+        panel_row_symbols(buffer, area, area.bottom() - 2).contains("tag29"),
         "the last tag is drawn on the last inner row"
     );
 
@@ -5050,7 +5092,7 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
         "the outline window ends on its last row"
     );
     assert!(
-        row_symbols(buffer, area.bottom() - 2).contains("heading 29"),
+        panel_row_symbols(buffer, area, area.bottom() - 2).contains("heading 29"),
         "the last heading is drawn on the last inner row"
     );
 
@@ -5087,7 +5129,7 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
         "the backlinks window ends on its last row"
     );
     assert!(
-        row_symbols(buffer, panel.bottom() - 2).contains("src29"),
+        panel_row_symbols(buffer, panel, panel.bottom() - 2).contains("src29"),
         "the last backlink is drawn on the last inner row"
     );
 }

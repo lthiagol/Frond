@@ -717,8 +717,8 @@ impl App {
     ///
     /// The jump pins the heading as the active one: a heading near the
     /// note's end cannot scroll to the top, so the scroll alone would name
-    /// an earlier heading there. The reader's next scroll of the note
-    /// releases the pin ([`Outline::note_scrolled`]).
+    /// an earlier heading there. The pin's release belongs to
+    /// [`Outline::note_scrolled`].
     fn jump_to_outline_heading(&mut self) {
         let entries = outline_rows(&self.base, &self.viewer);
         let Some(entry) = entries.get(self.outline.selected) else {
@@ -831,10 +831,9 @@ impl App {
             sidebar.reveal(path);
         }
         self.refresh_backlinks();
-        // The outline lists the note in the content pane: a new note resets
-        // both of its cursors to the first heading and drops the old note's
-        // pin (the next draw would sync them too, but a key can arrive
-        // before that).
+        // The outline lists the note in the content pane: a new note's
+        // cursors and pin are [`Outline::on_note_change`]'s (the next draw
+        // would sync them too, but a key can arrive before that).
         self.outline.on_note_change(self.outline_len());
         // Debounce-gated ("rate-limited trivially"): skipped entirely when
         // the last spawn is recent — the status cannot have gone stale in
@@ -885,8 +884,8 @@ impl App {
         if let Some(heading) = heading {
             if self.base.is_none() {
                 self.viewer.scroll_to_heading(heading);
-                // A link's heading is a jump like a search hit: it releases
-                // an outline pin and follows the landing scroll.
+                // A link's heading lands like a search hit:
+                // [`Outline::note_scrolled`] owns the outline's response.
                 self.outline.note_scrolled();
             }
         }
@@ -1619,8 +1618,8 @@ impl App {
         } else {
             self.viewer.open_file(path)?;
             self.base = None;
-            // A history move is a new note context like any open: its
-            // outline starts at the top (the restored scroll moves the
+            // A history move is a new note context like any open: the reset
+            // is [`Outline::on_note_change`]'s (the restored scroll moves the
             // active heading at the next draw).
             self.outline.on_note_change(self.outline_len());
             Ok(())
@@ -2205,7 +2204,8 @@ impl App {
             Some(base) => base.scroll_down(n as usize),
             None => {
                 self.viewer.scroll_down(n);
-                // The reader's own scroll: the outline follows it again.
+                // The reader's own scroll: [`Outline::note_scrolled`] owns
+                // the follow.
                 self.outline.note_scrolled();
             }
         }
@@ -2275,7 +2275,7 @@ impl App {
         };
         self.viewer.scroll_to_source_line(target);
         // A search jump is the reader moving the note, not a heading
-        // choice: it releases a jump's pin like any scroll.
+        // choice: [`Outline::note_scrolled`] owns what that releases.
         self.outline.note_scrolled();
     }
 
@@ -2316,11 +2316,9 @@ impl App {
         self.handle_wheel(down);
     }
 
-    /// The wheel over the sidebar: the outline scrolls its own view —
-    /// leaf's table of contents leaves the reading position where the note
-    /// put it, and stops following the note until the reader scrolls it —
-    /// while the tree and tag views move their selection, which their
-    /// window follows.
+    /// The wheel over the sidebar: the outline's response is
+    /// [`Outline::wheel`]'s (leaf's table-of-contents rule), while the tree
+    /// and tag views move their selection, which their window follows.
     fn sidebar_wheel(&mut self, down: bool) {
         if self.sidebar_mode == SidebarMode::Outline {
             self.outline.wheel(wheel_delta(down), self.outline_len());

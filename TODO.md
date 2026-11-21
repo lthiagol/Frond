@@ -28,7 +28,8 @@ covering every user-visible change.
 
 ## In flight
 
-Nothing. The last cycle is cut and pushed:
+Nothing. The cycle's last unit is committed and pushed; 0.6.6 is released
+and the tree is clean. What the cycle carries:
 
 - **0.6.6** is released (2026-11-21) and pushed. `v0.6.6` is
   deliberately **not** tagged — the version lives in the tree, and the tag
@@ -42,22 +43,17 @@ Nothing. The last cycle is cut and pushed:
 
 ## Open
 
-- **The sweep.** The last review's lows are all one class: *every comment
-  that names a rule is a copy of it*, and the review will keep finding the
-  next copy, one round at a time. Three outline assertions in
-  `crates/app/src/ui/tests.rs` read the whole terminal row, where the note
-  pane beside the panel can render the same heading text — the vacuity
-  the last unit closed for one test, in the other three. And
-  `jump_to_outline_heading`'s doc in `crates/app/src/app.rs` still
-  paraphrases the release with a single trigger, the drift the field
-  comment just shed. **Grep for the paraphrases** — the triggers, the
-  rules, the whole-row reads — and point them all at their owners in one
-  unit.
+Nothing. The last unit swept the class the reviews kept finding - every
+comment that named a rule - and the delta review came back with nothing
+to fix.
 
 ## Next
 
-1. The sweep above, as one unit.
-2. Then the human's requests.
+1. The human's requests.
+2. The findings of a cycle live in `/tmp/opencode/review<N>/` and die with
+   the machine. Moving them into the repository would keep the reasoning
+   behind each decision - the skill calls it a stopgap, and this project
+   has now lost its review record twice.
 
 ## Past investigations
 
