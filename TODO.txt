@@ -35,6 +35,15 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 36 - the walk warning's kind is structural: `IndexWarning` was
+    `{ path, message }` and told an unreadable path apart from a
+    frontmatter diagnostic by matching the message against the
+    `"unreadable: "` prefix - a classification carried in prose. It carries
+    a kind now (`Unreadable` / `Frontmatter`), every producer names it and
+    the compiler holds them to it, and the prefix survives as the spelling
+    the user reads. The app selects exactly the same warnings as before.
+    Two reviewers, 0 blocking, 2 low (both carried; one folded into unit
+    38, which exercises the same path).
   - Unit 35 - the duplicated doc comment is gone: `TagList::row_matches` carried
     the same comment twice, the second line with the extra clause; the
     redundant line is gone and the survivor keeps both. One line, one file.
