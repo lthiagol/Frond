@@ -45,6 +45,23 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 43 - a file that turns unreadable is reported, even when nothing
+    changed: a `chmod` moves neither the mtime nor the size, so the
+    watcher never fed the path to the index and nothing was reported. The
+    open note is re-read on every watch tick now - one file per tick, every
+    other file stays stat-only - and it is fed to the index only while the
+    index holds no warning for it, so a quiet tick stays quiet. The review
+    caught a per-tick churn the first round introduced (a full re-render
+    per second while the condition stood) and the fix round closed it.
+    Three reviewers, 0 blocking; one fix round; 1 low (carried).
+  - From unit 43's review (three lows, carried): a `.base` table's own file
+      is watched by stamp alone, so a permission break on it goes
+      unreported - and a `.base` frond was launched on records no
+      unreadable-path warning at all; a note opened through a file symlink
+      is canonicalized to its target while the walk lists the symlink's
+      path, so the match never fires; and the break -> heal -> break-again
+      sequence is unpinned, so a change that let a healed note keep its
+      warning would silence every later break with no test failing.
   - Unit 42 - the four carried lows are closed: the code was right and
     something around it said something the code did not mean. The two
     guards now say what they are for (the merge guard never fires - the
