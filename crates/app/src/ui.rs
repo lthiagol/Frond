@@ -383,6 +383,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     if app.viewer.help_open {
         draw_help(f, area, app, ui);
+    } else {
+        app.layout.help_scrollbar_area = None;
     }
     if let Some(disambiguation) = &app.disambiguation {
         let index = app.index.as_ref().map(|i| i.borrow());
@@ -1895,6 +1897,9 @@ fn help_popup(area: Rect) -> HelpPopup {
 }
 
 fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
+    // The bar is only a position control while it is actually drawn; a
+    // popup whose body fits leaves the field `None`.
+    app.layout.help_scrollbar_area = None;
     // Dim everything behind the popup (herdr's overlay treatment). The popup
     // cells are cleared below, which resets their style and so drops DIM.
     let buf = f.buffer_mut();
@@ -1973,6 +1978,10 @@ fn draw_help(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             width: 1,
             height: body_height,
         };
+        // Geometry for the mouse handlers: the bar is a body-position
+        // control, mapped over the popup's own scroll range.
+        app.layout.help_scrollbar_area = Some(bar_area);
+        app.layout.help_scroll_max = max_scroll;
         draw_scrollbar(
             f,
             bar_area,

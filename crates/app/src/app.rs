@@ -103,6 +103,9 @@ enum BarTarget {
     /// The sidebar panel: the tree, tag list or outline currently shown.
     Sidebar,
     Backlinks,
+    /// The help popup's body scroll: the one bar that lives inside a popup,
+    /// so its drag stays active while that popup owns the pointer.
+    Help,
 }
 
 /// A still-ambiguous wikilink awaiting the user's pick (shown as a popup;
@@ -144,6 +147,13 @@ pub struct Layout {
     /// The backlinks panel's scrollbar column (`None` while its rows fit):
     /// its bar positions the panel's selection.
     pub backlinks_scrollbar_area: Option<Rect>,
+    /// The help popup's scrollbar column (`None` while the popup is closed
+    /// or its body fits): its bar positions the popup's body scroll.
+    pub help_scrollbar_area: Option<Rect>,
+    /// The help popup's scroll range (`total - visible`) as of the last
+    /// draw: a bar row maps onto it, and only the draw knows the popup's
+    /// fitted height.
+    pub help_scroll_max: usize,
     /// The search popup (`None` while closed): routes result-row clicks and
     /// wheels by position.
     pub search_area: Option<Rect>,
@@ -1012,6 +1022,14 @@ impl App {
         Some(bar_value_at(area, row, base.max_scroll()))
     }
 
+    /// Maps a row of the help popup's scrollbar track onto a body position,
+    /// with the same linear mapping as the note pane's bar. `None` while the
+    /// popup's body fits (no bar was drawn).
+    fn help_bar_scroll_at(&self, row: u16) -> Option<usize> {
+        let area = self.layout.help_scrollbar_area?;
+        Some(bar_value_at(area, row, self.layout.help_scroll_max))
+    }
+
     /// Moves the shown sidebar list's selection to the row the panel's bar
     /// names (the tree, the tag list or the outline). Selecting never
     /// activates: a bar press does not open a note, toggle a folder or jump
@@ -1102,13 +1120,15 @@ impl App {
     }
 
     /// Left-button press. On any scrollbar column (the note pane, the
-    /// `.base` table, the sidebar panel, the backlinks panel) it jumps that
-    /// pane to the mapped position and starts a drag: the bars are position
-    /// controls, so the press never moves the keyboard focus, and a list
-    /// bar's press moves the selection without opening it. Any other press
-    /// is inert: clicks keep their release semantics, and popups keep
-    /// owning the pointer while open. With mouse capture off the app ignores
-    /// the mouse entirely, independent of what the terminal forwards.
+    /// `.base` table, the sidebar panel, the backlinks panel, the help
+    /// popup) it jumps that pane to the mapped position and starts a drag:
+    /// the bars are position controls, so the press never moves the keyboard
+    /// focus, and a list bar's press moves the selection without opening it.
+    /// Any other press is inert: clicks keep their release semantics, and
+    /// popups keep owning the pointer while open — except the help popup's
+    /// own bar, which scrolls its body. With mouse capture off the app
+    /// ignores the mouse entirely, independent of what the terminal
+    /// forwards.
     pub fn handle_press(&mut self, col: u16, row: u16) {
         // A new press supersedes any drag state a lost release left behind:
         // whatever this press starts (or does not), the next release is
@@ -1117,7 +1137,24 @@ impl App {
         if !self.mouse_capture {
             return;
         }
-        if self.quick.open || self.search.open || self.any_popup_open() {
+        if self.quick.open || self.search.open {
+            return;
+        }
+        if self.any_popup_open() {
+            // The help popup's bar is the one pointer target its popup owns
+            // itself: the press scrolls the body instead of being inert.
+            // Every other press on a popup stays inert (the popup owns the
+            // pointer).
+            if self.viewer.help_open && self.disambiguation.is_none() {
+                if let Some(area) = self.layout.help_scrollbar_area {
+                    if point_in_rect(col, row, area) {
+                        self.bar_drag = Some(BarTarget::Help);
+                        if let Some(scroll) = self.help_bar_scroll_at(row) {
+                            self.viewer.help_scroll = scroll;
+                        }
+                    }
+                }
+            }
             return;
         }
         if let Some(area) = self.layout.note_scrollbar_area {
@@ -1161,7 +1198,9 @@ impl App {
     /// pointer's row (the column may leave the bar; only the row matters).
     /// A drag that did not start on a bar does nothing, and a popup that
     /// opened mid-drag owns the pointer: the pane behind it must not keep
-    /// moving (the release still ends the drag).
+    /// moving (the release still ends the drag). The help popup's bar is
+    /// the exception — it belongs to the popup, so its drag follows the
+    /// pointer while no other popup covers it.
     pub fn handle_drag(&mut self, _col: u16, row: u16) {
         let Some(target) = self.bar_drag else {
             return;
@@ -1169,7 +1208,14 @@ impl App {
         if !self.mouse_capture {
             return;
         }
-        if self.quick.open || self.search.open || self.any_popup_open() {
+        if self.quick.open || self.search.open {
+            return;
+        }
+        if target == BarTarget::Help {
+            if !self.viewer.help_open || self.disambiguation.is_some() {
+                return;
+            }
+        } else if self.any_popup_open() {
             return;
         }
         match target {
@@ -1195,14 +1241,20 @@ impl App {
                     self.select_backlink_bar_row(area, row);
                 }
             }
+            BarTarget::Help => {
+                if let Some(scroll) = self.help_bar_scroll_at(row) {
+                    self.viewer.help_scroll = scroll;
+                }
+            }
         }
     }
 
     /// Left-button release. The release that ends a bar drag is consumed:
     /// it clears the drag and never acts as a click, so a link, note row or
-    /// folder under the pointer does not open. Every other release keeps
-    /// the click semantics (including a bar column, where a click is a
-    /// no-op because the bar is not a row target).
+    /// folder under the pointer does not open (nor does the help popup
+    /// close — a bar release is not a key). Every other release keeps the
+    /// click semantics (including a bar column, where a click is a no-op
+    /// because the bar is not a row target).
     pub fn handle_release(&mut self, col: u16, row: u16) {
         if self.bar_drag.is_some() {
             self.bar_drag = None;

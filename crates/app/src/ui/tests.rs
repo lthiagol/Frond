@@ -3112,6 +3112,78 @@ fn help_scrollbar_thumb_ends_track_the_scroll_position() {
     );
 }
 
+/// The help popup's bar is a body-position control: a press jumps the body
+/// to the mapped row, a drag follows the pointer, and the release that ends
+/// the drag is consumed (it neither closes the popup nor moves the focus).
+#[test]
+fn help_bar_press_and_drag_position_the_body() {
+    let file = ui_viewer("ui-bar-help-pos.md", "x\n");
+    let mut app = app_for(&file, None);
+    app.viewer.help_open = true;
+    let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .help_scrollbar_area
+        .expect("an overflowing help draws its bar");
+    let max = app.layout.help_scroll_max;
+    assert!(max > 0, "the body overflows at 100x12");
+    let focus = app.focus;
+
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.viewer.help_scroll, 0, "the first track row is the top");
+    assert_eq!(app.focus, focus, "the press does not move the focus");
+    assert!(app.viewer.help_open, "the press is not a close");
+
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(
+        app.viewer.help_scroll, max,
+        "the last track row is the body's end"
+    );
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert!(
+        terminal
+            .backend()
+            .to_string()
+            .contains("? help · q / Ctrl+C quit"),
+        "the body is drawn at its end"
+    );
+
+    let offset = bar.height / 2;
+    app.handle_press(bar.x, bar.y + offset);
+    assert_eq!(
+        app.viewer.help_scroll,
+        bar_row_at(offset, max + 1, bar.height),
+        "a middle track row names that fraction of the scroll range"
+    );
+
+    // The drag follows the pointer's row even after leaving the bar column,
+    // and the release that ends it neither closes the popup nor moves focus.
+    app.handle_press(bar.x, bar.y);
+    app.handle_drag(1, bar.bottom() - 1);
+    assert_eq!(app.viewer.help_scroll, max, "the drag follows the pointer");
+    app.handle_drag(1, bar.y);
+    assert_eq!(app.viewer.help_scroll, 0);
+    app.handle_press(bar.x, bar.y + offset);
+    app.handle_release(1, bar.bottom() - 1);
+    assert!(app.viewer.help_open, "the drag's release does not close");
+    assert_eq!(app.focus, focus, "nor does it move the focus");
+
+    // The popup's own keys keep scrolling the same body.
+    app.handle_key(key(KeyCode::Char('j')));
+    assert_eq!(
+        app.viewer.help_scroll,
+        bar_row_at(offset, max + 1, bar.height) + 1,
+        "j scrolls the body on from the bar's position"
+    );
+
+    // Mouse capture off disables the bar, like every other mouse action.
+    app.mouse_capture = false;
+    app.viewer.help_scroll = 0;
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(app.viewer.help_scroll, 0, "capture off leaves the body put");
+}
+
 // --- scrollbars (markdown viewer, sidebar tree, tag list) -------------
 
 /// Buffer symbols of a whole row, left to right.
