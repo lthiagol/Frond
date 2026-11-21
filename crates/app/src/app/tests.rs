@@ -1239,10 +1239,16 @@ fn sidebar_border_and_past_end_clicks_are_noops() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    // The top border, every header row (blank, label, rule) and a row past
-    // the short list: none selects or opens anything.
+    // The top border, every header row (the blank above the label, the
+    // label, the blank below it, and the rule) and a row past the short
+    // list: none selects or opens anything.
     let selected = app.sidebar.as_ref().unwrap().selected.clone();
-    for row in [0, 1, 2, 3, 1 + crate::ui::LIST_HEADER_ROWS + 2] {
+    let header_rows = 1..=crate::ui::LIST_HEADER_ROWS;
+    let past_end = 1 + crate::ui::LIST_HEADER_ROWS + 2;
+    for row in std::iter::once(0)
+        .chain(header_rows)
+        .chain(std::iter::once(past_end))
+    {
         app.handle_click(3, row);
     }
     assert!(app.sidebar.as_ref().unwrap().expanded.is_empty());
@@ -1254,9 +1260,10 @@ fn sidebar_border_and_past_end_clicks_are_noops() {
     );
 }
 
-/// The header block is chrome, in every mode: a click on its blank, label
-/// or rule row selects nothing and opens nothing, while the first body row
-/// still maps to the first list row.
+/// The header block is chrome, in every mode: a click on any of its rows —
+/// the blank above the label, the label, the blank below it, or the rule —
+/// selects nothing and opens nothing, while the first body row still maps
+/// to the first list row.
 #[test]
 fn sidebar_header_rows_select_nothing_in_every_mode() {
     let vault_dir = TempDir::new("app-header-clicks");
@@ -1270,7 +1277,8 @@ fn sidebar_header_rows_select_nothing_in_every_mode() {
     let (_file, mut app) = app(&vault_dir);
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    let header_rows = 1..=3;
+    // Every header row, from the blank above the label through the rule.
+    let header_rows = 1..=crate::ui::LIST_HEADER_ROWS;
 
     // Tree: the selected row and the tree's expansion stay put.
     let tree_selected = app.sidebar.as_ref().unwrap().selected.clone();
@@ -1326,6 +1334,90 @@ fn sidebar_header_rows_select_nothing_in_every_mode() {
         app.outline.selected, 0,
         "one row below the rule is the first heading"
     );
+}
+
+/// A panel too short for its header block (below six rows) clips the rule
+/// and leaves the list no body rows: in every mode the panel still draws
+/// without painting the rule and every row click is a no-op.
+#[test]
+fn sidebar_header_that_does_not_fit_maps_no_rows_in_every_mode() {
+    let vault_dir = TempDir::new("app-header-short");
+    std::fs::write(
+        vault_dir.path().join("a.md"),
+        "---\ntags: [mocktag]\n---\n# One\n\nbody\n\n## Two\n\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(vault_dir.path().join("sub")).unwrap();
+    std::fs::write(vault_dir.path().join("sub").join("b.md"), "# B\n\nbody\n").unwrap();
+    let (_file, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+
+    // The frame height is one more than the panel's: the status bar takes
+    // the last row, leaving the sidebar five rows, one short of the six the
+    // header block needs.
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(30, 6)).unwrap();
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar drawn");
+    assert_eq!(area.height, 5, "a panel below the header's six rows");
+    // Every row of the panel, top border through bottom border: none can
+    // map a list row, since the list body has no height at all.
+    let rows: Vec<u16> = (area.y..area.bottom()).collect();
+
+    fn assert_rule_clipped(term: &ratatui::Terminal<ratatui::backend::TestBackend>, area: Rect) {
+        let buffer = term.backend().buffer();
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                assert_ne!(
+                    buffer[(x, y)].symbol(),
+                    "┤",
+                    "the rule does not fit and must not be painted (row {y})"
+                );
+            }
+        }
+    }
+
+    // Tree: no row is selected or expanded.
+    assert_rule_clipped(&term, area);
+    let tree_selected = app.sidebar.as_ref().unwrap().selected.clone();
+    for &row in &rows {
+        app.handle_click(3, row);
+    }
+    assert_eq!(
+        app.sidebar.as_ref().unwrap().selected,
+        tree_selected,
+        "no row maps in a body with no height"
+    );
+    assert!(app.sidebar.as_ref().unwrap().expanded.is_empty());
+    assert_eq!(app.focus, Focus::Sidebar, "but the sidebar owns the click");
+
+    // Tags: the tag cursor stays put.
+    app.handle_key(key(KeyCode::Char('t')));
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    assert_rule_clipped(&term, area);
+    let tag_selected = app.tags.selection_index();
+    for &row in &rows {
+        app.handle_click(3, row);
+    }
+    assert_eq!(
+        app.tags.selection_index(),
+        tag_selected,
+        "no tag row maps in a body with no height"
+    );
+
+    // Outline: the heading cursor and the note's scroll stay put.
+    app.handle_key(key(KeyCode::Char('o')));
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    assert_rule_clipped(&term, area);
+    let outline_selected = app.outline.selected;
+    let scroll = app.viewer.scroll;
+    for &row in &rows {
+        app.handle_click(3, row);
+    }
+    assert_eq!(
+        app.outline.selected, outline_selected,
+        "no heading maps in a body with no height"
+    );
+    assert_eq!(app.viewer.scroll, scroll, "and the note never jumps");
 }
 
 #[test]

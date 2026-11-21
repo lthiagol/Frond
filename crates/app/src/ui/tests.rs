@@ -1417,24 +1417,27 @@ fn outline_sidebar_renders_headings_indented_by_level() {
         "the panel is titled outline: {:?}",
         row(area.y)
     );
-    // The label is chrome above the list: a blank row, the label, the rule,
-    // then the headings (leaf's header chunk).
+    // The label is chrome above the list: a blank row, the label, another
+    // blank row, the rule, then the headings - the label sits square
+    // between two blank lines.
     assert_eq!(
-        LIST_HEADER_ROWS, 3,
-        "the header is a blank row, the label and its rule"
+        LIST_HEADER_ROWS, 4,
+        "the header is a blank row, the label, a blank row and its rule"
     );
+    assert_eq!(row(area.y + 1).trim(), "", "a blank line above the label");
     assert!(
         row(area.y + 2).contains("TABLE OF CONTENTS"),
         "the TOC label sits above the headings: {:?}",
         row(area.y + 2)
     );
+    assert_eq!(row(area.y + 3).trim(), "", "a blank line below the label");
     assert!(
-        row(area.y + 3).starts_with("──"),
+        row(area.y + 4).starts_with("──"),
         "a rule underlines the label: {:?}",
-        row(area.y + 3)
+        row(area.y + 4)
     );
     assert_eq!(
-        buffer[(area.right() - 1, area.y + 3)].symbol(),
+        buffer[(area.right() - 1, area.y + 4)].symbol(),
         "┤",
         "the rule tees into the panel's right border, leaf's header shape"
     );
@@ -1615,7 +1618,8 @@ fn table_of_contents_label_is_centred_in_the_outline_panel() {
     let inner_width = area.width - 2;
     let left = (inner_width - label_width) / 2;
     let x = area.x + 1 + left;
-    // The header block: a blank row under the border, then the label.
+    // The header block: a blank row under the border, then the label (with a
+    // blank row below it).
     let y = area.y + 2;
     let drawn: String = (x..x + label_width)
         .map(|x| buffer[(x, y)].symbol())
@@ -1677,7 +1681,8 @@ fn tree_and_tag_headers_name_the_vault_over_the_same_rule() {
         let label_width = UnicodeWidthStr::width(vault_name) as u16;
         let inner_width = area.width - 2;
         let x = area.x + 1 + (inner_width - label_width) / 2;
-        // The header block: a blank row under the border, then the label.
+        // The header block: a blank row under the border, the label, then a
+        // blank row.
         let y = area.y + 2;
         let drawn: String = (x..x + label_width)
             .map(|x| buffer[(x, y)].symbol())
@@ -1686,13 +1691,18 @@ fn tree_and_tag_headers_name_the_vault_over_the_same_rule() {
             drawn, vault_name,
             "the vault's name is centred in the {mode} header"
         );
+        assert_eq!(
+            row(area.y + 3).trim(),
+            "",
+            "the blank line below the label in {mode}"
+        );
         assert!(
-            row(area.y + 3).starts_with("──"),
+            row(area.y + 4).starts_with("──"),
             "the same rule underlines it in {mode}: {:?}",
-            row(area.y + 3)
+            row(area.y + 4)
         );
         assert_eq!(
-            buffer[(area.right() - 1, area.y + 3)].symbol(),
+            buffer[(area.right() - 1, area.y + 4)].symbol(),
             "┤",
             "the rule tees into the border in {mode}"
         );
@@ -1701,6 +1711,71 @@ fn tree_and_tag_headers_name_the_vault_over_the_same_rule() {
         assert!(
             !row(area.y + 1 + LIST_HEADER_ROWS).trim().is_empty(),
             "the {mode} list starts below the header"
+        );
+    }
+}
+
+/// Every mode's header has the same shape - blank, label, blank, rule - so
+/// the label sits square in the panel, and each mode's rows start on the
+/// first full row below the whole block.
+#[test]
+fn every_mode_header_is_blank_label_blank_rule_and_rows_start_below() {
+    let vault_dir = TempDir::new("ui-header-shape");
+    std::fs::write(
+        vault_dir.path().join("tagged.md"),
+        "---\ntags: [mocktag]\n---\n# Tagged\n\nbody\n",
+    )
+    .unwrap();
+    let file = ui_viewer("ui-header-shape.md", "# Top\n\nbody\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+
+    for mode in ["tree", "tags", "outline"] {
+        match mode {
+            "tree" => {}
+            "tags" => {
+                app.handle_key(key(KeyCode::Char('t')));
+            }
+            "outline" => {
+                app.handle_key(key(KeyCode::Char('o')));
+            }
+            _ => unreachable!(),
+        }
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let area = app.layout.sidebar_area.expect("sidebar visible");
+        let row = |y: u16| -> String {
+            (area.x + 1..area.right() - 1)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect()
+        };
+        assert_eq!(
+            row(area.y + 1).trim(),
+            "",
+            "{mode}: a blank line above the label"
+        );
+        assert!(
+            !row(area.y + 2).trim().is_empty(),
+            "{mode}: the label sits between the two blank lines"
+        );
+        assert_eq!(
+            row(area.y + 3).trim(),
+            "",
+            "{mode}: a blank line below the label"
+        );
+        assert!(
+            row(area.y + 4).starts_with("──"),
+            "{mode}: the rule closes the block: {:?}",
+            row(area.y + 4)
+        );
+        assert_eq!(
+            buffer[(area.right() - 1, area.y + 4)].symbol(),
+            "┤",
+            "{mode}: the rule tees into the border"
+        );
+        assert!(
+            !row(area.y + 1 + LIST_HEADER_ROWS).trim().is_empty(),
+            "{mode}: the rows start below the whole header"
         );
     }
 }

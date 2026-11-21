@@ -7,7 +7,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Added
 - The sidebar's panels say what they list: the tree and tag views carry
   the vault's name in a header block over a rule, the way the outline's
-  `TABLE OF CONTENTS` label does, and every label is centred.
+  `TABLE OF CONTENTS` label does, and every label is centred, with a
+  blank line above and below it so the label sits square in the panel.
 - The outline's headings are numbered, the way leaf numbers them: the
   top-level headings carry a two-digit index (`01`, `02`) counted in
   document order, and the deeper ones a bullet.

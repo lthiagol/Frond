@@ -228,26 +228,26 @@ check("beta.md" in body_text(), "sidebar rescan picked up new file")
 
 # --- mouse: sidebar clicks and wheel (SGR 1006 injected into the pty) ---
 # Sidebar geometry at 100x30: width 30 (x 0..29), inner rows start at
-# y=1 (below the top border); the header block takes y=1..3 (blank, the
-# vault's name, the rule), so the list starts at y=4. Visible tree rows
-# (projects expanded): y=4 projects, y=5 LONG, y=6 alpha.md, y=7 beta.md,
-# y=8 index.md.
+# y=1 (below the top border); the header block takes y=1..4 (blank, the
+# vault's name, blank, the rule), so the list starts at y=5. Visible tree
+# rows (projects expanded): y=5 projects, y=6 LONG, y=7 alpha.md,
+# y=8 beta.md, y=9 index.md.
 check("a-note-with-a-really" in body_text(), "mouse section precondition: LONG row visible")
 
-click(5, 4)  # on the `projects` folder row
+click(5, 5)  # on the `projects` folder row
 pump(0.4)
 check(
     "a-note-with-a-really" not in screen_no_status(),
     "click on a folder row collapses it",
 )
-click(5, 4)  # again: expands
+click(5, 5)  # again: expands
 pump(0.4)
 check(
     "a-note-with-a-really" in screen_no_status(),
     "click on a collapsed folder row expands it",
 )
 
-click(5, 6)  # on the alpha.md row: opens it
+click(5, 7)  # on the alpha.md row: opens it
 pump_until(lambda: "alpha body" in body_text())
 check("Alpha" in body_text() and "alpha body" in body_text(), "click on a note row opens it")
 check("alpha.md" in status_line(), "status bar reflects the clicked note")
@@ -275,7 +275,7 @@ check("Alpha" not in body_text(), "wheel over the content pane scrolls the conte
 send("?")
 pump(0.4)
 check("close esc/any key" in body_text(), "help popup open for click gating")
-click(5, 6)
+click(5, 7)
 pump(0.4)
 check(
     "close esc/any key" in body_text(),

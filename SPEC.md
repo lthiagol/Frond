@@ -505,10 +505,11 @@ last shown.
   list has no hierarchy to collapse).
 - The panel says what it is: while the outline is shown, a
   `TABLE OF CONTENTS` label sits at the top of the panel, above the
-  headings, with a rule under it - the shape leaf gives the same panel.
-  The label takes its rows from the list, and the headings scroll under
-  it. The label is **centred** in the panel. The panel's border title
-  keeps naming the mode (` outline `), as the tree's and the tags' do.
+  headings - a blank line, the label, another blank line, and the rule
+  under that, so the label has a line of space on each side. The label
+  takes its rows from the list, and the headings scroll under it. The
+  label is **centred** in the panel. The panel's border title keeps
+  naming the mode (` outline `), as the tree's and the tags' do.
 - The tree and tag views carry the **vault's name** in the same header
   block - the vault directory's name, centred, over the same rule - so
   every mode says what it lists. The outline keeps its own

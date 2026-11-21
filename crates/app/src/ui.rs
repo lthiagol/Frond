@@ -836,18 +836,20 @@ fn sidebar_line(
 }
 
 /// The header block every sidebar list mode carries above its rows, top to
-/// bottom: a blank row, the label, and the rule under it — leaf's
-/// `render/toc.rs` header chunk. The list (its viewport, its bar and its row
-/// clicks) starts below these rows.
+/// bottom: a blank row, the label, another blank row, and the rule under it
+/// — leaf's `render/toc.rs` header chunk with a line of space on each side
+/// of the label. The list (its viewport, its bar and its row clicks) starts
+/// below these rows.
 enum ListHeaderRow {
     Blank,
     Label,
     Rule,
 }
 
-const LIST_HEADER: [ListHeaderRow; 3] = [
+const LIST_HEADER: [ListHeaderRow; 4] = [
     ListHeaderRow::Blank,
     ListHeaderRow::Label,
+    ListHeaderRow::Blank,
     ListHeaderRow::Rule,
 ];
 
@@ -932,10 +934,10 @@ fn draw_outline(
 }
 
 /// Paints a list panel's label and its rule inside the panel's top border,
-/// row for row from [`LIST_HEADER`]: a blank row, a centred bold label, then
-/// a rule that tees into the panel's right border with leaf's `┤` corner.
-/// The rows come out of the list (see [`list_body_area`]); this is chrome
-/// above them.
+/// row for row from [`LIST_HEADER`]: a blank row, a centred bold label, a
+/// blank row, then a rule that tees into the panel's right border with
+/// leaf's `┤` corner. The rows come out of the list (see
+/// [`list_body_area`]); this is chrome above them.
 fn draw_list_header(f: &mut Frame, area: Rect, label: &str, ui: UiTheme, focused: bool) {
     let inner = Rect {
         x: area.x + 1,
