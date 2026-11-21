@@ -278,38 +278,34 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
-  - From unit 34's review (two lows, carried): the new disambiguation test
-      hardcodes the popup's width constant (60) that `draw_disambiguation`
-      clamps, where the sibling popup tests go through a shared geometry
-      helper - extracting one for this popup is a small refactor of its own;
-      and the test pins the bar's background but not the inverse-video text
-      colour the sibling popup tests also pin, so the row's fg half of unit
-      23's rule stays untested.
-  - From unit 33's review (two lows, carried): the search snippet's test
-      helper `rendered_width` re-implements ratatui's `Line::width()` - the
-      helper can go in favour of it; and the comment on
-      `snippet_fits_the_budget_with_a_wide_character_at_its_edge` claims the
-      fixture is the regression's shape at the popup's real snippet width,
-      but it passes on the old code (the UI test is what pins the
-      regression there) - the comment overstates what the fixture proves.
-  - From unit 23's review (both lows, carried): the search popup's
-      `snippet_line` (`crates/app/src/search.rs`) can overshoot its width
-      budget by a cell with wide characters, so a selected row's bar misses
-      the popup's inner right edge — the root cause is pre-existing, and
-      the fix belongs in `snippet_line`, not in the selection rule. And the
-      disambiguation popup's bar has no test pinning its end position (the
-      other six panels have one).
-  - From unit 25's review (one low, carried): `crates/app/src/tags.rs`
-      carries the same doc comment twice ("Does this row carry the
-      selection?") — a one-line cleanup, pre-existing.
-  - From unit 31's review (three lows, carried): the index classifies an
-      unreadable path by the message prefix `unreadable: ` (a `kind` field
-      would make it structural); a directory's warning clears when the
-      whole walk fails (the inherited unit 21 semantics); a file that
-      becomes unreadable mid-session is recorded by `reindex_one` but
-      never surfaced, while the spec's never-silent sentence is scoped to
-      the startup walk.
-  - Parked: a scroll position for the sidebar tree — the recommendation is
+  - From unit 38's review (one low, carried): a permission-only break
+      changes no stamp, so the watcher never feeds the path to the index
+      and no report appears - the condition's end needs no event, but its
+      start does. Both reviewers read the spec line as correctly scoped
+      ("the reindex that fails to read it records the problem"), so this
+      is the mechanism's boundary, not a spec overclaim. A file unreadable
+      at startup was never indexed; one that breaks later keeps its stale
+      index entry.
+  - From unit 37's review (one low, carried): the index's "one message,
+      not two" merge guard in `surface_walk_warnings` is unreachable as
+      written - walk warnings are directories only and the merged index
+      warnings exclude directories, so the two sets cannot overlap. The
+      guarantee is real (the index dedups by path itself), but a reader
+      looking to that guard for it is misled.
+  - From unit 40's review (one low, carried): the disambiguation guard
+      around the help popup's bar names a state no input path can produce
+      (the two popups are never open at once) - harmless, but unexplained
+      by either comment.
+  - From unit 36's review (one low, carried): the colliding-prefix
+      fixture pins `is_unreadable` alone; no producer path carries that
+      text, so a future producer-side text-based classifier would pass it.
+      The producer side is pinned separately by the plain.md case.
+  - From unit 41's review (one low, carried): the older test
+      `popups_paint_content_bg_over_the_terminal_default` still encodes
+      the disambiguation popup's derived geometry in hardcoded
+      coordinates, so a future width change breaks it instead of flowing
+      through the new helper.
+  - Parked: a scroll position for the sidebar tree - the recommendation is
       to **drop** it: the sidebar's scroll is a selection cursor, not a
       document position.
 
