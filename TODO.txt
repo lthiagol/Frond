@@ -35,6 +35,23 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 38 - a file that turns unreadable is surfaced: the reindex that
+    failed to read it recorded the problem, but nothing surfaced the
+    record, so the note was missing with no word about it. The app now
+    reads the index's own unreadable-path warnings instead of a startup
+    snapshot - the index is the live report, so a mid-session failure is
+    in it by construction. A frontmatter diagnostic stays out
+    structurally (the kind filter), and a file that reads again is healed
+    and reindexed before its warning goes. Two reviewers, 0 blocking, 3
+    low (all carried).
+  - From unit 38's review (carried): a permission-only break changes no
+    stamp, so the watcher never feeds the path to the index and no report
+    appears - the condition's end needs no event, but its start does.
+    Both reviewers read the spec line as correctly scoped ("the reindex
+    that fails to read it records the problem"), so this is the
+    mechanism's boundary, not a spec overclaim. A file unreadable at
+    startup was never indexed; one that breaks later keeps its stale
+    index entry.
   - Unit 37 - the directory's warning survives a failed walk: when the whole
     vault walk failed, the status bar's warning for an unreadable directory
     disappeared and the notes inside it were missing with no word about it.
