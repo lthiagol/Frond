@@ -45,6 +45,16 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - The permission-only break's scope is **settled**, by the human's
+    decision: the open note is re-read each tick and a file that turns
+    unreadable without changing is reported when it is the note being
+    read. A background file that breaks stays unreported - the spec says
+    so plainly. A vault-wide sweep would cost a read per note per tick.
+  - The carried lows are **re-checked against the tree**: four of the
+    eight were already closed (unit 42's work closed the merge guard's
+    comment, the disambiguation guard's comments and the colliding
+    prefix fixture's comment; unit 41 closed the hardcoded geometry
+    test) and had stayed on the list. Four remain open.
   - Unit 47 - the sidebar says what it lists, and its bar follows the note:
     the tree and tag views carry the vault's name in the outline's header
     block, centred over the same rule, and every label is centred; a note
@@ -372,58 +382,24 @@ OPEN
       by grepping those two finds four of six - the invariant holds, the
       list is loose. An enumeration in a comment rots: state the invariant
       and how to check it instead.
-  - From unit 38's review (one low, carried): a permission-only break
-      changes no stamp, so the watcher never feeds the path to the index
-      and no report appears - the condition's end needs no event, but its
-      start does. Both reviewers read the spec line as correctly scoped
-      ("the reindex that fails to read it records the problem"), so this
-      is the mechanism's boundary, not a spec overclaim. A file unreadable
-      at startup was never indexed; one that breaks later keeps its stale
-      index entry.
-  - From unit 37's review (one low, carried): the index's "one message,
-      not two" merge guard in `surface_walk_warnings` is unreachable as
-      written - walk warnings are directories only and the merged index
-      warnings exclude directories, so the two sets cannot overlap. The
-      guarantee is real (the index dedups by path itself), but a reader
-      looking to that guard for it is misled.
-  - From unit 40's review (one low, carried): the disambiguation guard
-      around the help popup's bar names a state no input path can produce
-      (the two popups are never open at once) - harmless, but unexplained
-      by either comment.
-  - From unit 36's review (one low, carried): the colliding-prefix
-      fixture pins `is_unreadable` alone; no producer path carries that
-      text, so a future producer-side text-based classifier would pass it.
-      The producer side is pinned separately by the plain.md case.
-  - From unit 41's review (one low, carried): the older test
-      `popups_paint_content_bg_over_the_terminal_default` still encodes
-      the disambiguation popup's derived geometry in hardcoded
-      coordinates, so a future width change breaks it instead of flowing
-      through the new helper.
 
 NEXT
-  1. The eight carried lows under OPEN, in my order of value:
-     - the permission-only break stays silent (the condition's start needs
-       an event, its end does not) - the only one with user-visible
-       behaviour, and it wants its own unit;
+  1. The header's symmetry, the human's own change: the label is centred,
+     but the block leaves a blank line above it and none below, so it does
+     not sit square in the panel. One blank line above the label and one
+     below it, then the rule - the visual parity the human asked for.
+  2. The four carried lows under OPEN, in my order of value:
      - the pin's doc comment overclaims (an identically-titled heading
        inserted above it moves the mark - no textual key can tell two
        same-titled headings apart, so the comment must say so);
      - the too-wide-label path is reachable but unpinned (a long vault
        name in a narrow sidebar);
-     - the index's "one message, not two" guard is unreachable as written;
-     - the disambiguation guard around the help popup's bar names a state
-       no input path can produce;
      - the drag-side comment says "defensive" only by delegation, and the
        colliding-prefix comment enumerates two of the six frontmatter
        diagnostics' opening phrases - an enumeration in a comment rots:
-       state the invariant and how to check it instead;
-     - the colliding-prefix fixture pins the reader but no producer path
-       carries that text;
-     - the older test that still hardcodes the disambiguation popup's
-       derived geometry.
-     Seven of the eight are cleanup and can be one unit; the
-     permission-only break is a behaviour change and wants its own.
-  2. **No release cut this cycle**: the human's call - the notes stay in
+       state the invariant and how to check it instead.
+     All three are comments and tests; one unit covers them.
+  3. **No release cut this cycle**: the human's call - the notes stay in
      the `## [Unreleased]` section and are kept current as the work
      lands. `Cargo.toml` still says 0.6.5.
-  3. Otherwise: the next cycle starts from the human's requests.
+  4. Otherwise: the next cycle starts from the human's requests.
