@@ -45,6 +45,15 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 48 - the sidebar's header sits square in the panel: a blank line,
+    the label, another blank line, and the rule - the label has a line of
+    space on each side, in every mode. The header takes one row more from
+    the list, so every mode's rows moved down one and the viewport, the
+    scrollbar's track and row mapping, and the click mapping all account
+    for it, from the one place that knows the header's height. The review
+    caught the tests' own copy of that height going stale - the
+    enumeration now derives from the rule, so it grows with it. Two
+    reviewers, 1 blocking (fixed in a fix round), 1 low (fixed with it).
   - The permission-only break's scope is **settled**, by the human's
     decision: the open note is re-read each tick and a file that turns
     unreadable without changing is reported when it is the note being
