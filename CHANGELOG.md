@@ -7,9 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Added
 - The `.base` table's scrollbar is a position control: a press on the bar
   jumps the table to that row of its content, and a drag keeps the table
-  following the pointer until the button is released. Every other
-  scrollbar in the app was already a position control; this one was
-  display only.
+  following the pointer until the button is released. Until now the
+  table's bar and the help popup's were display only.
+- The help popup's scrollbar is a position control too: a press on the bar
+  jumps the popup's body to that row, and a drag keeps the body following
+  the pointer until the button is released. The popup's own keys keep
+  scrolling the body; the bar is the mouse way into the same scroll.
 
 ### Fixed
 - A file that becomes unreadable while frond is running is now reported on
