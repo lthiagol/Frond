@@ -1683,6 +1683,173 @@ fn outline_over_a_base_table_shows_no_headings() {
 }
 
 #[test]
+fn outline_active_heading_is_marked_in_the_accent_without_moving_the_selection() {
+    let vault_dir = TempDir::new("ui-outline-active");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    // One heading every two rendered lines, so the note's scroll and the
+    // outline's row indices line up predictably.
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    let file = ui_viewer("ui-outline-active.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::PageDown));
+    assert!(app.viewer.scroll > 0, "precondition: the note scrolled");
+    let expected = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false)
+        .expect("the note has headings");
+    assert!(expected > 0, "precondition: past the first heading");
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let list_top = area.y + 1 + OUTLINE_HEADER_ROWS;
+    assert_eq!(
+        app.outline.active, expected,
+        "the heading at or above the top of the viewport is the active one"
+    );
+    assert_eq!(
+        app.outline.selected, 0,
+        "a note scroll never moves the reader's selection"
+    );
+    assert!(
+        (app.outline.scroll..app.outline.scroll + app.outline.viewport).contains(&expected),
+        "the panel scrolled the active heading into view"
+    );
+    let y = list_top + (expected - app.outline.scroll) as u16;
+    assert!(
+        row_symbols(buffer, y).contains(&format!("heading {expected}")),
+        "the active heading is drawn in the panel: {:?}",
+        row_symbols(buffer, y)
+    );
+    assert_eq!(
+        buffer[(area.x + 1, y)].fg,
+        app.theme_ui.sidebar_border_focused,
+        "the active heading takes the accent"
+    );
+    assert!(
+        buffer[(area.x + 1, y)].modifier.contains(Modifier::BOLD),
+        "the active heading is bold"
+    );
+    // The heading above it is not active: the mark is not just "any row".
+    assert_ne!(
+        buffer[(area.x + 1, list_top)].fg,
+        app.theme_ui.sidebar_border_focused,
+        "an inactive heading is not in the accent"
+    );
+}
+
+#[test]
+fn outline_follows_the_note_to_its_end_and_scrolls_the_active_heading_into_view() {
+    let vault_dir = TempDir::new("ui-outline-active-end");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    let file = ui_viewer("ui-outline-active-end.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    // A frame first: the keys' page and end steps use the viewport the last
+    // frame measured, as they do in the app's loop.
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    app.handle_key(key(KeyCode::Char('G')));
+
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let list_top = area.y + 1 + OUTLINE_HEADER_ROWS;
+    let len = app.viewer.toc.len();
+    assert_eq!(
+        app.outline.active,
+        len - 1,
+        "at the note's end the last heading is active"
+    );
+    assert_eq!(
+        app.outline.selected, 0,
+        "the reader's selection stays at the top"
+    );
+    assert!(
+        app.outline.scroll > 0,
+        "the panel scrolled the active heading into view"
+    );
+    assert!(
+        (app.outline.scroll..app.outline.scroll + app.outline.viewport)
+            .contains(&app.outline.active),
+        "the active row is inside the panel's window"
+    );
+    let y = list_top + (app.outline.active - app.outline.scroll) as u16;
+    assert!(
+        row_symbols(buffer, y).contains(&format!("heading {}", len - 1)),
+        "the last heading is on the panel: {:?}",
+        row_symbols(buffer, y)
+    );
+    assert_eq!(
+        buffer[(area.x + 1, y)].fg,
+        app.theme_ui.sidebar_border_focused,
+        "and it is marked active"
+    );
+}
+
+#[test]
+fn outline_jump_pins_the_heading_until_the_reader_scrolls_the_note() {
+    let vault_dir = TempDir::new("ui-outline-pin");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    let file = ui_viewer("ui-outline-pin.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h')));
+    let len = app.viewer.toc.len();
+    app.outline.select(len - 1, len);
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.focus, Focus::Content, "the jump hands over the note");
+    let computed = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false);
+    assert_ne!(
+        computed,
+        Some(len - 1),
+        "precondition: the clamped scroll alone names an earlier heading"
+    );
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    assert!(
+        (app.outline.scroll..app.outline.scroll + app.outline.viewport)
+            .contains(&app.outline.active),
+        "the pinned heading is inside the panel's window"
+    );
+    let y = area.y + 1 + OUTLINE_HEADER_ROWS + (app.outline.active - app.outline.scroll) as u16;
+    let buffer = terminal.backend().buffer();
+    assert_eq!(
+        app.outline.active,
+        len - 1,
+        "the jumped-to heading is pinned as active"
+    );
+    assert!(
+        row_symbols(buffer, y).contains(&format!("heading {}", len - 1)),
+        "the pinned heading is marked in the panel: {:?}",
+        row_symbols(buffer, y)
+    );
+
+    // The reader's own scroll releases the pin: the active heading follows
+    // the note again, and the selection still never moves.
+    app.handle_key(key(KeyCode::Char('k')));
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let computed = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false);
+    assert_eq!(
+        app.outline.active,
+        computed.unwrap(),
+        "the scroll took the active heading back"
+    );
+    assert_eq!(
+        app.outline.selected,
+        len - 1,
+        "releasing the pin does not move the selection"
+    );
+}
+
+#[test]
 fn disambiguation_popup_renders_candidates() {
     let vault_dir = TempDir::new("ui-disamb");
     std::fs::create_dir_all(vault_dir.path().join("x")).unwrap();

@@ -34,7 +34,7 @@ checks every preset and built-in, so a mislabelled theme fails the suite.
 | Key | Role in this app | Source role (leaf) |
 |---|---|---|
 | `sidebar_bg` | Sidebar (tree/tags) + backlinks panel background | `toc_bg` |
-| `sidebar_border_focused` | Focused sidebar/tag/backlinks border; the status-bar name when the sidebar is focused | `toc_accent` |
+| `sidebar_border_focused` | Focused sidebar/tag/backlinks border; the status-bar name when the sidebar is focused; the active outline heading (the accent, in bold) | `toc_accent` |
 | `sidebar_border_unfocused` | Unfocused sidebar/tag/backlinks border; `.base` table border | `toc_border` |
 | `selection_bg` | Selected row bar (full-opacity accent); the row text is the panel background colour | `toc_accent` |
 | `changed_marker_fg` | Sidebar ` *` changed-file marker | `status_warning_fg` |
