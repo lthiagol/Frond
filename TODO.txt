@@ -35,6 +35,21 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 40 - the help popup's scrollbar is a position control: it was the
+    last bar that was display only. A press jumps the popup's body to that
+    row, a drag follows the pointer, and the release that ends the drag
+    opens nothing - it does not close the popup, because a bar release is
+    not a key. The popup keeps the pointer, so this is the one bar that
+    lives inside a popup; every other popup still owns it. Two reviewers,
+    0 blocking, 3 low (2 carried; one was an overclaim in the
+    orchestrator's own changelog line, fixed in the unit).
+  - From unit 40's review (carried): a press on the help popup's chrome -
+    its title, its footer - must do nothing, and no test pins it; the
+    guard it depends on is inside the restructured press branch, so a
+    later edit would regress it silently. And the disambiguation guard
+    around the help-bar branch names a state no input path can produce
+    (the two popups are never open at once) - harmless, but unexplained
+    by either comment.
   - Unit 39 - the `.base` table's scrollbar is a position control: it was
     display only, so a press on it did nothing. It works like the note
     pane's now - a press jumps the table to the row the bar names, a drag
