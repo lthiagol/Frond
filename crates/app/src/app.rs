@@ -97,6 +97,9 @@ pub enum SidebarMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BarTarget {
     Note,
+    /// The open `.base` table: its bar is a document position, like the
+    /// note pane's, not a selection cursor.
+    Base,
     /// The sidebar panel: the tree, tag list or outline currently shown.
     Sidebar,
     Backlinks,
@@ -127,6 +130,9 @@ pub struct Layout {
     /// The note pane's scrollbar column (`None` while no bar is drawn):
     /// routes the press and drag that make it a position control.
     pub note_scrollbar_area: Option<Rect>,
+    /// The `.base` table's scrollbar column (`None` while no bar is drawn):
+    /// routes the press and drag that make it a position control.
+    pub base_scrollbar_area: Option<Rect>,
     /// The sidebar widget (`None` while hidden).
     pub sidebar_area: Option<Rect>,
     /// The sidebar panel's scrollbar column (`None` while its rows fit):
@@ -997,6 +1003,15 @@ impl App {
         Some(bar_value_at(area, row, self.viewer.max_scroll() as usize) as u32)
     }
 
+    /// Maps a row of the `.base` table's scrollbar track onto a document
+    /// position, with the same linear mapping as the note pane's bar.
+    /// `None` while no table (or no bar) is drawn.
+    fn base_bar_scroll_at(&self, row: u16) -> Option<usize> {
+        let area = self.layout.base_scrollbar_area?;
+        let base = self.base.as_ref()?;
+        Some(bar_value_at(area, row, base.max_scroll()))
+    }
+
     /// Moves the shown sidebar list's selection to the row the panel's bar
     /// names (the tree, the tag list or the outline). Selecting never
     /// activates: a bar press does not open a note, toggle a folder or jump
@@ -1087,13 +1102,13 @@ impl App {
     }
 
     /// Left-button press. On any scrollbar column (the note pane, the
-    /// sidebar panel, the backlinks panel) it jumps that pane to the mapped
-    /// position and starts a drag: the bars are position controls, so the
-    /// press never moves the keyboard focus, and a list bar's press moves
-    /// the selection without opening it. Any other press is inert: clicks
-    /// keep their release semantics, and popups keep owning the pointer
-    /// while open. With mouse capture off the app ignores the mouse
-    /// entirely, independent of what the terminal forwards.
+    /// `.base` table, the sidebar panel, the backlinks panel) it jumps that
+    /// pane to the mapped position and starts a drag: the bars are position
+    /// controls, so the press never moves the keyboard focus, and a list
+    /// bar's press moves the selection without opening it. Any other press
+    /// is inert: clicks keep their release semantics, and popups keep
+    /// owning the pointer while open. With mouse capture off the app ignores
+    /// the mouse entirely, independent of what the terminal forwards.
     pub fn handle_press(&mut self, col: u16, row: u16) {
         // A new press supersedes any drag state a lost release left behind:
         // whatever this press starts (or does not), the next release is
@@ -1110,6 +1125,17 @@ impl App {
                 self.bar_drag = Some(BarTarget::Note);
                 if let Some(scroll) = self.bar_scroll_at(row) {
                     self.viewer.set_scroll(scroll);
+                }
+                return;
+            }
+        }
+        if let Some(area) = self.layout.base_scrollbar_area {
+            if point_in_rect(col, row, area) {
+                self.bar_drag = Some(BarTarget::Base);
+                if let Some(scroll) = self.base_bar_scroll_at(row) {
+                    if let Some(base) = &mut self.base {
+                        base.set_scroll(scroll);
+                    }
                 }
                 return;
             }
@@ -1150,6 +1176,13 @@ impl App {
             BarTarget::Note => {
                 if let Some(scroll) = self.bar_scroll_at(row) {
                     self.viewer.set_scroll(scroll);
+                }
+            }
+            BarTarget::Base => {
+                if let Some(scroll) = self.base_bar_scroll_at(row) {
+                    if let Some(base) = &mut self.base {
+                        base.set_scroll(scroll);
+                    }
                 }
             }
             BarTarget::Sidebar => {
@@ -1220,11 +1253,12 @@ impl App {
         if self.any_popup_open() {
             return;
         }
-        // A list panel's bar column is a position control, not a row
-        // target: a bare release there (a press/drag pair is consumed by
+        // A bar column is a position control, not a row target: a bare
+        // release there (a press/drag pair is consumed by
         // `handle_release`) must not open the row under the pointer or
         // move focus. The backlinks click rect already stops before its
-        // bar; the sidebar's covers the whole panel.
+        // bar; the sidebar's covers the whole panel, and the `.base`
+        // table's viewport includes its bar.
         if self.sidebar_visible
             && self
                 .layout
@@ -1236,6 +1270,13 @@ impl App {
         if self
             .layout
             .backlinks_scrollbar_area
+            .is_some_and(|area| point_in_rect(col, row, area))
+        {
+            return;
+        }
+        if self
+            .layout
+            .base_scrollbar_area
             .is_some_and(|area| point_in_rect(col, row, area))
         {
             return;

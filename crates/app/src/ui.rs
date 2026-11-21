@@ -186,6 +186,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         };
         app.layout.note_viewport = note_area;
         app.layout.note_scrollbar_area = None;
+        app.layout.base_scrollbar_area = None;
         app.layout.backlinks_area = None;
         app.layout.backlinks_scrollbar_area = None;
         draw_base_table(f, note_area, app, ui);
@@ -314,6 +315,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
 
         // Geometry for click routing (focus on click), fresh every frame.
+        app.layout.base_scrollbar_area = None;
         app.layout.backlinks_area = None;
         app.layout.backlinks_scrollbar_area = None;
         if panel_height > 0 {
@@ -463,6 +465,9 @@ fn draw_base_table(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
             width: 1,
             height: inner.height,
         };
+        // Geometry for the mouse handlers: the bar is a document-position
+        // control, like the note pane's.
+        app.layout.base_scrollbar_area = Some(bar);
         draw_scrollbar(
             f,
             bar,
