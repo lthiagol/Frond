@@ -5,11 +5,15 @@
 //! lists `.base` files alongside `.md` notes and reports directories it
 //! could not read), stats each file (mtime + size, same fingerprint as the
 //! single-file watcher) and feeds every added/modified/removed file into
-//! [`VaultIndex::reindex_one`]. The watcher itself holds no index state —
-//! the index owns the data, the watcher only decides *when* to refresh.
+//! [`VaultIndex::reindex_one`]. The open note is the one file a tick also
+//! re-reads: a permission change moves neither its mtime nor its size, so
+//! the stamp comparison alone would never notice it. The watcher itself
+//! holds no index state — the index owns the data, the watcher only decides
+//! *when* to refresh.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use vault::walk::{walk_vault_with_warnings, WalkEntry};
 use vault::{IndexWarning, VaultIndex};
@@ -59,11 +63,12 @@ impl VaultWatcher {
 
     /// One vault-wide poll: reindexes every changed/new/removed file and
     /// returns the changed paths plus the walk's warnings (empty
-    /// `changed` = nothing happened). A root that cannot be walked at all
-    /// is skipped entirely (retry next tick) and reports no warnings: the
-    /// walk could not look, which is not the same as finding every
-    /// directory readable.
-    pub fn poll(&mut self, index: &mut VaultIndex) -> PollOutcome {
+    /// `changed` = nothing happened). `open_note` is re-read even when its
+    /// stamp did not move (see [`Self::reconcile`]). A root that cannot be
+    /// walked at all is skipped entirely (retry next tick) and reports no
+    /// warnings: the walk could not look, which is not the same as finding
+    /// every directory readable.
+    pub fn poll(&mut self, index: &mut VaultIndex, open_note: Option<&Path>) -> PollOutcome {
         let Ok(report) = walk_vault_with_warnings(index.root()) else {
             return PollOutcome {
                 changed: Vec::new(),
@@ -71,7 +76,7 @@ impl VaultWatcher {
             };
         };
         PollOutcome {
-            changed: self.reconcile(index, &report.entries),
+            changed: self.reconcile(index, &report.entries, open_note),
             warnings: Some(
                 report
                     .warnings
@@ -86,7 +91,20 @@ impl VaultWatcher {
     /// difference into `reindex_one`. Split from [`Self::poll`] so tests
     /// can replay a walk whose files became unstatable afterwards (the
     /// transient-stat-failure case, see the `Err` arm below).
-    fn reconcile(&mut self, index: &mut VaultIndex, entries: &[WalkEntry]) -> Vec<PathBuf> {
+    ///
+    /// The open note is the one file whose stamp match still costs a read:
+    /// a permission change moves neither its mtime nor its size, so a
+    /// failed read has to be fed to the index explicitly (its reindex
+    /// records the same unreadable warning a startup skip leaves) — once,
+    /// while the index holds no warning for it; the record persists on its
+    /// own afterwards. Every other file stays stat-only — a vault-wide read
+    /// per tick is the cost this avoids.
+    fn reconcile(
+        &mut self,
+        index: &mut VaultIndex,
+        entries: &[WalkEntry],
+        open_note: Option<&Path>,
+    ) -> Vec<PathBuf> {
         let mut changed = Vec::new();
         // Every path the walk still reports, stat success or not: a path
         // in here must never count as removed.
@@ -101,6 +119,21 @@ impl VaultWatcher {
             };
             if self.stamps.get(&entry.path) != Some(&stamp) {
                 self.stamps.insert(entry.path.clone(), stamp);
+                changed.push(entry.path.clone());
+            } else if open_note == Some(entry.path.as_path())
+                && fs::read_to_string(&entry.path).is_err()
+                && !index
+                    .warnings()
+                    .iter()
+                    .any(|warning| warning.path == entry.path && warning.is_unreadable())
+            {
+                // A changed path was already read by `reindex_many`
+                // below; an unchanged one has not, and its unreadability
+                // is what the stamp can never show. Re-feed it only while
+                // the index has no warning for it: once recorded, the
+                // warning persists on its own, so a second feed would
+                // change nothing in the report and would turn every quiet
+                // tick into a full re-render.
                 changed.push(entry.path.clone());
             }
         }
@@ -151,14 +184,14 @@ mod tests {
         // ADD: a new note appears.
         wait_mtime_tick();
         write(&dir.path().join("b.md"), "---\nstatus: draft\n---\n");
-        let changed = watcher.poll(&mut index).changed;
+        let changed = watcher.poll(&mut index, None).changed;
         assert_eq!(changed, vec![dir.path().join("b.md")]);
         assert_eq!(index.len(), 2);
 
         // MODIFY: content change (same length) is caught by mtime.
         wait_mtime_tick();
         write(&dir.path().join("a.md"), "---\nstatus: resolved\n---\n");
-        let changed = watcher.poll(&mut index).changed;
+        let changed = watcher.poll(&mut index, None).changed;
         assert_eq!(changed, vec![dir.path().join("a.md")]);
         assert_eq!(
             index
@@ -172,12 +205,12 @@ mod tests {
         // REMOVE: deleted file drops out of the index.
         wait_mtime_tick();
         fs::remove_file(dir.path().join("b.md")).unwrap();
-        let changed = watcher.poll(&mut index).changed;
+        let changed = watcher.poll(&mut index, None).changed;
         assert_eq!(changed, vec![dir.path().join("b.md")]);
         assert_eq!(index.len(), 1);
 
         // Quiet tick: no changes.
-        assert!(watcher.poll(&mut index).changed.is_empty());
+        assert!(watcher.poll(&mut index, None).changed.is_empty());
     }
 
     #[test]
@@ -186,27 +219,27 @@ mod tests {
         write(&dir.path().join("a.md"), "a\n");
         let mut index = VaultIndex::build(dir.path()).unwrap();
         let mut watcher = VaultWatcher::new(&index);
-        assert!(watcher.poll(&mut index).changed.is_empty());
+        assert!(watcher.poll(&mut index, None).changed.is_empty());
 
         // ADD: a new `.base` file is picked up (path-only in the index).
         wait_mtime_tick();
         let base = dir.path().join("tasks.base");
         write(&base, "filters: []\n");
-        let changed = watcher.poll(&mut index).changed;
+        let changed = watcher.poll(&mut index, None).changed;
         assert_eq!(changed, vec![base.clone()]);
         assert_eq!(index.bases().collect::<Vec<_>>(), vec![base.clone()]);
 
         // MODIFY: content changes re-feed the path; the listing stays.
         wait_mtime_tick();
         write(&base, "filters:\n  and: []\n");
-        let changed = watcher.poll(&mut index).changed;
+        let changed = watcher.poll(&mut index, None).changed;
         assert_eq!(changed, vec![base.clone()]);
         assert_eq!(index.bases().count(), 1);
 
         // REMOVE: the base drops out.
         wait_mtime_tick();
         fs::remove_file(&base).unwrap();
-        let changed = watcher.poll(&mut index).changed;
+        let changed = watcher.poll(&mut index, None).changed;
         assert_eq!(changed, vec![base]);
         assert!(index.bases().next().is_none());
     }
@@ -223,7 +256,7 @@ mod tests {
             &dir.path().join("source.md"),
             "---\nstatus: active\n---\n[[target]]\n",
         );
-        watcher.poll(&mut index);
+        watcher.poll(&mut index, None);
         assert_eq!(
             index.backlinks_to(&dir.path().join("target.md")),
             vec![dir.path().join("source.md")]
@@ -253,7 +286,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(dir.path().join("sub"), fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let changed = watcher.reconcile(&mut index, &entries);
+        let changed = watcher.reconcile(&mut index, &entries, None);
         assert!(
             changed.is_empty(),
             "stat failure must not report a change: {changed:?}"
@@ -276,7 +309,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(dir.path().join("sub"), fs::Permissions::from_mode(0o755)).unwrap();
         }
-        assert!(watcher.poll(&mut index).changed.is_empty());
+        assert!(watcher.poll(&mut index, None).changed.is_empty());
     }
 
     /// Startup race: a file created between `VaultIndex::build` and the
@@ -296,7 +329,7 @@ mod tests {
         write(&dir.path().join("late.md"), "---\nstatus: draft\n---\n");
         let mut watcher = VaultWatcher::new(&index);
 
-        let changed = watcher.poll(&mut index).changed;
+        let changed = watcher.poll(&mut index, None).changed;
         assert_eq!(changed, vec![dir.path().join("late.md")]);
         assert_eq!(index.len(), 2, "the late file got indexed");
         assert_eq!(
@@ -308,7 +341,71 @@ mod tests {
             Some("draft")
         );
         // And the next poll is quiet.
-        assert!(watcher.poll(&mut index).changed.is_empty());
+        assert!(watcher.poll(&mut index, None).changed.is_empty());
+    }
+
+    /// The open note is the one file a tick re-reads: a permission change
+    /// moves neither its mtime nor its size, so the stamp comparison alone
+    /// would never feed it to the index. Every other file stays stat-only —
+    /// a vault-wide read per tick is the cost this scope rules out.
+    #[test]
+    fn only_the_open_note_is_re_read_when_its_stamp_is_unchanged() {
+        let dir = TempDir::new("watch-open-note");
+        write(&dir.path().join("open.md"), "open\n");
+        write(&dir.path().join("other.md"), "other\n");
+        let mut index = VaultIndex::build(dir.path()).unwrap();
+        let mut watcher = VaultWatcher::new(&index);
+        let open = dir.path().join("open.md");
+        let other = dir.path().join("other.md");
+
+        // Both locked with no content change: no stamp moved.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&open, fs::Permissions::from_mode(0o000)).unwrap();
+            fs::set_permissions(&other, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let changed = watcher.poll(&mut index, Some(&open)).changed;
+        assert_eq!(
+            changed,
+            vec![open.clone()],
+            "only the open note is read (and so fed to the index)"
+        );
+        assert!(
+            index
+                .warnings()
+                .iter()
+                .any(|w| w.path == open && w.is_unreadable()),
+            "the open note's failed read is recorded: {:?}",
+            index.warnings()
+        );
+        assert!(
+            !index
+                .warnings()
+                .iter()
+                .any(|w| w.path == other && w.is_unreadable()),
+            "a file that is not the open note is not read: {:?}",
+            index.warnings()
+        );
+        assert!(
+            index.notes().any(|note| note.path == other),
+            "the unread other note keeps its index entry: nothing read it"
+        );
+
+        // Still locked: the warning is recorded, so the next tick re-reads
+        // the note but feeds nothing. A re-feed would report the same
+        // warning again while turning every quiet tick into a re-render.
+        let changed = watcher.poll(&mut index, Some(&open)).changed;
+        assert!(
+            changed.is_empty(),
+            "a recorded unreadable warning needs no re-feed: {changed:?}"
+        );
+
+        // Restore so the fixture's files can be unlinked.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&open, fs::Permissions::from_mode(0o644)).unwrap();
+            fs::set_permissions(&other, fs::Permissions::from_mode(0o644)).unwrap();
+        }
     }
 
     /// A directory that becomes unreadable *after* startup must produce a
@@ -336,7 +433,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let outcome = watcher.poll(&mut index);
+        let outcome = watcher.poll(&mut index, None);
         let warnings = outcome
             .warnings
             .expect("the walk could read the root and reported");
@@ -352,7 +449,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let outcome = watcher.poll(&mut index);
+        let outcome = watcher.poll(&mut index, None);
         let warnings = outcome
             .warnings
             .expect("the walk could read the root and reported");
@@ -377,7 +474,7 @@ mod tests {
             fs::set_permissions(&sub, fs::Permissions::from_mode(0o000)).unwrap();
         }
         // The first poll reports the locked directory (the root reads).
-        let outcome = watcher.poll(&mut index);
+        let outcome = watcher.poll(&mut index, None);
         assert!(outcome.warnings.is_some(), "the walk ran");
 
         // Now the root itself cannot be read: the walk fails outright.
@@ -385,7 +482,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let outcome = watcher.poll(&mut index);
+        let outcome = watcher.poll(&mut index, None);
         assert!(
             outcome.warnings.is_none(),
             "a failed walk is not an empty report: {:?}",

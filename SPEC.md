@@ -387,6 +387,14 @@ own keys, and they take them instead of the app:
   appears in the same slot, with the path relative to the vault root. It
   stays for as long as the file stays unreadable, and the note returns to
   the index with the report's end.
+  The **open note** is re-read on every watch tick, so a file that turns
+  unreadable **without changing** - a permission change moves neither its
+  timestamp nor its size, so nothing else would notice - is reported too.
+  The report clears when the file reads again. A `.base` table is not
+  covered: the table's own file is watched by stamp alone, so a
+  permission break on it goes unreported - and a `.base` frond was
+  launched on records no unreadable-path warning at all, even though it
+  is the one file probed by read.
 
 ## Status bar
 
