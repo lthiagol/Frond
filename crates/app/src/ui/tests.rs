@@ -3002,9 +3002,9 @@ fn popups_paint_content_bg_over_the_terminal_default() {
         "help popup painted with content_bg"
     );
 
-    // Disambiguation popup (2 candidates → 60x6 centered at x=20,y=9):
-    // even a *border* cell carries content_bg (the Paragraph base
-    // style fills the whole rect; the Block only patches fg).
+    // Disambiguation popup: even a *border* cell carries content_bg (the
+    // Paragraph base style fills the whole rect; the Block only patches
+    // fg). The geometry comes from the helper the renderer uses.
     app.viewer.help_open = false;
     app.disambiguation = Some(crate::app::Disambiguation {
         candidates: vec![
@@ -3015,8 +3015,9 @@ fn popups_paint_content_bg_over_the_terminal_default() {
         heading: None,
     });
     terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let popup = disambiguation_popup_geometry(Rect::new(0, 0, 100, 24), 2);
     assert_eq!(
-        terminal.backend().buffer()[(20, 9)].bg,
+        terminal.backend().buffer()[(popup.x, popup.y)].bg,
         Color::Rgb(9, 9, 9),
         "disambiguation popup (incl. border cells) painted with content_bg"
     );

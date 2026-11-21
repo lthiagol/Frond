@@ -1144,7 +1144,10 @@ impl App {
             // The help popup's bar is the one pointer target its popup owns
             // itself: the press scrolls the body instead of being inert.
             // Every other press on a popup stays inert (the popup owns the
-            // pointer).
+            // pointer). The disambiguation check is defensive: input routes
+            // to that popup first (keys in `handle_key`, clicks through
+            // `any_popup_open`), so help is never open beneath one today;
+            // it keeps a future path from scrolling the wrong body.
             if self.viewer.help_open && self.disambiguation.is_none() {
                 if let Some(area) = self.layout.help_scrollbar_area {
                     if point_in_rect(col, row, area) {
@@ -1212,6 +1215,8 @@ impl App {
             return;
         }
         if target == BarTarget::Help {
+            // The inverse of the press guard; see `handle_press` for why
+            // the disambiguation state is defensive.
             if !self.viewer.help_open || self.disambiguation.is_some() {
                 return;
             }
@@ -1674,8 +1679,9 @@ impl App {
     /// files. A directory is re-reported by every walk, so a walk that ran
     /// is authoritative for it; a file is not part of the walk, so the
     /// index's record of it is the report — from the startup build, or from
-    /// any later reindex that could not read it. The same path from both
-    /// sources is one message, not two.
+    /// any later reindex that could not read it. The two sources are
+    /// disjoint by construction — the walk warns on directories only, and
+    /// the index's files below exclude them — so no path is reported twice.
     ///
     /// `walk` is `None` when the walk itself failed (the root could not be
     /// read). That is not an empty report: the walk could not look, and a
@@ -1713,6 +1719,9 @@ impl App {
         }
         let mut warnings = walk.to_vec();
         for warning in self.index_unreadable_files() {
+            // Defensive only: the sources' disjointness above means this
+            // check never fires today; it is kept so a future source that
+            // breaks that split cannot report one condition twice.
             if !warnings.iter().any(|current| current.path == warning.path) {
                 warnings.push(warning);
             }
