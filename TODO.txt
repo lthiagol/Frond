@@ -45,6 +45,15 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 47 - the sidebar says what it lists, and its bar follows the note:
+    the tree and tag views carry the vault's name in the outline's header
+    block, centred over the same rule, and every label is centred; a note
+    scroll takes the outline's selection with it, so the bar marks the
+    heading being read while the reader's own cursor stays where they put
+    it until the next scroll. The review caught that the kickoff's
+    too-narrow-label fallback belongs to the vault name, not the 17-cell
+    TOC label that can never be too narrow (carried). Two reviewers,
+    0 blocking, 2 low (the same finding on both axes; carried).
   - Unit 46 - the outline's headings are numbered, the way leaf numbers
     them: the top-level headings carry a two-digit index counted in document
     order, the deeper ones a bullet. A new note starts the outline at its
@@ -337,6 +346,13 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 47's review (one low, carried): the too-wide-label path is
+      reachable but unpinned - a vault directory whose name is longer than
+      the panel's inner width truncates, and no test exercises it. The
+      corner to pin is a long vault name in a narrow sidebar; the TOC
+      label itself is 17 cells in a panel of at least 22 and can never be
+      too narrow, which is where the brief's fallback was aimed by
+      mistake.
   - From unit 46's delta review (one low, carried): the pin's doc comment
       states an absolute guarantee - an edit above the pinned heading must
       not move the mark - with one exception it does not name: an edit that
