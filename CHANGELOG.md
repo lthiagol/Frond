@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- The `.base` table's scrollbar is a position control: a press on the bar
+  jumps the table to that row of its content, and a drag keeps the table
+  following the pointer until the button is released. Every other
+  scrollbar in the app was already a position control; this one was
+  display only.
 
 ### Fixed
 - A file that becomes unreadable while frond is running is now reported on

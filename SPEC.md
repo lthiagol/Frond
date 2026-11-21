@@ -188,8 +188,15 @@ frontmatter at all — the whole file is body.
   released. A press on the bar is **not** a row click: it never opens the
   row it lands on, and it does not move the keyboard focus. The release
   that ends a drag is not a click. Mouse capture off (`m`) disables it.
-  The bar column of the `.base` table and the help popup is not
-  interactive yet.
+- The **`.base` table's bar is a position control**: a press on the bar
+  column jumps the table to that row of its content, and a drag keeps
+  the table following the pointer until the button is released. The
+  mapping is linear over the track's rows, like the note pane's bar. The
+  table's scroll is a document position, not a selection cursor. The
+  press does not move the keyboard focus, and the release that ends a
+  drag is not a click (it must not open a row under the pointer). Mouse
+  capture off (`m`) disables it.
+- The **help popup's bar** is not interactive yet.
 - The **scrollbar's thumb highlights under the mouse**: while the pointer
   is over a bar column, that bar's thumb is painted in `scrollbar_hover_fg`
   (a new theme role; every theme's value is its accent). The track is
@@ -213,6 +220,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | Mouse wheel | Scroll the content pane; over the sidebar, the backlinks panel or a popup it moves that pane's selection instead |
 | Press / drag on the note pane's scrollbar | Jump the note to that position; a drag follows the pointer until the button is released |
 | Press / drag on a list panel's scrollbar | Move that panel's selection to that position; a drag follows the pointer until the button is released |
+| Press / drag on the `.base` table's scrollbar | Jump the table to that row of its content; a drag follows the pointer until the button is released |
 | Hover over a link (note pane) | Highlights the link in the theme's `link_hover` colour; the link focus does not move |
 | `n` / `N` (note pane) | Move to the next / previous occurrence of the last search in the open note |
 | Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a row of the search or quick-switcher popup selects it (a second click on the selected row opens it), while the disambiguation popup takes no clicks at all; a click on a popup's chrome — its borders, the quick switcher's prompt, its footer — does nothing |

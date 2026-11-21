@@ -213,6 +213,13 @@ impl BaseState {
         self.scroll = self.max_scroll();
     }
 
+    /// Sets the document position, clamped to the scroll range. The bar's
+    /// track-row mapping already produces a value in range; the clamp keeps
+    /// the invariant if a resize shrank the range since the last frame.
+    pub fn set_scroll(&mut self, value: usize) {
+        self.scroll = value.min(self.max_scroll());
+    }
+
     /// The click target at an absolute table line + inner column, if any.
     pub fn link_at(&self, line: usize, col: usize) -> Option<PathBuf> {
         self.regions

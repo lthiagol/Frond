@@ -2774,6 +2774,114 @@ fn base_click_on_the_scrollbar_column_is_a_no_op() {
     assert_eq!(app.viewer.path, first_row, "the first row's note opened");
 }
 
+/// The `.base` table's bar is a document-position control, like the note
+/// pane's: a press jumps the table to the mapped row of its content and
+/// does not move the keyboard focus.
+#[test]
+fn base_scrollbar_press_jumps_to_the_mapped_track_row() {
+    let dir = scrolling_base_vault("ui-base-bar-press");
+    let file = ui_viewer("ui-base-bar-press.md", "x\n");
+    let mut app = app_with_index(&file, &dir);
+    app.open_base_at(&dir.path().join("many.base"), 0).unwrap();
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .base_scrollbar_area
+        .expect("an overflowing table draws its bar");
+    assert_eq!(bar, Rect::new(98, 1, 1, 21));
+    let max = app.base.as_ref().unwrap().max_scroll();
+    assert!(max > 0, "the fixture overflows");
+
+    app.focus = Focus::Sidebar;
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(
+        app.base.as_ref().unwrap().scroll,
+        0,
+        "the first track row is the top"
+    );
+    assert_eq!(app.focus, Focus::Sidebar, "the press does not move focus");
+
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(
+        app.base.as_ref().unwrap().scroll,
+        max,
+        "the last track row is the bottom"
+    );
+
+    // Row 10 of the 20 row offsets is exactly half the range.
+    app.handle_press(bar.x, bar.y + 10);
+    assert_eq!(
+        app.base.as_ref().unwrap().scroll,
+        max / 2,
+        "a middle row names that fraction of the range"
+    );
+
+    // Mouse capture off (`m`) disables the bar, like every other mouse action.
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(app.base.as_ref().unwrap().scroll, 0);
+    app.mouse_capture = false;
+    app.handle_press(bar.x, bar.bottom() - 1);
+    assert_eq!(
+        app.base.as_ref().unwrap().scroll,
+        0,
+        "the table bar is inert with capture off"
+    );
+}
+
+/// A drag follows the pointer row even after the column is left, and the
+/// release that ends it is consumed: the link cell under the pointer must
+/// not open a note (a bare click at the same cells does).
+#[test]
+fn base_scrollbar_drag_follows_the_pointer_and_its_release_is_not_a_click() {
+    let dir = scrolling_base_vault("ui-base-bar-drag");
+    let file = ui_viewer("ui-base-bar-drag.md", "x\n");
+    let mut app = app_with_index(&file, &dir);
+    app.open_base_at(&dir.path().join("many.base"), 0).unwrap();
+    app.sidebar_visible = false;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let bar = app
+        .layout
+        .base_scrollbar_area
+        .expect("an overflowing table draws its bar");
+    let max = app.base.as_ref().unwrap().max_scroll();
+    let opened = app.viewer.path.clone();
+    assert!(max > 0, "the fixture overflows");
+    // Header at inner row 1, rule at row 2, so y=3 is the first data row and
+    // its `file.name` cell is a live link.
+    assert!(
+        app.base.as_ref().unwrap().link_at(2, 0).is_some(),
+        "the release target is a link cell"
+    );
+
+    app.focus = Focus::Sidebar;
+    app.handle_press(bar.x, bar.y);
+    assert_eq!(
+        app.base.as_ref().unwrap().scroll,
+        0,
+        "the press jumped to the top"
+    );
+    // The pointer leaves the bar column; only its row drives the position.
+    app.handle_drag(10, bar.y + 10);
+    assert_eq!(
+        app.base.as_ref().unwrap().scroll,
+        max / 2,
+        "the drag follows the pointer"
+    );
+    app.handle_drag(10, bar.y);
+    assert_eq!(app.base.as_ref().unwrap().scroll, 0);
+
+    app.handle_release(2, 3);
+    assert!(
+        app.base.is_some(),
+        "the release that ends a drag opens nothing"
+    );
+    assert_eq!(app.viewer.path, opened, "and it does not navigate");
+    assert_eq!(app.focus, Focus::Sidebar, "and it does not move focus");
+}
+
 #[test]
 fn chrome_uses_the_themed_border_and_content_bg() {
     let vault_dir = TempDir::new("ui-theme-vault");
