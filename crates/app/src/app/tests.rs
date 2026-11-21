@@ -901,9 +901,9 @@ fn sidebar_click_expands_collapses_and_opens_notes() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    // Collapsed rows: 0 = `sub` folder, 1 = a.md; inner rows start at
-    // screen row 1 (below the top border).
-    let sub_row = 1;
+    // Collapsed rows: 0 = `sub` folder, 1 = a.md; inner rows start below
+    // the top border and the header block.
+    let sub_row = 1 + crate::ui::LIST_HEADER_ROWS;
 
     // Folder click: selects + expands, opens nothing, focus unchanged.
     app.handle_click(3, sub_row);
@@ -925,7 +925,7 @@ fn sidebar_click_expands_collapses_and_opens_notes() {
     );
 
     // Expanded rows: [sub, b.md, c.md, a.md] — click row 2 (b.md).
-    app.handle_click(3, 2);
+    app.handle_click(3, sub_row + 1);
     assert_eq!(app.viewer.path, vault_dir.path().join("sub/b.md"));
     assert!(app.nav.can_go_back(), "opened through the normal open path");
     assert_eq!(app.viewer.scroll, 0, "open resets the scroll");
@@ -955,7 +955,7 @@ fn click_sidebar_note_opens_and_moves_focus_to_content() {
     app.focus = Focus::Sidebar;
 
     // Row 2 (inner row 1) is `a.md` in the collapsed list [sub, a.md].
-    app.handle_click(3, 2);
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS + 1);
     assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
     assert_eq!(
         app.focus,
@@ -1216,7 +1216,7 @@ fn click_while_popup_open_does_not_move_focus() {
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     app.focus = Focus::Content;
     app.viewer.help_open = true;
-    app.handle_click(3, 2);
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
     assert_eq!(app.focus, Focus::Content, "modal popup ignores the click");
 }
 
@@ -1226,11 +1226,11 @@ fn sidebar_click_maps_screen_row_through_scroll() {
     let (_f, mut app) = app(&vault_dir);
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     // Collapsed rows [sub, a.md]; scroll 1 hides `sub`, so the first
-    // inner screen row is a.md.
+    // inner screen row (below the header) is a.md.
     let sidebar = app.sidebar.as_mut().unwrap();
     sidebar.viewport = 5;
     sidebar.scroll = 1;
-    app.handle_click(3, 1);
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
     assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
 }
 
@@ -1239,13 +1239,93 @@ fn sidebar_border_and_past_end_clicks_are_noops() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    // Top border row and a row past the short list: neither selects
-    // nor opens anything.
-    app.handle_click(3, 0);
-    app.handle_click(3, 5);
+    // The top border, every header row (blank, label, rule) and a row past
+    // the short list: none selects or opens anything.
+    let selected = app.sidebar.as_ref().unwrap().selected.clone();
+    for row in [0, 1, 2, 3, 1 + crate::ui::LIST_HEADER_ROWS + 2] {
+        app.handle_click(3, row);
+    }
     assert!(app.sidebar.as_ref().unwrap().expanded.is_empty());
     assert_eq!(app.viewer.path, file.path());
-    assert!(app.sidebar.as_ref().unwrap().selected.is_some());
+    assert_eq!(
+        app.sidebar.as_ref().unwrap().selected,
+        selected,
+        "no header or past-the-end row moved the selection"
+    );
+}
+
+/// The header block is chrome, in every mode: a click on its blank, label
+/// or rule row selects nothing and opens nothing, while the first body row
+/// still maps to the first list row.
+#[test]
+fn sidebar_header_rows_select_nothing_in_every_mode() {
+    let vault_dir = TempDir::new("app-header-clicks");
+    std::fs::write(
+        vault_dir.path().join("a.md"),
+        "---\ntags: [mocktag]\n---\n# One\n\nbody\n\n## Two\n\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(vault_dir.path().join("sub")).unwrap();
+    std::fs::write(vault_dir.path().join("sub").join("b.md"), "# B\n\nbody\n").unwrap();
+    let (_file, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    let header_rows = 1..=3;
+
+    // Tree: the selected row and the tree's expansion stay put.
+    let tree_selected = app.sidebar.as_ref().unwrap().selected.clone();
+    for row in header_rows.clone() {
+        app.handle_click(3, row);
+    }
+    assert_eq!(
+        app.sidebar.as_ref().unwrap().selected,
+        tree_selected,
+        "a header row selects no tree row"
+    );
+    assert_eq!(app.focus, Focus::Sidebar, "but the sidebar owns the click");
+    // The first body row is the first list row.
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
+    assert_eq!(
+        app.sidebar.as_ref().unwrap().selected,
+        Some(vault_dir.path().join("sub")),
+        "one row below the rule is the first list row"
+    );
+
+    // Tags: the tag cursor stays put.
+    app.handle_key(key(KeyCode::Char('t')));
+    let tag_selected = app.tags.selection_index();
+    for row in header_rows.clone() {
+        app.handle_click(3, row);
+    }
+    assert_eq!(
+        app.tags.selection_index(),
+        tag_selected,
+        "a header row selects no tag row"
+    );
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
+    assert_eq!(
+        app.tags.selection_index(),
+        Some(0),
+        "one row below the rule is the first tag row"
+    );
+
+    // Outline: the heading cursor and the note's scroll stay put.
+    app.handle_key(key(KeyCode::Char('o')));
+    let outline_selected = app.outline.selected;
+    let scroll = app.viewer.scroll;
+    for row in header_rows.clone() {
+        app.handle_click(3, row);
+    }
+    assert_eq!(
+        app.outline.selected, outline_selected,
+        "a header row selects no heading"
+    );
+    assert_eq!(app.viewer.scroll, scroll, "and never jumps the note");
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
+    assert_eq!(
+        app.outline.selected, 0,
+        "one row below the rule is the first heading"
+    );
 }
 
 #[test]
@@ -1256,7 +1336,8 @@ fn sidebar_click_does_not_fall_through_to_content_links() {
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     app.layout.note_viewport = Rect::new(30, 0, 70, 20);
     // Scroll 1 puts the `[[a]]` link (rendered line 2) at screen row
-    // 1 — the same row as the sidebar's first inner row (`sub`).
+    // 1 — a header row of the sidebar, which owns the whole column but
+    // maps no list row there.
     let link = app
         .viewer
         .links
@@ -1272,13 +1353,14 @@ fn sidebar_click_does_not_fall_through_to_content_links() {
         vault_dir.path().join("start.md"),
         "the content link was not activated"
     );
+    assert_eq!(app.focus, Focus::Sidebar, "the sidebar owns the click");
     assert!(
-        app.sidebar
+        !app.sidebar
             .as_ref()
             .unwrap()
             .expanded
             .contains(&vault_dir.path().join("sub")),
-        "the sidebar handled the click instead"
+        "a header row selects no sidebar row"
     );
 }
 
@@ -1291,7 +1373,7 @@ fn sidebar_clicks_are_gated_by_popups() {
 
     // Help popup: modal, clicks ignored entirely.
     app.viewer.help_open = true;
-    app.handle_click(3, 1);
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
     assert!(app.viewer.help_open);
     assert!(!app.sidebar.as_ref().unwrap().expanded.contains(&sub));
     assert_eq!(app.viewer.path, file.path());
@@ -1299,7 +1381,7 @@ fn sidebar_clicks_are_gated_by_popups() {
 
     // Search popup: same gating.
     app.search.open = true;
-    app.handle_click(3, 1);
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
     assert!(app.search.open);
     assert!(!app.sidebar.as_ref().unwrap().expanded.contains(&sub));
     app.search.open = false;
@@ -1310,7 +1392,7 @@ fn sidebar_clicks_are_gated_by_popups() {
         selected: 0,
         heading: None,
     });
-    app.handle_click(3, 1);
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
     assert_eq!(app.disambiguation.as_ref().unwrap().selected, 0);
     assert!(!app.sidebar.as_ref().unwrap().expanded.contains(&sub));
 }
@@ -1327,10 +1409,10 @@ fn sidebar_click_works_in_tags_mode() {
     app.handle_key(key(KeyCode::Char('t'))); // sidebar → tags mode
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
     // Rows: 0 = the mocktag tag (collapsed), then its note when expanded.
-    app.handle_click(3, 1); // tag row: expand
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS); // tag row: expand
     assert!(app.tags.expanded.contains("mocktag"));
     assert_eq!(app.viewer.path, file.path(), "tag click opens nothing");
-    app.handle_click(3, 2); // note row: open
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS + 1); // note row: open
     assert_eq!(app.viewer.path, vault_dir.path().join("a.md"));
     assert_eq!(app.focus, Focus::Content, "note click focuses content");
 }
@@ -1441,7 +1523,7 @@ fn backlinks_open_from_sidebar_focus_takes_focus() {
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
 
     // Click the sidebar row for `sub` (row 1, collapsed) → focus Sidebar.
-    app.handle_click(3, 1);
+    app.handle_click(3, 1 + crate::ui::LIST_HEADER_ROWS);
     assert_eq!(app.focus, Focus::Sidebar);
 
     // `b` opens the panel and must take focus even from the sidebar.
@@ -1612,7 +1694,7 @@ fn outline_click_jumps_to_the_clicked_heading() {
 
     // The first heading is the row below the panel's border and the TOC
     // header; the second is the next row.
-    let first = 1 + crate::ui::OUTLINE_HEADER_ROWS;
+    let first = 1 + crate::ui::LIST_HEADER_ROWS;
     app.handle_click(5, first + 1); // `## Two`
     assert_eq!(app.outline.selected, 1);
     assert_eq!(app.viewer.scroll, app.viewer.toc[1].line as u32);

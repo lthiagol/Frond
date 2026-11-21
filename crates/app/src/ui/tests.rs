@@ -1369,15 +1369,16 @@ fn tag_selected_row_is_a_full_width_inverse_video_bar() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     // The first tag row is selected: inverted text, bar to the inner right
-    // edge (border at x = 29).
-    assert_eq!(buffer[(1, 1)].bg, Color::Rgb(5, 5, 5), "tag bar starts");
+    // edge (border at x = 29), below the vault-name header.
+    let first = 1 + LIST_HEADER_ROWS;
+    assert_eq!(buffer[(1, first)].bg, Color::Rgb(5, 5, 5), "tag bar starts");
     assert_eq!(
-        buffer[(1, 1)].fg,
+        buffer[(1, first)].fg,
         Color::Rgb(7, 7, 7),
         "tag selected text is the panel background"
     );
     assert_eq!(
-        buffer[(28, 1)].bg,
+        buffer[(28, first)].bg,
         Color::Rgb(5, 5, 5),
         "tag bar reaches the inner right edge"
     );
@@ -1419,7 +1420,7 @@ fn outline_sidebar_renders_headings_indented_by_level() {
     // The label is chrome above the list: a blank row, the label, the rule,
     // then the headings (leaf's header chunk).
     assert_eq!(
-        OUTLINE_HEADER_ROWS, 3,
+        LIST_HEADER_ROWS, 3,
         "the header is a blank row, the label and its rule"
     );
     assert!(
@@ -1437,13 +1438,17 @@ fn outline_sidebar_renders_headings_indented_by_level() {
         "┤",
         "the rule tees into the panel's right border, leaf's header shape"
     );
+    let label = "TABLE OF CONTENTS";
+    let inner_width = area.width - 2;
+    let label_width = UnicodeWidthStr::width(label) as u16;
+    let label_x = area.x + 1 + (inner_width - label_width) / 2;
     assert_eq!(
-        buffer[(area.x + 2, area.y + 2)].fg,
+        buffer[(label_x, area.y + 2)].fg,
         app.theme_ui.dimmed_fg,
         "the label uses the existing dimmed role (there is no header key)"
     );
-    let top = row(area.y + 1 + OUTLINE_HEADER_ROWS);
-    let deep = row(area.y + 2 + OUTLINE_HEADER_ROWS);
+    let top = row(area.y + 1 + LIST_HEADER_ROWS);
+    let deep = row(area.y + 2 + LIST_HEADER_ROWS);
     assert_eq!(
         top.trim_end(),
         "01 Top",
@@ -1485,7 +1490,7 @@ fn outline_rows_carry_the_index_and_the_bullet() {
             .map(|x| buffer[(x, y)].symbol())
             .collect()
     };
-    let top = area.y + 1 + OUTLINE_HEADER_ROWS;
+    let top = area.y + 1 + LIST_HEADER_ROWS;
     assert_eq!(
         row(top).trim_end(),
         "01 Alpha",
@@ -1543,7 +1548,7 @@ fn outline_selected_row_is_a_full_width_inverse_video_bar() {
     let buffer = terminal.backend().buffer();
     // The first heading is the selected row (below the TOC header): inverted
     // text and a bar out to the panel's inner right edge (border at x = 29).
-    let first = 1 + OUTLINE_HEADER_ROWS;
+    let first = 1 + LIST_HEADER_ROWS;
     assert_eq!(
         buffer[(1, first)].bg,
         Color::Rgb(5, 5, 5),
@@ -1589,6 +1594,117 @@ fn outline_panel_carries_the_toc_label_only_in_outline_mode() {
     );
 }
 
+/// The label is centred in the panel, with no leading padding cell (the
+/// panel is 30 wide, so its inner 28 cells leave five before the 17-cell
+/// label and six after it).
+#[test]
+fn table_of_contents_label_is_centred_in_the_outline_panel() {
+    let vault_dir = TempDir::new("ui-outline-centre");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-outline-centre.md", "# Top\n\nbody\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let label = "TABLE OF CONTENTS";
+    let label_width = UnicodeWidthStr::width(label) as u16;
+    let inner_width = area.width - 2;
+    let left = (inner_width - label_width) / 2;
+    let x = area.x + 1 + left;
+    // The header block: a blank row under the border, then the label.
+    let y = area.y + 2;
+    let drawn: String = (x..x + label_width)
+        .map(|x| buffer[(x, y)].symbol())
+        .collect();
+    assert_eq!(drawn, label, "the whole label sits at the centre");
+    assert_eq!(
+        buffer[(area.x + 1, y)].symbol(),
+        " ",
+        "no leading padding cell: {left} blank cells before the label"
+    );
+    let right = inner_width - left - label_width;
+    assert!(
+        right == left || right == left + 1,
+        "the label leaves the same margin on both sides ({left} left, {right} right)"
+    );
+}
+
+/// The tree and tag views carry the vault's name in the same header block
+/// the outline uses: centred over the same rule, with the border title
+/// still naming the mode.
+#[test]
+fn tree_and_tag_headers_name_the_vault_over_the_same_rule() {
+    let root = TempDir::new("ui-vault-header");
+    let vault_path = root.path().join("myvault");
+    std::fs::create_dir_all(&vault_path).unwrap();
+    std::fs::write(
+        vault_path.join("alpha.md"),
+        "---\ntags: [mocktag]\n---\n# Alpha\n\nalpha\n",
+    )
+    .unwrap();
+    std::fs::write(
+        vault_path.join("beta.md"),
+        "---\ntags: [mocktag]\n---\n# Beta\n\nbeta\n",
+    )
+    .unwrap();
+    let vault_name = "myvault";
+    let file = ui_viewer("ui-vault-header.md", "x\n");
+    let index = Rc::new(RefCell::new(VaultIndex::build(&vault_path).unwrap()));
+    let mut app = App::new(sample_viewer(file.path()), Some(vault_path), Some(index)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+
+    for (mode, title) in [("tree", "vault"), ("tags", "tags")] {
+        if mode == "tags" {
+            app.handle_key(key(KeyCode::Char('t')));
+        }
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let area = app.layout.sidebar_area.expect("sidebar visible");
+        let row = |y: u16| -> String {
+            (area.x + 1..area.right() - 1)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect()
+        };
+        assert!(
+            row(area.y).contains(title),
+            "the border title still names the mode in {mode}: {:?}",
+            row(area.y)
+        );
+        let label_width = UnicodeWidthStr::width(vault_name) as u16;
+        let inner_width = area.width - 2;
+        let x = area.x + 1 + (inner_width - label_width) / 2;
+        // The header block: a blank row under the border, then the label.
+        let y = area.y + 2;
+        let drawn: String = (x..x + label_width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect();
+        assert_eq!(
+            drawn, vault_name,
+            "the vault's name is centred in the {mode} header"
+        );
+        assert!(
+            row(area.y + 3).starts_with("──"),
+            "the same rule underlines it in {mode}: {:?}",
+            row(area.y + 3)
+        );
+        assert_eq!(
+            buffer[(area.right() - 1, area.y + 3)].symbol(),
+            "┤",
+            "the rule tees into the border in {mode}"
+        );
+        // The rows start below the header: the first tree/tag row is drawn
+        // on the first body row.
+        assert!(
+            !row(area.y + 1 + LIST_HEADER_ROWS).trim().is_empty(),
+            "the {mode} list starts below the header"
+        );
+    }
+}
+
 #[test]
 fn outline_empty_state_when_the_note_has_no_headings() {
     let vault_dir = TempDir::new("ui-outline-empty");
@@ -1625,6 +1741,28 @@ fn outline_status_bar_shows_the_selected_heading() {
     assert!(
         !status_row(&screen).contains("ui-outline-status.md"),
         "the note name is replaced by the heading"
+    );
+}
+
+#[test]
+fn outline_status_label_follows_a_note_scroll() {
+    let vault_dir = TempDir::new("ui-outline-scroll-status");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    let file = ui_viewer("ui-outline-scroll-status.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::PageDown));
+    assert!(app.viewer.scroll > 0, "precondition: the note scrolled");
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.focus, Focus::Sidebar);
+    let screen = render(&mut app);
+    let expected = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false)
+        .expect("the note has headings");
+    assert!(
+        status_row(&screen).contains(&format!("heading {expected}")),
+        "the sidebar label follows the reading position: {}",
+        status_row(&screen)
     );
 }
 
@@ -1666,7 +1804,7 @@ fn outline_scrollbar_only_when_the_headings_overflow() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let bar_x = sidebar_width(100) - 2;
-    let list_top = 1 + OUTLINE_HEADER_ROWS;
+    let list_top = 1 + LIST_HEADER_ROWS;
     assert!(
         column_has_bar(buffer, bar_x, list_top..22),
         "outline bar drawn below the TOC header"
@@ -1704,7 +1842,7 @@ fn selected_bar_stops_before_the_scrollbar_column() {
     let buffer = terminal.backend().buffer();
     // 40 headings overflow, so the scrollbar owns the last inner column.
     let bar_x = sidebar_width(100) - 2;
-    let first = 1 + OUTLINE_HEADER_ROWS;
+    let first = 1 + LIST_HEADER_ROWS;
     assert_eq!(
         buffer[(bar_x - 1, first)].bg,
         Color::Rgb(5, 5, 5),
@@ -1758,7 +1896,7 @@ fn outline_over_a_base_table_shows_no_headings() {
 }
 
 #[test]
-fn outline_active_heading_is_marked_in_the_accent_without_moving_the_selection() {
+fn outline_scroll_takes_the_selection_and_the_active_heading_keeps_its_mark() {
     let vault_dir = TempDir::new("ui-outline-active");
     std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
     // One heading every two rendered lines, so the note's scroll and the
@@ -1778,41 +1916,55 @@ fn outline_active_heading_is_marked_in_the_accent_without_moving_the_selection()
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let area = app.layout.sidebar_area.expect("sidebar visible");
-    let list_top = area.y + 1 + OUTLINE_HEADER_ROWS;
+    let list_top = area.y + 1 + LIST_HEADER_ROWS;
     assert_eq!(
         app.outline.active, expected,
         "the heading at or above the top of the viewport is the active one"
     );
     assert_eq!(
-        app.outline.selected, 0,
-        "a note scroll never moves the reader's selection"
+        app.outline.selected, expected,
+        "the note's scroll took the bar to the heading being read"
     );
     assert!(
         (app.outline.scroll..app.outline.scroll + app.outline.viewport).contains(&expected),
         "the panel scrolled the active heading into view"
     );
-    let y = list_top + (expected - app.outline.scroll) as u16;
-    // The title starts past the row's `NN ` index.
     let title_x = area.x + 1 + outline_index_width() as u16;
+    let active_y = list_top + (expected - app.outline.scroll) as u16;
     assert!(
-        row_symbols(buffer, y).contains(&format!("heading {expected}")),
+        row_symbols(buffer, active_y).contains(&format!("heading {expected}")),
         "the active heading is drawn in the panel: {:?}",
-        row_symbols(buffer, y)
+        row_symbols(buffer, active_y)
+    );
+    // The bar marks it (inverse video), and the reader's cursor stays off
+    // the next scroll: moving it shows the active heading's own accent mark.
+    assert_eq!(
+        buffer[(title_x, active_y)].bg,
+        app.theme_ui.selection_bg,
+        "the bar marks the heading being read"
+    );
+
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('k')));
+    let moved = app.outline.selected;
+    assert_ne!(moved, expected, "precondition: the reader moved the cursor");
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let active_y = list_top + (expected - app.outline.scroll) as u16;
+    assert_eq!(
+        app.outline.active, expected,
+        "the reader's cursor move does not change the active heading"
     );
     assert_eq!(
-        buffer[(title_x, y)].fg,
+        buffer[(title_x, active_y)].fg,
         app.theme_ui.sidebar_border_focused,
-        "the active heading's title takes the accent"
+        "with the cursor elsewhere the active heading keeps the accent"
     );
     assert!(
-        buffer[(title_x, y)].modifier.contains(Modifier::BOLD),
+        buffer[(title_x, active_y)]
+            .modifier
+            .contains(Modifier::BOLD),
         "the active heading is bold"
-    );
-    // The heading above it is not active: the mark is not just "any row".
-    assert_ne!(
-        buffer[(title_x, list_top)].fg,
-        app.theme_ui.sidebar_border_focused,
-        "an inactive heading is not in the accent"
     );
 }
 
@@ -1834,7 +1986,7 @@ fn outline_follows_the_note_to_its_end_and_scrolls_the_active_heading_into_view(
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let area = app.layout.sidebar_area.expect("sidebar visible");
-    let list_top = area.y + 1 + OUTLINE_HEADER_ROWS;
+    let list_top = area.y + 1 + LIST_HEADER_ROWS;
     let len = app.viewer.toc.len();
     assert_eq!(
         app.outline.active,
@@ -1842,8 +1994,9 @@ fn outline_follows_the_note_to_its_end_and_scrolls_the_active_heading_into_view(
         "at the note's end the last heading is active"
     );
     assert_eq!(
-        app.outline.selected, 0,
-        "the reader's selection stays at the top"
+        app.outline.selected,
+        len - 1,
+        "and the scroll took the bar with it"
     );
     assert!(
         app.outline.scroll > 0,
@@ -1860,12 +2013,11 @@ fn outline_follows_the_note_to_its_end_and_scrolls_the_active_heading_into_view(
         "the last heading is on the panel: {:?}",
         row_symbols(buffer, y)
     );
-    // The title starts past the row's `NN ` index.
     let title_x = area.x + 1 + outline_index_width() as u16;
     assert_eq!(
-        buffer[(title_x, y)].fg,
-        app.theme_ui.sidebar_border_focused,
-        "and it is marked active"
+        buffer[(title_x, y)].bg,
+        app.theme_ui.selection_bg,
+        "and the bar marks it"
     );
 }
 
@@ -1898,12 +2050,17 @@ fn outline_jump_pins_the_heading_until_the_reader_scrolls_the_note() {
             .contains(&app.outline.active),
         "the pinned heading is inside the panel's window"
     );
-    let y = area.y + 1 + OUTLINE_HEADER_ROWS + (app.outline.active - app.outline.scroll) as u16;
+    let y = area.y + 1 + LIST_HEADER_ROWS + (app.outline.active - app.outline.scroll) as u16;
     let buffer = terminal.backend().buffer();
     assert_eq!(
         app.outline.active,
         len - 1,
         "the jumped-to heading is pinned as active"
+    );
+    assert_eq!(
+        app.outline.selected,
+        len - 1,
+        "the jump pins it as the selection too"
     );
     assert!(
         row_symbols(buffer, y).contains(&format!("heading {}", len - 1)),
@@ -1912,19 +2069,18 @@ fn outline_jump_pins_the_heading_until_the_reader_scrolls_the_note() {
     );
 
     // The reader's own scroll releases the pin: the active heading follows
-    // the note again, and the selection still never moves.
+    // the note again, and the selection goes with the scroll.
     app.handle_key(key(KeyCode::Char('k')));
     terminal.draw(|f| draw(f, &mut app)).unwrap();
-    let computed = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false);
+    let computed = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false)
+        .expect("the note has headings");
     assert_eq!(
-        app.outline.active,
-        computed.unwrap(),
+        app.outline.active, computed,
         "the scroll took the active heading back"
     );
     assert_eq!(
-        app.outline.selected,
-        len - 1,
-        "releasing the pin does not move the selection"
+        app.outline.selected, computed,
+        "and the selection went with the scroll"
     );
 }
 
@@ -3302,21 +3458,23 @@ fn sidebar_selection_keeps_selection_bg_over_sidebar_bg() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
-    // Inner row 2 = `alpha.md` (selected): selection_bg wins on top of
-    // the sidebar_bg base, and the text is inverted to the panel colour.
+    // Inner row 2 = `alpha.md` (selected), below the header block:
+    // selection_bg wins on top of the sidebar_bg base, and the text is
+    // inverted to the panel colour.
+    let selected_y = 1 + LIST_HEADER_ROWS + 1;
     assert_eq!(
-        buffer[(2, 2)].bg,
+        buffer[(2, selected_y)].bg,
         Color::Rgb(5, 5, 5),
         "selected row keeps selection_bg"
     );
     assert_eq!(
-        buffer[(2, 2)].fg,
+        buffer[(2, selected_y)].fg,
         Color::Rgb(7, 7, 7),
         "selected row text is the panel background"
     );
     // The bar reaches the panel's inner right edge (x = 28: border at 29).
     assert_eq!(
-        buffer[(28, 2)].bg,
+        buffer[(28, selected_y)].bg,
         Color::Rgb(5, 5, 5),
         "selected bar reaches the inner right edge"
     );
@@ -3992,21 +4150,26 @@ fn sidebar_scrollbar_present_only_when_rows_overflow() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let sidebar_w = sidebar_width(100);
-    // Border at column sidebar_w-1; the bar is the last inner column.
+    // Border at column sidebar_w-1; the bar is the last inner column and
+    // its track starts below the header block.
     let bar_x = sidebar_w - 2;
-    assert!(column_has_bar(buffer, bar_x, 1..22), "sidebar bar drawn");
+    let list_top = 1 + LIST_HEADER_ROWS;
+    assert!(
+        column_has_bar(buffer, bar_x, list_top..22),
+        "sidebar bar drawn"
+    );
     // The border glyph is the same `│` the track draws; only the thumb's
     // `█` distinguishes the border from the bar.
     assert!(
-        scrollbar_thumb_rows(buffer, sidebar_w - 1, 1..22).is_empty(),
+        scrollbar_thumb_rows(buffer, sidebar_w - 1, list_top..22).is_empty(),
         "the border column holds no thumb"
     );
     assert!(
-        !scrollbar_thumb_rows(buffer, bar_x, 1..22).is_empty(),
+        !scrollbar_thumb_rows(buffer, bar_x, list_top..22).is_empty(),
         "the bar column holds the thumb"
     );
     // Names never run under the bar.
-    for y in 1..22 {
+    for y in list_top..22 {
         let sym = buffer[(bar_x, y)].symbol();
         assert!(!sym.chars().any(|c| c.is_ascii_alphanumeric()), "{sym:?}");
     }
@@ -4045,9 +4208,10 @@ fn sidebar_scrollbar_thumb_ends_track_the_scroll_position() {
 
     let bar_x = sidebar_width(100) - 2;
     let sidebar_area = app.layout.sidebar_area.expect("sidebar visible");
-    let inner = sidebar_area.y + 1..sidebar_area.bottom() - 1;
+    let list_top = sidebar_area.y + 1 + LIST_HEADER_ROWS;
+    let inner = list_top..sidebar_area.bottom() - 1;
     let rows_total = app.sidebar.as_ref().expect("sidebar").row_count();
-    let inner_height = sidebar_area.height.saturating_sub(2) as usize;
+    let inner_height = inner.len();
 
     let buffer = terminal.backend().buffer();
     let track = scrollbar_track_rows(buffer, bar_x, inner.clone());
@@ -4100,20 +4264,24 @@ fn tag_list_scrollbar_only_when_rows_overflow() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let bar_x = sidebar_width(100) - 2;
-    assert!(column_has_bar(buffer, bar_x, 1..22), "tag list bar drawn");
+    let list_top = 1 + LIST_HEADER_ROWS;
+    assert!(
+        column_has_bar(buffer, bar_x, list_top..22),
+        "tag list bar drawn"
+    );
     // The border glyph is the same `│` the track draws; only the thumb's
     // `█` distinguishes the border from the bar.
     assert!(
-        scrollbar_thumb_rows(buffer, sidebar_width(100) - 1, 1..22).is_empty(),
+        scrollbar_thumb_rows(buffer, sidebar_width(100) - 1, list_top..22).is_empty(),
         "the border column holds no thumb"
     );
     assert!(
-        !scrollbar_thumb_rows(buffer, bar_x, 1..22).is_empty(),
+        !scrollbar_thumb_rows(buffer, bar_x, list_top..22).is_empty(),
         "the bar column holds the thumb"
     );
     // A vanished border leaves no thumb either, so it needs its own check.
     assert!(
-        border_drawn(buffer, sidebar_width(100) - 1, 1..22),
+        border_drawn(buffer, sidebar_width(100) - 1, list_top..22),
         "the border is drawn"
     );
 }
@@ -4190,8 +4358,13 @@ fn sidebar_tree_bar_press_positions_the_selection() {
         .expect("an overflowing tree draws its bar");
     assert_eq!(
         bar,
-        Rect::new(sidebar_width(100) - 2, area.y + 1, 1, area.height - 2),
-        "the bar is the panel's last inner column"
+        Rect::new(
+            sidebar_width(100) - 2,
+            area.y + 1 + LIST_HEADER_ROWS,
+            1,
+            area.height - 2 - LIST_HEADER_ROWS
+        ),
+        "the bar is the panel's last inner column, below the header"
     );
     let rows: Vec<std::path::PathBuf> = app
         .sidebar
@@ -4561,7 +4734,7 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let area = app.layout.sidebar_area.expect("sidebar visible");
     let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
-    let inner_height = area.height as usize - 2;
+    let inner_height = area.height as usize - 2 - LIST_HEADER_ROWS as usize;
     app.handle_press(bar.x, bar.bottom() - 1);
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -4598,7 +4771,7 @@ fn bar_press_at_the_last_row_ends_every_list_window_at_its_end() {
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let area = app.layout.sidebar_area.expect("sidebar visible");
     let bar = app.layout.sidebar_scrollbar_area.expect("bar drawn");
-    let inner_height = area.height as usize - 2;
+    let inner_height = area.height as usize - 2 - LIST_HEADER_ROWS as usize;
     app.handle_press(bar.x, bar.bottom() - 1);
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -5084,7 +5257,7 @@ fn sidebar_click_on_fitting_list_has_no_bar_and_maps_by_row() {
         "no bar on a fitting list"
     );
     let target = app.sidebar.as_ref().unwrap().rows()[1].node.path.clone();
-    app.handle_click(bar_col, area.y + 2);
+    app.handle_click(bar_col, area.y + 1 + LIST_HEADER_ROWS + 1);
     assert_eq!(
         app.sidebar.as_ref().unwrap().selected.as_deref(),
         Some(target.as_path()),
@@ -5104,20 +5277,22 @@ fn sidebar_click_on_visible_row_maps_with_bar_present() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let area = app.layout.sidebar_area.expect("sidebar visible");
-    // Row 0 of the list (`n00.md`) is at screen row area.y + 1; the bar
-    // narrowing must not move it: the list mapping is row-only.
+    // Row 0 of the list (`n00.md`) is at the first body row, below the
+    // header; the bar narrowing must not move it: the list mapping is
+    // row-only.
     let (target, second) = {
         let rows = app.sidebar.as_ref().unwrap().rows();
         (rows[0].node.path.clone(), rows[1].node.path.clone())
     };
-    app.handle_click(2, area.y + 1);
+    let first = area.y + 1 + LIST_HEADER_ROWS;
+    app.handle_click(2, first);
     assert_eq!(
         app.sidebar.as_ref().unwrap().selected.as_deref(),
         Some(target.as_path()),
         "click on the first visible row selects that row"
     );
     // The second visible row is the next one, still row-accurate.
-    app.handle_click(2, area.y + 2);
+    app.handle_click(2, first + 1);
     assert_eq!(
         app.sidebar.as_ref().unwrap().selected.as_deref(),
         Some(second.as_path()),

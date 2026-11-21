@@ -507,8 +507,13 @@ last shown.
   `TABLE OF CONTENTS` label sits at the top of the panel, above the
   headings, with a rule under it - the shape leaf gives the same panel.
   The label takes its rows from the list, and the headings scroll under
-  it. The panel's border title keeps naming the mode (` outline `), as
-  the tree's and the tags' do.
+  it. The label is **centred** in the panel. The panel's border title
+  keeps naming the mode (` outline `), as the tree's and the tags' do.
+- The tree and tag views carry the **vault's name** in the same header
+  block - the vault directory's name, centred, over the same rule - so
+  every mode says what it lists. The outline keeps its own
+  `TABLE OF CONTENTS` label, because it lists the open note's headings
+  and not the vault.
 - The outline **follows the note**: the heading the reader is looking at
   is the **active** one, marked in the accent colour and in bold, and
   the panel scrolls it into view as the note scrolls. The active
@@ -518,10 +523,15 @@ last shown.
   selected one - right after a jump pins it - the selection's bar is the
   mark: the reader chose that row, and the bar says so.
 - The active heading and the panel's **selection** are different things.
-  The selection is the cursor the reader moves (`j`/`k`, a click), the
-  thing `Enter` jumps to, and it is never moved by a scroll. Jumping to
-  a heading **pins** it as the active one until the reader scrolls the
-  note themselves; then the outline follows the scroll again.
+  The selection is the cursor the reader moves (`j`/`k`, a click) and
+  the thing `Enter` jumps to; the active heading is the one the note's
+  scroll moves. A note scroll **takes the selection with it** - the
+  selection becomes the active heading - so the bar marks the heading
+  the reader is looking at. The reader's own cursor stays where they
+  put it until the next scroll. Jumping to a heading **pins** it, as
+  the active one and as the selection, until the reader scrolls the note
+  themselves; then the outline follows the scroll again and the
+  selection goes with it.
 - The headings are **numbered**, the way leaf numbers them: the
   top-level headings (the shallowest level in the note, the ones that
   are flush left) carry a two-digit index - `01`, `02` - counted in

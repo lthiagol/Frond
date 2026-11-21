@@ -326,19 +326,21 @@ impl Sidebar {
     }
 
     /// Maps an absolute terminal row (0-based) to a row index in `rows()`
-    /// for this sidebar rendered in `area`, accounting for the top border
-    /// row and the scroll offset. `None` when the click is on a border row
-    /// or below the last visible row.
+    /// for this sidebar rendered in `area` (the panel's list body, below
+    /// the header block), accounting for the top border row and the scroll
+    /// offset. `None` when the click is on a border row or below the last
+    /// visible row.
     pub fn row_index_at_screen_row(&self, area: Rect, screen_row: u16) -> Option<usize> {
         list_row_at(screen_row, area, self.scroll, self.row_count())
     }
 }
 
-/// Screen-row → list-row mapping shared by the sidebar tree and the tag
-/// list (both render as a bordered list scrolled by `scroll`).
+/// Screen-row → list-row mapping shared by the three sidebar modes' list
+/// bodies (bordered lists scrolled by `scroll`).
 ///
 /// The inner list starts one row below `area.y` (top border) and spans
-/// `area.height - 2` rows; the first visible row is `scroll`. Returns the
+/// `area.height - 2` rows; the first visible row is `scroll`. `area` is the
+/// list body the header block leaves (see `ui::list_body_area`). Returns the
 /// index into the full row list, or `None` for border rows, rows past the
 /// widget, and rows past the last row of a short list.
 pub fn list_row_at(screen_row: u16, area: Rect, scroll: usize, rows_len: usize) -> Option<usize> {
