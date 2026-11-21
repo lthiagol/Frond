@@ -45,6 +45,13 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 51 - the last two carried lows: the pin field's comment now
+    *points* at `pinned_row`, which owns the drop rule, instead of
+    restating half of it - a paraphrase is a second home for a rule and
+    second homes drift, a pointer cannot; and the jump-after-a-wheel path
+    is pinned through a real draw (the test moved to the ui suite and
+    draws the frame, as the app does, and asserts the jumped-to heading is
+    drawn in the window). Two reviewers, 0 blocking, 2 low (carried).
   - The 0.6.6 cut: `Cargo.toml` and `Cargo.lock` bumped 0.6.5 -> 0.6.6,
     and the changelog released as `## [0.6.6] - 2026-11-21` with a fresh
     empty `## [Unreleased]` above it. **No tag**: the human's decision -
@@ -388,6 +395,14 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 51's review (two lows, carried, both one-liners): the pin
+      field's comment still names one release trigger ("a note scroll
+      releases it") where `note_scrolled`'s doc lists three - a scroll, a
+      search jump, a link's heading - so make that half a pure pointer
+      too, like the drop half; and the drawn-output assertion reads the
+      whole terminal row, so the note pane's own copy of the heading could
+      satisfy it - bound the read to the panel's columns, the way the
+      neighbouring wheel test does.
   - From unit 50's review (two lows, carried): the keybindings table's wheel
       row said "or a popup", but the help and disambiguation popups gate
       the wheel to nothing - the orchestrator's own line, and the rewrite

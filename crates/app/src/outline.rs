@@ -95,14 +95,10 @@ pub struct Outline {
     pub scroll: usize,
     /// Heading a jump pinned as active, until the reader scrolls the note.
     /// The pin is the heading's title plus its occurrence among the rows
-    /// carrying that title, and every watch-triggered reparse rebuilds
-    /// those rows: the mark names the row at that occurrence, where a row
-    /// index would move with an insert above. An edit that adds or
-    /// removes a heading carrying the title can therefore move the mark
-    /// to a different heading of that title — no textual key can tell
-    /// same-titled headings apart after a reparse. The pin is dropped
-    /// when no row carries the title any more; the reader's next note
-    /// scroll releases it.
+    /// carrying that title, so a reparse can name a different same-titled
+    /// heading — no textual key can tell those apart. The rule that keeps
+    /// or drops the pin lives in [`Self::pinned_row`]; a note scroll
+    /// releases it ([`Self::note_scrolled`]).
     pin: Option<(String, usize)>,
     /// Who positions the window. The note's scroll hands it to
     /// [`WindowOwner::Note`], the reader's own cursor moves, a click and the

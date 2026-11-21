@@ -1975,6 +1975,52 @@ fn outline_wheel_scrolls_the_view_and_a_note_scroll_releases_it() {
     );
 }
 
+/// A jump still shows its heading after the wheel: `Enter` on a row the
+/// wheel scrolled out of view scrolls the note there and the panel's window
+/// back to it. The drawer owns the follow, so the test draws the frame
+/// instead of invoking it by hand.
+#[test]
+fn enter_after_a_wheeled_outline_brings_the_jump_back_into_view() {
+    let vault_dir = TempDir::new("ui-outline-wheel-jump");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    let file = ui_viewer("ui-outline-wheel-jump.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h')));
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let list_top = area.y + 1 + LIST_HEADER_ROWS;
+
+    app.handle_wheel_at(5, list_top + 1, true);
+    app.handle_wheel_at(5, list_top + 1, true);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(app.outline.selected, 0);
+    assert!(
+        app.outline.scroll > app.outline.selected,
+        "precondition: the selected row is out of view"
+    );
+
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.focus, Focus::Content, "Enter hands over the note");
+    assert_eq!(app.viewer.scroll, app.viewer.toc[0].line as u32);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(app.outline.active, 0, "the jumped-to heading is active");
+    assert_eq!(
+        app.outline.scroll, 0,
+        "and the drawer's window followed it, not the wheel"
+    );
+    let y = list_top + (app.outline.active - app.outline.scroll) as u16;
+    assert!(
+        row_symbols(buffer, y).contains("heading 0"),
+        "the jumped-to heading is drawn in the window: {:?}",
+        row_symbols(buffer, y)
+    );
+}
+
 #[test]
 fn outline_scrollbar_only_when_the_headings_overflow() {
     let vault_dir = TempDir::new("ui-outline-bar");

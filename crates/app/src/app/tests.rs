@@ -1997,38 +1997,6 @@ fn wheel_over_the_outline_scrolls_the_view_and_keeps_the_selection() {
     assert_eq!(app.outline.selected, selected);
 }
 
-/// A jump still shows its heading: `Enter` after a wheel scrolls the real
-/// note and the panel's window back to the row the cursor names.
-#[test]
-fn enter_after_a_wheeled_outline_brings_the_jump_back_into_view() {
-    let vault_dir = outline_vault();
-    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
-    std::fs::write(vault_dir.path().join("many.md"), &headings).unwrap();
-    let (_f, mut app) = app(&vault_dir);
-    app.open_note(&vault_dir.path().join("many.md")).unwrap();
-    app.handle_key(key(KeyCode::Char('o')));
-    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
-    app.handle_wheel_at(5, 5, true);
-    app.handle_wheel_at(5, 5, true);
-    assert_eq!(app.outline.selected, 0);
-    assert_eq!(
-        app.outline.scroll, 6,
-        "precondition: the row is out of view"
-    );
-
-    app.handle_key(key(KeyCode::Char('h')));
-    app.handle_key(key(KeyCode::Enter));
-    assert_eq!(app.focus, Focus::Content, "Enter hands over the note");
-    assert_eq!(app.viewer.scroll, app.viewer.toc[0].line as u32);
-    app.outline
-        .follow_note(crate::app::outline_rows(&app.base, &app.viewer), 0, false);
-    assert_eq!(app.outline.active, 0, "the jumped-to heading is active");
-    assert_eq!(
-        app.outline.scroll, 0,
-        "and the window followed it, not the wheel"
-    );
-}
-
 #[test]
 fn session_saved_in_the_outline_restores_the_view_behind_it() {
     let vault_dir = outline_vault();
