@@ -97,8 +97,8 @@ pub struct Outline {
     /// The pin is the heading's title plus its occurrence among the rows
     /// carrying that title, so a reparse can name a different same-titled
     /// heading — no textual key can tell those apart. The rule that keeps
-    /// or drops the pin lives in [`Self::pinned_row`]; a note scroll
-    /// releases it ([`Self::note_scrolled`]).
+    /// or drops the pin lives in [`Self::pinned_row`], and the release
+    /// belongs to [`Self::note_scrolled`].
     pin: Option<(String, usize)>,
     /// Who positions the window. The note's scroll hands it to
     /// [`WindowOwner::Note`], the reader's own cursor moves, a click and the

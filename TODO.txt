@@ -45,6 +45,11 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 52 - the last two one-liners: the pin field's comment names no
+    trigger of its own (both halves point at the functions that own the
+    rules), and the drawn-output assertion reads only the outline panel's
+    columns, so the note pane's copy of the heading can no longer satisfy
+    it. Two reviewers, 0 blocking, 2 low (carried).
   - The open list is **pruned**: it had grown to six entries while five of
     them were already closed (units 17 and 19 closed the pin's comment and
     the too-wide-label path, unit 19 closed the hand-simulated drawer test,
@@ -404,6 +409,19 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 52's review (two lows, carried, both the same class one
+      layer over): three more outline assertions in `ui/tests.rs` read the
+      whole terminal row, where the note pane beside the panel can render
+      the same heading text - the latent vacuity unit 20 closed for the
+      jump test, in the other three; and
+      `jump_to_outline_heading`'s doc in `app.rs` still paraphrases the
+      release with a single trigger, the drift risk the field comment just
+      shed. Both were outside unit 20's boundary, so the builder was right
+      to leave them. **This class is better swept than picked**: every
+      comment that names a trigger or a rule is a copy of it, and the
+      review will keep finding the next copy. Grep for the paraphrases
+      (the triggers, the rules) and point them all at their owners in one
+      unit, rather than one comment per round.
   - From unit 51's review (two lows, carried, both one-liners): the pin
       field's comment still names one release trigger ("a note scroll
       releases it") where `note_scrolled`'s doc lists three - a scroll, a

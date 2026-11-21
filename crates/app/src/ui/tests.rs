@@ -2014,10 +2014,13 @@ fn enter_after_a_wheeled_outline_brings_the_jump_back_into_view() {
         "and the drawer's window followed it, not the wheel"
     );
     let y = list_top + (app.outline.active - app.outline.scroll) as u16;
+    // The panel's own columns: the note beside it also draws `heading 0`.
+    let drawn: String = (0..sidebar_width(100))
+        .map(|x| buffer[(x, y)].symbol().to_string())
+        .collect();
     assert!(
-        row_symbols(buffer, y).contains("heading 0"),
-        "the jumped-to heading is drawn in the window: {:?}",
-        row_symbols(buffer, y)
+        drawn.contains("heading 0"),
+        "the jumped-to heading is drawn in the window: {drawn:?}"
     );
 }
 
