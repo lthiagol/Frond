@@ -45,6 +45,16 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 45 - the outline follows the note: the heading the reader is
+    looking at is the active one, marked in the accent colour and in bold,
+    and the panel scrolls it into view as the note scrolls. The two cursors
+    are separate on purpose - the selection is what `Enter` jumps to and a
+    scroll never moves it; the active heading follows the note. A jump pins
+    the heading (one near the note's end cannot scroll to the top), and the
+    pin is released when the reader scrolls the note themselves. The review
+    caught the missing changelog line - the unit's user-visible change had
+    no release note - and the orchestrator wrote it before the commit; five
+    lows (three carried into unit 46).
   - Unit 44 - the outline panel says what it is: a bold `TABLE OF CONTENTS`
     label at the top of the panel, over a rule that tees into the border
     with leaf's corner - the shape leaf gives the same panel. The label
