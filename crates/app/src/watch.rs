@@ -65,10 +65,7 @@ impl VaultWatcher {
             warnings: report
                 .warnings
                 .into_iter()
-                .map(|w| IndexWarning {
-                    path: w.path,
-                    message: w.message,
-                })
+                .map(IndexWarning::from)
                 .collect(),
         }
     }

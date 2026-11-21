@@ -53,9 +53,9 @@ pub struct WalkWarning {
 }
 
 /// Message prefix shared by every warning about a path that could not be
-/// read at all (the walk's directories, the index's files). One home for
-/// the spelling: callers that need to tell an unreadable path apart from a
-/// frontmatter diagnostic match on it.
+/// read at all (the walk's directories, the index's files). It is the
+/// spelling the user reads, not a classification: an index warning's kind
+/// says what the warning is about.
 pub(crate) const UNREADABLE_PREFIX: &str = "unreadable: ";
 
 /// Walks `root` depth-first collecting `.md` and `.base` files, folders
