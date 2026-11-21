@@ -1910,6 +1910,71 @@ fn outline_follows_the_open_note() {
     assert!(screen.contains("Other"), "the new note's heading is listed");
 }
 
+/// The wheel over the outline scrolls what the panel shows, not what it
+/// marks: the drawn window moves, the selection and the status label stay,
+/// and the reader's next note scroll makes the panel follow again.
+#[test]
+fn outline_wheel_scrolls_the_view_and_a_note_scroll_releases_it() {
+    let vault_dir = TempDir::new("ui-outline-wheel");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    let file = ui_viewer("ui-outline-wheel.md", &headings);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h'))); // the status bar labels the sidebar
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let list_top = area.y + 1 + LIST_HEADER_ROWS;
+    assert_eq!(
+        app.outline.scroll, 0,
+        "precondition: the note put it at the top"
+    );
+
+    app.handle_wheel_at(5, list_top + 1, true);
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    assert_eq!(app.outline.scroll, 3, "the wheel moved the window");
+    assert_eq!(app.outline.selected, 0, "the reading position stayed");
+    // The panel's own columns: the note beside it starts with `heading 0`.
+    let first_row: String = (0..sidebar_width(100))
+        .map(|x| buffer[(x, list_top)].symbol().to_string())
+        .collect();
+    assert!(
+        first_row.contains("heading 3"),
+        "the window starts three headings down: {first_row:?}"
+    );
+    assert!(
+        !first_row.contains("heading 0"),
+        "the heading the note put at the top scrolled out of the window"
+    );
+    assert!(
+        status_row(&terminal.backend().to_string()).contains("heading 0"),
+        "the status bar still names the reading position: {}",
+        status_row(&terminal.backend().to_string())
+    );
+
+    // The reader's own scroll of the note: the panel follows again, takes
+    // the selection with it, and scrolls the active heading into view.
+    app.handle_key(key(KeyCode::Char('l'))); // back to the note pane
+    app.handle_key(key(KeyCode::PageDown));
+    assert!(app.viewer.scroll > 0, "precondition: the note scrolled");
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let expected = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false)
+        .expect("the note has headings");
+    assert!(expected > 0, "precondition: past the first heading");
+    assert_eq!(app.outline.active, expected);
+    assert_eq!(
+        app.outline.selected, expected,
+        "the scroll took the selection back"
+    );
+    assert!(
+        (app.outline.scroll..app.outline.scroll + app.outline.viewport).contains(&expected),
+        "and the window follows the note's heading again"
+    );
+}
+
 #[test]
 fn outline_scrollbar_only_when_the_headings_overflow() {
     let vault_dir = TempDir::new("ui-outline-bar");

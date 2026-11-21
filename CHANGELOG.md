@@ -44,6 +44,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   inside the unreadable directory were missing with no word about it.
 
 ### Changed
+- The wheel over the outline scrolls the panel's view instead of moving its
+  cursor, the way leaf's table of contents does: the reading position
+  stays where the note put it, and the panel stops following the note
+  until the reader scrolls the note themselves. The tree, the tag view and
+  the backlinks panel are unchanged - their wheel still moves their
+  selection, as their scrollbars do.
 
 ## [0.6.5] — 2026-11-20
 

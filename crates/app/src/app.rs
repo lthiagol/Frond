@@ -29,6 +29,19 @@ use crate::watch::VaultWatcher;
 pub const SIDEBAR_MIN_WIDTH: u16 = 24;
 pub const SIDEBAR_MAX_WIDTH: u16 = 120;
 
+/// The wheel's step, in rows: one notch scrolls the pane under the cursor
+/// by this much, or moves a list panel's selection by it.
+const WHEEL_ROWS: isize = 3;
+
+/// The wheel's step for a notch in the given direction.
+fn wheel_delta(down: bool) -> isize {
+    if down {
+        WHEEL_ROWS
+    } else {
+        -WHEEL_ROWS
+    }
+}
+
 pub use crate::baseview::BaseState;
 
 /// Interval between vault-wide watch scans. The current file is polled
@@ -2178,10 +2191,10 @@ impl App {
             return;
         }
         match self.focus {
-            Focus::Sidebar => self.sidebar_move(if down { 3 } else { -3 }),
-            Focus::Backlinks => self.backlink_move(if down { 3 } else { -3 }),
-            Focus::Content if down => self.scroll_content_down(3),
-            Focus::Content => self.scroll_content_up(3),
+            Focus::Sidebar => self.sidebar_wheel(down),
+            Focus::Backlinks => self.backlink_move(wheel_delta(down)),
+            Focus::Content if down => self.scroll_content_down(WHEEL_ROWS as u32),
+            Focus::Content => self.scroll_content_up(WHEEL_ROWS as u32),
         }
     }
 
@@ -2267,8 +2280,8 @@ impl App {
     }
 
     /// Mouse wheel with the cursor position: a wheel over the visible
-    /// sidebar scrolls the sidebar list regardless of where the keyboard
-    /// focus sits; a wheel over the open search popup scrolls the result
+    /// sidebar wheels the sidebar regardless of where the keyboard focus
+    /// sits; a wheel over the open search popup scrolls the result
     /// selection; anywhere else the focused pane scrolls (the M2
     /// behavior, kept via [`Self::handle_wheel`]). Help/disambiguation
     /// popups gate the wheel like clicks.
@@ -2276,7 +2289,7 @@ impl App {
         if self.quick.open {
             if let Some(popup) = self.layout.quick_area {
                 if point_in_rect(col, row, popup) {
-                    self.quick.move_selection(if down { 3 } else { -3 });
+                    self.quick.move_selection(wheel_delta(down));
                 }
             }
             return;
@@ -2284,7 +2297,7 @@ impl App {
         if self.search.open {
             if let Some(popup) = self.layout.search_area {
                 if point_in_rect(col, row, popup) {
-                    self.search.move_selection(if down { 3 } else { -3 });
+                    self.search.move_selection(wheel_delta(down));
                 }
             }
             return;
@@ -2295,12 +2308,25 @@ impl App {
         if self.sidebar_visible {
             if let Some(area) = self.layout.sidebar_area {
                 if point_in_rect(col, row, area) {
-                    self.sidebar_move(if down { 3 } else { -3 });
+                    self.sidebar_wheel(down);
                     return;
                 }
             }
         }
         self.handle_wheel(down);
+    }
+
+    /// The wheel over the sidebar: the outline scrolls its own view —
+    /// leaf's table of contents leaves the reading position where the note
+    /// put it, and stops following the note until the reader scrolls it —
+    /// while the tree and tag views move their selection, which their
+    /// window follows.
+    fn sidebar_wheel(&mut self, down: bool) {
+        if self.sidebar_mode == SidebarMode::Outline {
+            self.outline.wheel(wheel_delta(down), self.outline_len());
+        } else {
+            self.sidebar_move(wheel_delta(down));
+        }
     }
 
     /// `Ctrl+P`: opens the quick note switcher over the vault index. The

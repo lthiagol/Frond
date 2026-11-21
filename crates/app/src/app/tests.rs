@@ -1564,6 +1564,70 @@ fn wheel_is_gated_by_the_search_popup() {
     assert_eq!(app.viewer.path, file.path());
 }
 
+/// The wheel's other rule did not leak into the tag view: its wheel still
+/// moves the selection, which the window follows.
+#[test]
+fn wheel_over_the_tag_view_moves_its_selection() {
+    let vault_dir = vault();
+    std::fs::write(
+        vault_dir.path().join("a.md"),
+        "---\ntags: [mocktag, othertag]\n---\nA\n",
+    )
+    .unwrap();
+    let (_f, mut app) = app(&vault_dir);
+    app.handle_key(key(KeyCode::Char('t')));
+    assert_eq!(app.sidebar_mode, SidebarMode::Tags);
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    assert_eq!(
+        app.tags.selected,
+        Some(crate::tags::Selection::Tag("mocktag".to_string())),
+        "precondition: the busiest-first list starts on the first tag"
+    );
+
+    app.handle_wheel_at(5, 10, true);
+    assert_eq!(
+        app.tags.selected,
+        Some(crate::tags::Selection::Tag("othertag".to_string())),
+        "wheel down moved the tag selection"
+    );
+    app.handle_wheel_at(5, 10, false);
+    assert_eq!(
+        app.tags.selected,
+        Some(crate::tags::Selection::Tag("mocktag".to_string())),
+        "wheel up moved it back"
+    );
+}
+
+/// The backlinks panel keeps its rule too: its wheel moves its selection.
+#[test]
+fn wheel_over_the_backlinks_panel_moves_its_selection() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("a.md")).unwrap();
+    for name in ["b", "c"] {
+        std::fs::write(
+            vault_dir.path().join("sub").join(format!("{name}.md")),
+            "[[a]]\n\n",
+        )
+        .unwrap();
+    }
+    app.poll();
+    app.handle_key(key(KeyCode::Char('b')));
+    assert_eq!(app.focus, Focus::Backlinks);
+    assert_eq!(app.backlinks.len(), 2, "precondition: two backlinks");
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+
+    // The pointer is in the content column, where the backlinks panel is;
+    // the panel's wheel keeps the focus routing it had (M2).
+    app.handle_wheel_at(50, 20, true);
+    assert_eq!(
+        app.backlink_sel, 1,
+        "wheel down moved the backlink selection"
+    );
+    app.handle_wheel_at(50, 20, false);
+    assert_eq!(app.backlink_sel, 0, "wheel up moved it back");
+}
+
 // --- M3: backlinks panel -----------------------------------------
 
 #[test]
@@ -1897,6 +1961,72 @@ fn outline_has_no_rows_while_a_base_table_is_open() {
     // Back to a note: its rows return.
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
     assert_eq!(app.outline_len(), 2);
+}
+
+/// The wheel over the outline scrolls the panel's view (leaf's table of
+/// contents), not its cursor: the reading position stays where the note put
+/// it, and the note does not scroll.
+#[test]
+fn wheel_over_the_outline_scrolls_the_view_and_keeps_the_selection() {
+    let vault_dir = outline_vault();
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    std::fs::write(vault_dir.path().join("many.md"), &headings).unwrap();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("many.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('o')));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+
+    let selected = app.outline.selected;
+    let content_scroll = app.viewer.scroll;
+    app.handle_wheel_at(5, 5, true);
+    assert_eq!(app.outline.scroll, 3, "the outline's window scrolled");
+    assert_eq!(app.outline.selected, selected, "the cursor did not move");
+    assert_eq!(app.viewer.scroll, content_scroll, "the note did not scroll");
+
+    app.handle_wheel_at(5, 5, false);
+    assert_eq!(app.outline.scroll, 0, "wheel up scrolls the window back");
+
+    // Scrolling the cursor out of view leaves it selected: it is what
+    // Enter jumps to, and the view is not a cursor.
+    app.handle_wheel_at(5, 5, true);
+    app.handle_wheel_at(5, 5, true);
+    assert!(
+        app.outline.scroll > app.outline.selected,
+        "precondition: the cursor is above the window"
+    );
+    assert_eq!(app.outline.selected, selected);
+}
+
+/// A jump still shows its heading: `Enter` after a wheel scrolls the real
+/// note and the panel's window back to the row the cursor names.
+#[test]
+fn enter_after_a_wheeled_outline_brings_the_jump_back_into_view() {
+    let vault_dir = outline_vault();
+    let headings: String = (0..30).map(|i| format!("# heading {i}\n\n")).collect();
+    std::fs::write(vault_dir.path().join("many.md"), &headings).unwrap();
+    let (_f, mut app) = app(&vault_dir);
+    app.open_note(&vault_dir.path().join("many.md")).unwrap();
+    app.handle_key(key(KeyCode::Char('o')));
+    app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 20));
+    app.handle_wheel_at(5, 5, true);
+    app.handle_wheel_at(5, 5, true);
+    assert_eq!(app.outline.selected, 0);
+    assert_eq!(
+        app.outline.scroll, 6,
+        "precondition: the row is out of view"
+    );
+
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Enter));
+    assert_eq!(app.focus, Focus::Content, "Enter hands over the note");
+    assert_eq!(app.viewer.scroll, app.viewer.toc[0].line as u32);
+    app.outline
+        .follow_note(crate::app::outline_rows(&app.base, &app.viewer), 0, false);
+    assert_eq!(app.outline.active, 0, "the jumped-to heading is active");
+    assert_eq!(
+        app.outline.scroll, 0,
+        "and the window followed it, not the wheel"
+    );
 }
 
 #[test]

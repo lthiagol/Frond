@@ -45,6 +45,14 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 50 - the wheel over the outline scrolls the panel's **view**, the
+    way leaf's table of contents does: the reading position stays where the
+    note put it, and the panel stops following the note until the reader
+    scrolls the note themselves. The outline's window gained a third owner
+    - the note's scroll, the reader's cursor, or the reader's wheel - and
+    the tree, the tag view and the backlinks panel keep moving their
+    selection, as their scrollbars do. Two reviewers, 0 blocking, 2 low
+    (both carried).
   - Unit 49 - the carried lows are closed: the pin's doc comment now states
     what the pin *is* (a title plus its occurrence among the rows carrying
     that title) and what it guarantees, instead of enumerating which case
@@ -373,6 +381,15 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 50's review (two lows, carried): the keybindings table's wheel
+      row said "or a popup", but the help and disambiguation popups gate
+      the wheel to nothing - the orchestrator's own line, and the rewrite
+      that tightened the sentence around the one phrase that was already
+      loose (now closed: it names the search popup and the quick switcher,
+      the two that move their selection); and the test that pins "Enter
+      after a wheeled outline" hand-simulates the drawer's frame instead of
+      drawing, so that path is pinned through the real drawer nowhere - the
+      ui suite draws the wheel and draws a jump, but never the two combined.
   - From unit 49's delta review (one low, carried): the pin field's comment
       states the drop condition in its title half only - the pin also drops
       when the title survives but the stored occurrence no longer exists

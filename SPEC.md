@@ -224,7 +224,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `j` / `k`, arrows | Scroll (content); move selection (sidebar, backlinks) |
 | PgUp / PgDn | Half page (content pane) |
 | `g` / `G`, Home / End | Top / bottom (content pane) |
-| Mouse wheel | Scroll the content pane; over the sidebar, the backlinks panel or a popup it moves that pane's selection instead |
+| Mouse wheel | Scroll the content pane; over the tree, the tag view, the backlinks panel, the search popup or the quick switcher it moves that pane's selection instead; over the outline it scrolls the panel's view |
 | Press / drag on the note pane's scrollbar | Jump the note to that position; a drag follows the pointer until the button is released |
 | Press / drag on a list panel's scrollbar | Move that panel's selection to that position; a drag follows the pointer until the button is released |
 | Press / drag on the `.base` table's scrollbar | Jump the table to that row of its content; a drag follows the pointer until the button is released |
@@ -533,6 +533,13 @@ last shown.
   the active one and as the selection, until the reader scrolls the note
   themselves; then the outline follows the scroll again and the
   selection goes with it.
+- The wheel over the outline scrolls the panel's **view**, not its
+  cursor: the reading position stays where the note put it, and the
+  panel stops following the note until the reader scrolls the note
+  themselves - leaf's rule. The keys and a click still move the
+  cursor. The tree, the tag view and the backlinks panel keep the
+  other rule: their wheel moves their selection, as their scrollbars
+  do.
 - The headings are **numbered**, the way leaf numbers them: the
   top-level headings (the shallowest level in the note, the ones that
   are flush left) carry a two-digit index - `01`, `02` - counted in

@@ -4,9 +4,10 @@
 //! order; the indentation is relative to the shallowest heading level in
 //! that note. This module owns the two cursors — the reader's selection and
 //! the active heading the note's scroll moves — and the one scroll window
-//! they share (the selection's shape is `tags::TagList`'s); the rows
-//! themselves stay in the viewer so the outline always follows the note on
-//! screen. Rendering lives in `ui.rs`.
+//! they share, which has three owners: the note's scroll, the reader's
+//! cursor, and the reader's wheel (the selection's shape is
+//! `tags::TagList`'s). The rows themselves stay in the viewer so the
+//! outline always follows the note on screen. Rendering lives in `ui.rs`.
 
 use engine::TocEntry;
 
@@ -68,6 +69,17 @@ pub fn active_row(entries: &[TocEntry], scroll: u32, at_end: bool) -> Option<usi
         .rposition(|entry| entry.line as u32 <= scroll)
 }
 
+/// Who positions the outline's window: the note's scroll (the panel follows
+/// the active heading), the reader's cursor (`j`/`k`, a click, the panel's
+/// bar), or the reader's wheel (the view stays where they put it, leaf's
+/// `TocScrollMode::Manual`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WindowOwner {
+    Note,
+    Cursor,
+    Wheel,
+}
+
 /// The outline's two cursors over the open note's heading rows.
 pub struct Outline {
     /// Index of the selected row: the reader's cursor (`j`/`k`, a click,
@@ -92,10 +104,11 @@ pub struct Outline {
     /// when no row carries the title any more; the reader's next note
     /// scroll releases it.
     pin: Option<(String, usize)>,
-    /// Whether the window follows the active row (the note's scroll) or the
-    /// selection. The reader's own cursor moves, a click and the panel's bar
-    /// hand it to the selection; a note scroll hands it back.
-    follow: bool,
+    /// Who positions the window. The note's scroll hands it to
+    /// [`WindowOwner::Note`], the reader's own cursor moves, a click and the
+    /// panel's bar to [`WindowOwner::Cursor`], and the wheel to
+    /// [`WindowOwner::Wheel`]; a note scroll hands it back to the note.
+    owner: WindowOwner,
     /// A note scroll has happened and the selection must take the active
     /// row on the next [`Self::follow_note`]: the bar marks the heading the
     /// reader is looking at. A reader move or a note change cancels it, so a
@@ -117,7 +130,7 @@ impl Outline {
             viewport: 20,
             scroll: 0,
             pin: None,
-            follow: true,
+            owner: WindowOwner::Note,
             take_selection: false,
         }
     }
@@ -126,8 +139,8 @@ impl Outline {
     /// headings changed, so both indices must stay valid. The selection is
     /// clamped to the last row. A pinned heading is resolved by title and
     /// occurrence on the next [`Self::follow_note`]. The window is
-    /// positioned by that call (from the drawer) or by the selection's own
-    /// moves.
+    /// positioned by that call (from the drawer), by the selection's own
+    /// moves, or by the wheel.
     pub fn sync(&mut self, len: usize) {
         if len == 0 {
             self.selected = 0;
@@ -148,7 +161,7 @@ impl Outline {
     /// the note again.
     pub fn on_note_change(&mut self, len: usize) {
         self.pin = None;
-        self.follow = true;
+        self.owner = WindowOwner::Note;
         self.take_selection = false;
         self.selected = 0;
         self.active = 0;
@@ -159,22 +172,39 @@ impl Outline {
     /// The reader moved the note themselves (a scroll, a search jump, a
     /// link's heading): the outline follows the note again, a jump's pin is
     /// released, and the selection goes with the scroll — the bar marks the
-    /// heading being read from the next frame on.
+    /// heading being read from the next frame on. This also takes the
+    /// window back from the wheel, so the panel follows the note again.
     pub fn note_scrolled(&mut self) {
         self.pin = None;
-        self.follow = true;
+        self.owner = WindowOwner::Note;
         self.take_selection = true;
+    }
+
+    /// The reader's wheel: scrolls the window itself by `delta` rows and
+    /// hands it to [`WindowOwner::Wheel`]. The selection does not move —
+    /// leaf's table of contents leaves it where it was, even when the view
+    /// scrolls it out of sight — and the panel stops following the note
+    /// until the reader scrolls the note themselves
+    /// ([`Self::note_scrolled`]).
+    pub fn wheel(&mut self, delta: isize, len: usize) {
+        self.owner = WindowOwner::Wheel;
+        self.take_selection = false;
+        self.scroll = (self.scroll as isize + delta).max(0) as usize;
+        self.clamp_scroll(len);
     }
 
     /// A jump to row `index` of `entries` pinned it as the active row: the
     /// computed row is overridden until the reader scrolls the note
     /// ([`Self::note_scrolled`]). The pin holds the heading's title and
     /// which occurrence of that title it is, so a reparse resolves the same
-    /// heading rather than the first row carrying the title.
+    /// heading rather than the first row carrying the title. A jump is a
+    /// request to see the heading, so the window follows the pinned mark —
+    /// including after the wheel has scrolled it out of sight.
     pub fn pin_active(&mut self, entries: &[TocEntry], index: usize) {
         let Some(entry) = entries.get(index) else {
             return;
         };
+        self.owner = WindowOwner::Note;
         let occurrence = entries[..index]
             .iter()
             .filter(|other| other.title == entry.title)
@@ -184,8 +214,8 @@ impl Outline {
     }
 
     /// Recomputes the active row from the note's scroll position (a pin
-    /// wins), takes the selection with a pending note scroll, and, while
-    /// the window follows the note, scrolls it into view. Called from the
+    /// wins), takes the selection with a pending note scroll, and, when
+    /// the note owns the window, scrolls it into view. Called from the
     /// drawer on every frame: the note's scroll and the viewport are known
     /// there, and the frame is what the reader sees.
     pub fn follow_note(&mut self, entries: &[TocEntry], scroll: u32, at_end: bool) {
@@ -202,7 +232,7 @@ impl Outline {
             self.selected = self.active;
             self.take_selection = false;
         }
-        if self.follow {
+        if self.owner == WindowOwner::Note {
             self.scroll_row_into_view(self.active, entries.len());
         }
     }
@@ -232,7 +262,7 @@ impl Outline {
             return;
         }
         self.selected = index;
-        self.follow = false;
+        self.owner = WindowOwner::Cursor;
         self.take_selection = false;
         self.scroll_selection_into_view(len);
     }
@@ -250,21 +280,21 @@ impl Outline {
             return;
         }
         self.selected = (self.selected as isize + delta).clamp(0, len as isize - 1) as usize;
-        self.follow = false;
+        self.owner = WindowOwner::Cursor;
         self.take_selection = false;
         self.scroll_selection_into_view(len);
     }
 
     /// Called from `ui::draw` with the sidebar's inner height: the new
-    /// viewport may move the window, which follows whichever cursor owns it.
+    /// viewport may move the window, which follows whichever cursor owns
+    /// it. A window the wheel owns stays where it is, clamped to the list.
     pub fn on_viewport_height(&mut self, height: usize, len: usize) {
         self.viewport = height.max(1);
-        let row = if self.follow {
-            self.active
-        } else {
-            self.selected
-        };
-        self.scroll_row_into_view(row, len);
+        match self.owner {
+            WindowOwner::Note => self.scroll_row_into_view(self.active, len),
+            WindowOwner::Cursor => self.scroll_row_into_view(self.selected, len),
+            WindowOwner::Wheel => self.clamp_scroll(len),
+        }
     }
 
     fn scroll_selection_into_view(&mut self, len: usize) {
@@ -492,6 +522,128 @@ mod tests {
             outline.selected, 9,
             "and the selection went with the scroll"
         );
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_window_and_leaves_the_selection() {
+        let mut outline = Outline::new();
+        outline.viewport = 3;
+        let lines: Vec<usize> = (0..12).map(|i| i * 10).collect();
+        let entries = spaced(&lines);
+        outline.note_scrolled();
+        outline.follow_note(&entries, 90, false);
+        assert_eq!(outline.selected, 9, "precondition: the note put it there");
+        assert_eq!(outline.scroll, 7);
+
+        outline.wheel(3, entries.len());
+        outline.follow_note(&entries, 90, false);
+        assert_eq!(
+            outline.scroll, 9,
+            "the wheel moved the window, redraw and all"
+        );
+        assert_eq!(
+            outline.selected, 9,
+            "the reading position stays where the note put it"
+        );
+        assert_eq!(outline.active, 9, "and the active heading does not move");
+
+        outline.wheel(3, entries.len());
+        assert_eq!(outline.scroll, 9, "clamped at the last window");
+        outline.wheel(-4, entries.len());
+        assert_eq!(outline.scroll, 5);
+        assert_eq!(
+            outline.selected, 9,
+            "a selection the view scrolled away stays selected"
+        );
+    }
+
+    #[test]
+    fn a_note_scroll_releases_the_wheel_window() {
+        let mut outline = Outline::new();
+        outline.viewport = 3;
+        let lines: Vec<usize> = (0..12).map(|i| i * 10).collect();
+        let entries = spaced(&lines);
+        outline.note_scrolled();
+        outline.follow_note(&entries, 90, false);
+        outline.wheel(-5, entries.len());
+        assert_eq!(outline.scroll, 2);
+        outline.follow_note(&entries, 90, false);
+        assert_eq!(outline.scroll, 2, "the panel stopped following the note");
+        assert_eq!(outline.selected, 9);
+
+        outline.note_scrolled();
+        outline.follow_note(&entries, 20, false);
+        assert_eq!(outline.active, 2);
+        assert_eq!(outline.selected, 2, "the scroll took the selection back");
+        assert_eq!(outline.scroll, 2, "and the window follows the note again");
+
+        outline.note_scrolled();
+        outline.follow_note(&entries, 90, false);
+        assert_eq!(outline.scroll, 7, "a later scroll follows as before");
+    }
+
+    #[test]
+    fn keys_and_a_click_take_the_window_back_from_the_wheel() {
+        let mut outline = Outline::new();
+        outline.viewport = 3;
+        let lines: Vec<usize> = (0..12).map(|i| i * 10).collect();
+        let entries = spaced(&lines);
+        outline.wheel(5, entries.len());
+        assert_eq!(outline.scroll, 5);
+
+        outline.move_down(1, entries.len());
+        assert_eq!(outline.selected, 1);
+        assert_eq!(
+            outline.scroll, 1,
+            "a key's move brings the cursor into view"
+        );
+        outline.follow_note(&entries, 90, false);
+        assert_eq!(
+            outline.scroll, 1,
+            "a redraw does not hand the window back to the note"
+        );
+        assert_eq!(outline.selected, 1, "the reader's cursor stays put");
+
+        outline.select(10, entries.len());
+        assert_eq!(outline.scroll, 8, "a click scrolls the window to the row");
+        outline.follow_note(&entries, 0, false);
+        assert_eq!(outline.scroll, 8, "and a redraw keeps it there");
+        assert_eq!(outline.selected, 10);
+    }
+
+    #[test]
+    fn a_wheel_window_survives_a_viewport_change_clamped_to_the_list() {
+        let mut outline = Outline::new();
+        outline.viewport = 3;
+        let entries = spaced(&(0..12).map(|i| i * 10).collect::<Vec<_>>());
+        outline.wheel(5, entries.len());
+        assert_eq!(outline.scroll, 5);
+
+        outline.on_viewport_height(4, entries.len());
+        assert_eq!(outline.scroll, 5, "the drawer does not snap it to a cursor");
+
+        // A shorter list clamps a stale wheel window to its end.
+        outline.on_viewport_height(4, 6);
+        assert_eq!(outline.scroll, 2);
+        outline.wheel(1, 6);
+        assert_eq!(outline.scroll, 2, "and the wheel stays clamped there");
+    }
+
+    #[test]
+    fn a_jump_after_a_wheel_brings_the_heading_back_into_view() {
+        let mut outline = Outline::new();
+        outline.viewport = 3;
+        let entries = spaced(&(0..12).map(|i| i * 10).collect::<Vec<_>>());
+        outline.wheel(9, entries.len());
+        outline.follow_note(&entries, 10, false);
+        assert_eq!(outline.scroll, 9, "precondition: the wheel window stays");
+
+        // The reader jumps to a heading above the wheeled window: the
+        // window follows the pinned mark, not the scroll the wheel left.
+        outline.pin_active(&entries, 1);
+        outline.follow_note(&entries, 10, false);
+        assert_eq!(outline.active, 1);
+        assert_eq!(outline.scroll, 1, "the jumped-to heading is in view");
     }
 
     #[test]
