@@ -45,6 +45,15 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - The open list is **pruned**: it had grown to six entries while five of
+    them were already closed (units 17 and 19 closed the pin's comment and
+    the too-wide-label path, unit 19 closed the hand-simulated drawer test,
+    and the orchestrator closed the keybindings row's popup wording). One
+    entry is genuinely open. The list grew the way the header's height
+    grew: the closures went into the units' own entries and the old lines
+    stayed. **Check the list against the tree before planning a cycle** -
+    a carried low that has been closed is work nobody needs to do, and one
+    that has not been re-checked is a guess.
   - Unit 51 - the last two carried lows: the pin field's comment now
     *points* at `pinned_row`, which owns the drop rule, instead of
     restating half of it - a paraphrase is a second home for a rule and
@@ -403,52 +412,6 @@ OPEN
       whole terminal row, so the note pane's own copy of the heading could
       satisfy it - bound the read to the panel's columns, the way the
       neighbouring wheel test does.
-  - From unit 50's review (two lows, carried): the keybindings table's wheel
-      row said "or a popup", but the help and disambiguation popups gate
-      the wheel to nothing - the orchestrator's own line, and the rewrite
-      that tightened the sentence around the one phrase that was already
-      loose (now closed: it names the search popup and the quick switcher,
-      the two that move their selection); and the test that pins "Enter
-      after a wheeled outline" hand-simulates the drawer's frame instead of
-      drawing, so that path is pinned through the real drawer nowhere - the
-      ui suite draws the wheel and draws a jump, but never the two combined.
-  - From unit 49's delta review (one low, carried): the pin field's comment
-      states the drop condition in its title half only - the pin also drops
-      when the title survives but the stored occurrence no longer exists
-      (deleting the last occurrence of a title drops the pin rather than
-      sliding it onto an earlier duplicate). The exact rule is already
-      stated in `pinned_row`'s own doc, one function away. **The fix is to
-      point at that function rather than restate the rule here**: a
-      paraphrase is a second home that drifts, a pointer cannot. Three
-      rounds on this one comment taught that - each rewrite was
-      true-but-partial.
-  - From unit 47's review (one low, carried): the too-wide-label path is
-      reachable but unpinned - a vault directory whose name is longer than
-      the panel's inner width truncates, and no test exercises it. The
-      corner to pin is a long vault name in a narrow sidebar; the TOC
-      label itself is 17 cells in a panel of at least 22 and can never be
-      too narrow, which is where the brief's fallback was aimed by
-      mistake.
-  - From unit 46's delta review (one low, carried): the pin's doc comment
-      states an absolute guarantee - an edit above the pinned heading must
-      not move the mark - with one exception it does not name: an edit that
-      inserts an *identically titled* heading above the pinned occurrence
-      shifts every later duplicate's occurrence number, so the mark lands
-      on the inserted heading. No textual key can tell two same-titled
-      headings apart after a reparse, and the behaviour is strictly
-      better than the title-only pin it replaced (which mis-marked with no
-      external edit at all); the reader's next note scroll releases it.
-      The comment overclaims - soften it. The overclaim came from the
-      orchestrator's brief, which stated the property too absolutely.
-  - From unit 42's review (two lows, carried): the drag-side comment says
-      "defensive" only by delegation ("see `handle_press`") where the brief
-      asked each guard to say why - a note, not a gap; and the
-      colliding-prefix comment enumerates two of the six frontmatter
-      diagnostics' opening phrases, so a reader re-verifying the invariant
-      by grepping those two finds four of six - the invariant holds, the
-      list is loose. An enumeration in a comment rots: state the invariant
-      and how to check it instead.
-
 NEXT
   1. The header's symmetry, the human's own change: the label is centred,
      but the block leaves a blank line above it and none below, so it does
