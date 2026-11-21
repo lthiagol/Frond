@@ -121,7 +121,6 @@ impl TagList {
         rows
     }
 
-    /// Does this row carry the selection?
     /// Does this row carry the selection? (The renderer's highlight test.)
     pub fn row_matches(row: &TagRow<'_>, selected: &Option<Selection>) -> bool {
         match (selected, row.note) {
