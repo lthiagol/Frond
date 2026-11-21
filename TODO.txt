@@ -35,6 +35,13 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 39 - the `.base` table's scrollbar is a position control: it was
+    display only, so a press on it did nothing. It works like the note
+    pane's now - a press jumps the table to the row the bar names, a drag
+    follows the pointer, the release that ends the drag opens nothing,
+    the focus does not move, and mouse capture off disables it. The
+    mapping is the note pane's own helper, so there is no second copy to
+    drift. Two reviewers, 0 blocking, 1 low (carried).
   - Unit 38 - a file that turns unreadable is surfaced: the reindex that
     failed to read it recorded the problem, but nothing surfaced the
     record, so the note was missing with no word about it. The app now
