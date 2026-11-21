@@ -320,7 +320,6 @@ pub fn snippet_line(
 mod tests {
     use super::*;
     use ratatui::style::Style;
-    use unicode_width::UnicodeWidthStr;
 
     /// The themed match highlight used across these tests (ui.rs passes
     /// the theme's `popup_match_fg`/`popup_match_bg`).
@@ -330,14 +329,6 @@ mod tests {
 
     fn spans_text(line: &ratatui::text::Line<'_>) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
-    }
-
-    /// The display width of a rendered line, the way the popup lays it out.
-    fn rendered_width(line: &ratatui::text::Line<'_>) -> usize {
-        line.spans
-            .iter()
-            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
-            .sum()
     }
 
     fn highlighted_text(line: &ratatui::text::Line<'_>) -> String {
@@ -530,7 +521,7 @@ mod tests {
             for width in 1..=60 {
                 let line = snippet_line(&text, start, end, width, MATCH);
                 assert!(
-                    rendered_width(&line) <= width,
+                    line.width() <= width,
                     "width {width} overshot with {text:?}: {:?}",
                     spans_text(&line)
                 );
@@ -544,19 +535,24 @@ mod tests {
     fn snippet_cuts_a_match_wider_than_the_window() {
         let text = "漢".repeat(30);
         let line = snippet_line(&text, 0, text.len(), 10, MATCH);
-        assert_eq!(rendered_width(&line), 9, "8 cells of match plus the marker");
+        assert_eq!(line.width(), 9, "8 cells of match plus the marker");
         assert_eq!(highlighted_text(&line), "漢漢漢漢");
         assert!(spans_text(&line).ends_with('…'));
     }
 
-    /// The regression's shape at the popup's real snippet width: a wide
-    /// character at the budget's edge, with both sides cut.
+    /// A wide character at the budget's edge, with both sides cut: the
+    /// window stops on the budget instead of overshooting it. This fixture
+    /// also fits under the old loop (it landed exactly on the budget), so
+    /// it is not the regression's shape at the popup's real snippet width;
+    /// that geometry is pinned by
+    /// `search_selected_bar_reaches_the_edge_with_wide_snippet_chars` in
+    /// `ui::tests`, where the `s` after "needle" flips the parity.
     #[test]
     fn snippet_fits_the_budget_with_a_wide_character_at_its_edge() {
         let text = format!("{}needle{}", "漢".repeat(50), "漢".repeat(50));
         let start = "漢".repeat(50).len();
         let line = snippet_line(&text, start, start + 6, 58, MATCH);
-        assert!(rendered_width(&line) <= 58);
+        assert!(line.width() <= 58);
         assert_eq!(highlighted_text(&line), "needle");
         let rendered = spans_text(&line);
         assert!(rendered.starts_with('…'), "{rendered}");

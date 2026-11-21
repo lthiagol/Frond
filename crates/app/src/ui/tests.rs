@@ -1644,7 +1644,8 @@ fn disambiguation_popup_renders_candidates() {
 
 /// The selected candidate's row is one bar reaching the popup's inner right
 /// edge, like every other list panel's (the disambiguation popup was the one
-/// without a test pinning its end position).
+/// without a test pinning its end position), with its text in the popup's
+/// own background colour (the bar's inverse-video half).
 #[test]
 fn disambiguation_selected_row_is_a_full_width_bar() {
     let vault_dir = TempDir::new("ui-disamb-band");
@@ -1669,17 +1670,18 @@ fn disambiguation_selected_row_is_a_full_width_bar() {
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
-    let popup = centered(
-        Rect::new(0, 0, 100, 24),
-        60,
-        DISAMBIGUATION_CHROME.height(2),
-    );
+    let popup = disambiguation_popup_geometry(Rect::new(0, 0, 100, 24), 2);
     // No chrome above the list: the second candidate is the second inner row.
     let y = popup.y + 2;
     assert_eq!(
         buffer[(popup.x + 1, y)].bg,
         Color::Rgb(5, 5, 5),
         "the selected candidate carries the bar"
+    );
+    assert_eq!(
+        buffer[(popup.x + 1, y)].fg,
+        Color::Rgb(9, 9, 9),
+        "selected candidate text is the popup background"
     );
     assert_eq!(
         buffer[(popup.right() - 2, y)].bg,
@@ -2748,10 +2750,16 @@ fn base_scrollbar_thumb_ends_track_the_scroll_position() {
     );
 }
 
-/// A click on the bar column maps to a cell that no region covers (no-op);
-/// a click on a link cell still opens the note.
+/// A bare release (no preceding press) on the bar column opens nothing and
+/// keeps the table: `handle_click`'s bar-rect guard intercepts it before any
+/// region mapping, so the bar is not a row target even though the table's
+/// viewport includes that column. A release on a link cell still opens the
+/// note. (A press on the bar is a position control, and the release that
+/// ends its drag is consumed before `handle_click`;
+/// `base_scrollbar_drag_follows_the_pointer_and_its_release_is_not_a_click`
+/// pins that path.)
 #[test]
-fn base_click_on_the_scrollbar_column_is_a_no_op() {
+fn base_bare_release_on_the_scrollbar_column_opens_nothing() {
     let dir = scrolling_base_vault("ui-base-bar-click");
     let file = ui_viewer("ui-base-bar-click.md", "x\n");
     let mut app = app_with_index(&file, &dir);
@@ -3182,6 +3190,42 @@ fn help_bar_press_and_drag_position_the_body() {
     app.viewer.help_scroll = 0;
     app.handle_press(bar.x, bar.bottom() - 1);
     assert_eq!(app.viewer.help_scroll, 0, "capture off leaves the body put");
+}
+
+/// A press on the help popup's chrome — its title, its footer — must do
+/// nothing: the popup's bar is the one pointer target it owns, and the
+/// point-in-rect guard keeps every other row inert. The body is parked
+/// mid-scroll so a stray mapping to either end would show.
+#[test]
+fn help_press_on_the_popup_chrome_does_nothing() {
+    let file = ui_viewer("ui-bar-help-chrome.md", "x\n");
+    let mut app = app_for(&file, None);
+    app.viewer.help_open = true;
+    let mut terminal = Terminal::new(TestBackend::new(100, 12)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let HelpPopup { rect: popup, .. } = help_popup(buffer.area);
+    let max = app.layout.help_scroll_max;
+    assert!(max > 2, "the fixture's body overflows");
+    let mid = max / 2;
+    app.viewer.help_scroll = mid;
+    let focus = app.focus;
+
+    // The title sits in the top border row; the footer is the last inner row.
+    let title_row = popup.y;
+    let footer_row = popup.y + popup.height - 2;
+    for (chrome, row) in [("title", title_row), ("footer", footer_row)] {
+        app.handle_press(popup.x + 1, row);
+        assert_eq!(
+            app.viewer.help_scroll, mid,
+            "a press on the {chrome} moved the body"
+        );
+        assert!(
+            app.viewer.help_open,
+            "a press on the {chrome} closed the popup"
+        );
+        assert_eq!(app.focus, focus, "a press on the {chrome} moved the focus");
+    }
 }
 
 // --- scrollbars (markdown viewer, sidebar tree, tag list) -------------

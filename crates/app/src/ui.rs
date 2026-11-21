@@ -1089,6 +1089,19 @@ impl PopupList {
 /// this one value.
 const DISAMBIGUATION_CHROME: PopupChrome = PopupChrome { above: 0, below: 2 };
 
+/// Geometry of the disambiguation popup within the terminal `area`: the
+/// popup rectangle (borders included), sized to the candidates and clamped
+/// to the terminal. Shared by the renderer and its tests, so the width
+/// constant has one home.
+fn disambiguation_popup_geometry(area: Rect, candidates: usize) -> Rect {
+    let width = 60.min(area.width.saturating_sub(2)).max(1);
+    let height = DISAMBIGUATION_CHROME
+        .height(candidates as u16)
+        .min(area.height.saturating_sub(2))
+        .max(1);
+    centered(area, width, height)
+}
+
 /// Disambiguation popup for a wikilink the folder hint could not narrow.
 /// When more candidates exist than fit the terminal, the list scrolls and
 /// the selection is kept visible.
@@ -1100,12 +1113,8 @@ fn draw_disambiguation(
     index: Option<&VaultIndex>,
 ) {
     let footer = "j/k select · Enter open · other key cancel";
-    let width = 60.min(area.width.saturating_sub(2)).max(1);
-    let height = DISAMBIGUATION_CHROME
-        .height(d.candidates.len() as u16)
-        .min(area.height.saturating_sub(2))
-        .max(1);
-    let popup = centered(area, width, height);
+    let popup = disambiguation_popup_geometry(area, d.candidates.len());
+    let inner_width = popup.width.saturating_sub(2) as usize;
     // Stateless scroll window over the candidates: no chrome above the
     // list, the footer (and its blank row) below it.
     let list = DISAMBIGUATION_CHROME.list(popup, d.selected, d.candidates.len());
@@ -1120,15 +1129,10 @@ fn draw_disambiguation(
             let selected = i == d.selected;
             let mut line = Line::from(Span::raw(truncate_ellipsis(
                 &rel_label(path, index),
-                width.saturating_sub(2) as usize,
+                inner_width,
             )));
             if selected {
-                highlight_selection(
-                    &mut line,
-                    width.saturating_sub(2) as usize,
-                    ui.content_bg,
-                    ui,
-                );
+                highlight_selection(&mut line, inner_width, ui.content_bg, ui);
             }
             line
         })

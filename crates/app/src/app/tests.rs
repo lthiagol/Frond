@@ -1979,6 +1979,44 @@ fn a_startup_unreadable_directory_is_shown_once_and_clears() {
     );
 }
 
+/// The startup snapshot's directory warning stands when the root fails
+/// before any walk succeeds: the failed walk reports `None` (not an empty
+/// list), so the early return protects the warning the snapshot put on the
+/// bar, not just one a later walk re-reported.
+#[test]
+fn a_startup_directory_warning_stands_when_the_root_fails_before_any_walk() {
+    let vault_dir = vault();
+    let sub = vault_dir.path().join("sub");
+    let chmod = |path: &std::path::Path, mode: u32| {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    chmod(&sub, 0o000);
+    let file = TempFile::new("app-startup-rootfail.md", "MAIN\n\n");
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let index = shared_index(&vault_dir); // built while `sub` is locked
+    let mut app = App::new(viewer, Some(vault_dir.path().to_path_buf()), Some(index)).unwrap();
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("a startup warning is silent"));
+    assert!(message.contains("sub: unreadable"), "{message:?}");
+
+    // The root cannot be read before any walk has run: the first walk fails
+    // outright and reports `None`. The snapshot's warning must stand.
+    chmod(vault_dir.path(), 0o000);
+    app.poll();
+    assert_eq!(
+        app.walk_warning.as_deref(),
+        Some(message.as_str()),
+        "a failed first walk cleared the startup snapshot's warning"
+    );
+
+    // Restore so the fixture's TempDir can clean up.
+    chmod(vault_dir.path(), 0o755);
+    chmod(&sub, 0o755);
+}
+
 /// A file the startup index could not read stays on the bar through the
 /// walks that do not report files, until the file reads again.
 #[test]
@@ -2050,6 +2088,82 @@ fn a_startup_unreadable_file_stays_until_it_reads_again() {
             .iter()
             .any(|warning| warning.path == locked && warning.is_unreadable()),
         "the index drops the file's unreadable warning too: {:?}",
+        index.warnings()
+    );
+}
+
+/// The heal waits for a walk that could look: a file that reads again while
+/// the root is locked is not reindexed by the failed walk, and its warning
+/// stands until a walk succeeds.
+#[test]
+fn a_file_that_reads_again_during_a_failed_walk_waits_for_a_successful_walk() {
+    let vault_dir = TempDir::new("app-heal-rootfail");
+    std::fs::write(vault_dir.path().join("ok.md"), "ok\n").unwrap();
+    let locked = vault_dir.path().join("locked.md");
+    std::fs::write(&locked, "secret\n").unwrap();
+    let chmod = |path: &std::path::Path, mode: u32| {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    chmod(&locked, 0o000);
+    let file = TempFile::new("app-heal-rootfail-main.md", "MAIN\n\n");
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let index = shared_index(&vault_dir); // built while `locked.md` is unreadable
+    let mut app = App::new(
+        viewer,
+        Some(vault_dir.path().to_path_buf()),
+        Some(index.clone()),
+    )
+    .unwrap();
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("the skipped file is silent"));
+
+    // The file reads again, but the root is locked: the walk cannot look, so
+    // it must not heal (that would act on a walk that failed).
+    chmod(&locked, 0o644);
+    chmod(vault_dir.path(), 0o000);
+    app.last_vault_scan = None;
+    app.poll();
+    assert_eq!(
+        app.walk_warning.as_deref(),
+        Some(message.as_str()),
+        "a failed walk cleared a warning whose condition no longer holds"
+    );
+    assert!(
+        !index.borrow().notes().any(|note| note.path == locked),
+        "the failed walk healed the file anyway"
+    );
+    assert!(
+        index
+            .borrow()
+            .warnings()
+            .iter()
+            .any(|warning| warning.path == locked && warning.is_unreadable()),
+        "the index's record stands until a walk can look"
+    );
+
+    // A walk that can look heals and reindexes the file with its warning.
+    chmod(vault_dir.path(), 0o755);
+    app.last_vault_scan = None;
+    app.poll();
+    assert!(
+        app.walk_warning.is_none(),
+        "a successful walk clears the warning: {:?}",
+        app.walk_warning
+    );
+    let index = index.borrow();
+    assert!(
+        index.notes().any(|note| note.path == locked),
+        "the healed file is back in the index"
+    );
+    assert!(
+        !index
+            .warnings()
+            .iter()
+            .any(|warning| warning.path == locked && warning.is_unreadable()),
+        "the index drops the file's unreadable warning: {:?}",
         index.warnings()
     );
 }
