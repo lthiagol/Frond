@@ -1628,7 +1628,13 @@ impl App {
             {
                 self.last_vault_scan = Some(now);
                 if let Some(watcher) = &mut self.watcher {
-                    walk_outcome = Some(watcher.poll(&mut index.borrow_mut()));
+                    // The watcher re-reads the open note even when its stamp
+                    // is unchanged: a permission-only break moves neither
+                    // mtime nor size, so this is the only tick that can
+                    // report it.
+                    let open_note = self.viewer.path.clone();
+                    walk_outcome =
+                        Some(watcher.poll(&mut index.borrow_mut(), Some(open_note.as_path())));
                 }
             }
         }

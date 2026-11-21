@@ -2269,6 +2269,99 @@ fn a_file_that_becomes_unreadable_mid_session_is_surfaced_and_heals() {
     );
 }
 
+/// A permission-only break moves neither the note's mtime nor its size, so
+/// the stamp comparison alone would never feed the open note to the index.
+/// The watch tick re-reads it: the failed read is recorded and reported in
+/// the same slot as every other unreadable path, vault-relative, and the
+/// first successful read ends the report. The reader keeps the last good
+/// render throughout.
+#[test]
+fn the_open_note_turning_unreadable_without_a_change_is_surfaced_and_heals() {
+    let vault_dir = vault();
+    let note = vault_dir.path().join("a.md");
+    let chmod = |mode: u32| {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&note, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let viewer = Viewer::open(&note, 80).unwrap();
+    let index = shared_index(&vault_dir);
+    let mut app = App::new(
+        viewer,
+        Some(vault_dir.path().to_path_buf()),
+        Some(index.clone()),
+    )
+    .unwrap();
+    assert!(app.walk_warning.is_none(), "{:?}", app.walk_warning);
+    let rendered = app.viewer.lines.len();
+    assert!(index.borrow().notes().any(|n| n.path == note));
+
+    // A readable open note is not a change: the tick's re-read is silent.
+    app.poll();
+    assert!(app.walk_warning.is_none(), "{:?}", app.walk_warning);
+
+    // Lock it without touching the content: the stamp is unchanged.
+    chmod(0o000);
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("the unreadable open note is silent"));
+    assert!(
+        message.contains("a.md: unreadable"),
+        "names the file, vault-relative: {message:?}"
+    );
+    assert!(
+        !message.contains(&vault_dir.path().display().to_string()),
+        "the vault root is not part of the message: {message:?}"
+    );
+    assert!(
+        app.viewer.last_error.is_none(),
+        "the report has its own slot, not the error one: {:?}",
+        app.viewer.last_error
+    );
+    assert_eq!(
+        app.viewer.lines.len(),
+        rendered,
+        "the reader keeps the last good render"
+    );
+    assert!(
+        !index.borrow().notes().any(|n| n.path == note),
+        "the unreadable note left the index, as a startup skip would"
+    );
+
+    // Still unreadable: the next tick keeps the same one message.
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert_eq!(app.walk_warning.as_deref(), Some(message.as_str()));
+    assert_eq!(
+        message.matches("unreadable").count(),
+        1,
+        "the same condition is one message, not two: {message:?}"
+    );
+
+    // Readable again with no stamp change: the report ends and the note
+    // comes back to the index.
+    chmod(0o644);
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert!(
+        app.walk_warning.is_none(),
+        "a readable file ends the report: {:?}",
+        app.walk_warning
+    );
+    assert!(
+        index.borrow().notes().any(|n| n.path == note),
+        "the healed note is back in the index"
+    );
+    assert_eq!(
+        app.viewer.lines.len(),
+        rendered,
+        "the render never went away"
+    );
+}
+
 /// A vault the walk skipped nothing in shows no warning. The fixture's plain
 /// notes carry a frontmatter diagnostic in the index; that is not a note the
 /// reader lost, so it does not reach the bar.
