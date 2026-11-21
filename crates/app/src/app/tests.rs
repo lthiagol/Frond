@@ -1521,7 +1521,7 @@ fn tag_view_without_vault_is_noop() {
 
 /// A vault whose `a.md` has two headings (`# One`, `## Two`) separated by
 /// enough body to make the second heading a real scroll target; `b.md` has
-/// one heading and `c.md` none.
+/// one heading, `c.md` none, and `d.md` five.
 fn outline_vault() -> TempDir {
     let dir = TempDir::new("app-outline");
     let mut a = String::from("# One\n\n");
@@ -1535,6 +1535,11 @@ fn outline_vault() -> TempDir {
     std::fs::write(dir.path().join("a.md"), a).unwrap();
     std::fs::write(dir.path().join("b.md"), "# Bee\n\nbody\n").unwrap();
     std::fs::write(dir.path().join("c.md"), "plain body, no headings\n").unwrap();
+    let mut d = String::new();
+    for i in 0..5 {
+        d.push_str(&format!("# Dee {i}\n\nbody\n\n"));
+    }
+    std::fs::write(dir.path().join("d.md"), d).unwrap();
     dir
 }
 
@@ -1630,19 +1635,41 @@ fn outline_l_moves_to_content_and_h_does_nothing() {
 }
 
 #[test]
-fn outline_follows_the_open_note_and_clamps_the_selection() {
+fn outline_follows_the_open_note_and_resets_both_cursors() {
     let vault_dir = outline_vault();
     let (_f, mut app) = app(&vault_dir);
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
     app.handle_key(key(KeyCode::Char('o')));
-    app.outline.select(1, app.viewer.toc.len());
-    assert_eq!(app.outline.selected, 1);
+    app.outline.select(1, app.outline_len());
+    let entries = crate::app::outline_rows(&app.base, &app.viewer);
+    app.outline.pin_active(entries, 1);
+    assert_eq!(
+        app.outline.active, 1,
+        "precondition: the second heading is active"
+    );
 
-    // b.md has one heading: the cursor must stay valid.
+    // `d.md` has five headings: the old selection index (1) is a valid row
+    // there too, so only a reset can put the cursor back at the top.
+    app.open_note(&vault_dir.path().join("d.md")).unwrap();
+    assert!(
+        app.outline_len() > 2,
+        "precondition: more headings than the old index"
+    );
+    assert_eq!(
+        app.outline.selected, 0,
+        "the new note starts at its first heading"
+    );
+    assert_eq!(
+        app.outline.active, 0,
+        "the old note's pin does not carry over"
+    );
+    assert_eq!(app.outline.scroll, 0);
+    assert_eq!(app.sidebar_mode, SidebarMode::Outline, "the view stays on");
+
+    // A note with fewer headings than the old index starts at the top too.
     app.open_note(&vault_dir.path().join("b.md")).unwrap();
     assert_eq!(app.viewer.toc.len(), 1);
-    assert_eq!(app.outline.selected, 0, "selection clamped to the new list");
-    assert_eq!(app.sidebar_mode, SidebarMode::Outline, "the view stays on");
+    assert_eq!(app.outline.selected, 0);
 }
 
 #[test]

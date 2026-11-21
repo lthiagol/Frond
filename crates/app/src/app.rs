@@ -707,14 +707,13 @@ impl App {
     /// an earlier heading there. The reader's next scroll of the note
     /// releases the pin ([`Outline::note_scrolled`]).
     fn jump_to_outline_heading(&mut self) {
-        let Some(line) = outline_rows(&self.base, &self.viewer)
-            .get(self.outline.selected)
-            .map(|entry| entry.line as u32)
-        else {
+        let entries = outline_rows(&self.base, &self.viewer);
+        let Some(entry) = entries.get(self.outline.selected) else {
             return;
         };
+        let line = entry.line as u32;
+        self.outline.pin_active(entries, self.outline.selected);
         self.viewer.set_scroll(line);
-        self.outline.pin_active(self.outline.selected);
         self.focus = Focus::Content;
     }
 
@@ -819,9 +818,10 @@ impl App {
             sidebar.reveal(path);
         }
         self.refresh_backlinks();
-        // The outline lists the note in the content pane: the new note
-        // starts at its top, so the outline's cursors do too (the next draw
-        // would sync them too, but a key can arrive before that).
+        // The outline lists the note in the content pane: a new note resets
+        // both of its cursors to the first heading and drops the old note's
+        // pin (the next draw would sync them too, but a key can arrive
+        // before that).
         self.outline.on_note_change(self.outline_len());
         // Debounce-gated ("rate-limited trivially"): skipped entirely when
         // the last spawn is recent — the status cannot have gone stale in

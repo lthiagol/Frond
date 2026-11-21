@@ -827,8 +827,9 @@ pub(crate) fn outline_list_area(area: Rect) -> Rect {
 }
 
 /// The outline panel (`o`): the open note's headings, indented relative to
-/// its shallowest heading level. The empty state covers both no note and a
-/// note without headings.
+/// its shallowest heading level, the depth-0 rows numbered and the deeper
+/// ones bulleted. The empty state covers both no note and a note without
+/// headings.
 fn draw_outline(
     f: &mut Frame,
     area: Rect,
@@ -955,10 +956,27 @@ fn draw_outline_header(f: &mut Frame, area: Rect, ui: UiTheme, focused: bool) {
     }
 }
 
-/// One outline row: the heading indented by its depth relative to the
-/// note's shallowest level, truncated to the list width. The selection is
-/// the reader's bar; the active heading (the one the note's scroll is at)
-/// takes the theme's accent in bold, so the two cursors read apart.
+/// The numbered prefix of a depth-0 outline row: leaf's TOC index, two
+/// digits and a space. One home for the prefix's shape and width, so the
+/// renderer and its tests cannot drift.
+pub(crate) fn outline_index_prefix(index: usize) -> String {
+    format!("{index:02} ")
+}
+
+/// The display width of [`outline_index_prefix`]: the column the row's
+/// title starts at. The renderer measures the prefix it built; the tests
+/// use this to place the title without repeating the `NN ` width.
+#[cfg(test)]
+pub(crate) fn outline_index_width() -> usize {
+    UnicodeWidthStr::width(outline_index_prefix(0).as_str())
+}
+
+/// One outline row: the heading's two-digit index at depth 0, or an
+/// indented bullet deeper down (leaf's table of contents), then the title,
+/// truncated to leave room for that prefix. The selection is the reader's
+/// bar; the active heading (the one the note's scroll is at) takes the
+/// theme's accent in bold, so the two cursors read apart. The index and the
+/// bullet use the accent for the active row and the dimmed role otherwise.
 fn outline_line(
     row: &crate::outline::Row<'_>,
     selected: bool,
@@ -966,14 +984,20 @@ fn outline_line(
     inner_width: usize,
     ui: UiTheme,
 ) -> Line<'static> {
-    let indent = "  ".repeat(row.depth);
-    let title = truncate_ellipsis(&row.entry.title, inner_width.saturating_sub(indent.width()));
-    let mut spans = Vec::with_capacity(2);
-    if !indent.is_empty() {
-        spans.push(Span::raw(indent));
-    }
-    spans.push(Span::raw(title));
-    let mut line = Line::from(spans);
+    let prefix = match row.index {
+        Some(index) => outline_index_prefix(index),
+        None => format!("{}• ", "  ".repeat(row.depth)),
+    };
+    let title = truncate_ellipsis(&row.entry.title, inner_width.saturating_sub(prefix.width()));
+    let marker = if active {
+        ui.sidebar_border_focused
+    } else {
+        ui.dimmed_fg
+    };
+    let mut line = Line::from(vec![
+        Span::styled(prefix, Style::new().fg(marker)),
+        Span::raw(title),
+    ]);
     if selected {
         highlight_selection(&mut line, inner_width, ui.sidebar_bg, ui);
     } else if active {

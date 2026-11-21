@@ -522,6 +522,15 @@ last shown.
   thing `Enter` jumps to, and it is never moved by a scroll. Jumping to
   a heading **pins** it as the active one until the reader scrolls the
   note themselves; then the outline follows the scroll again.
+- The headings are **numbered**, the way leaf numbers them: the
+  top-level headings (the shallowest level in the note, the ones that
+  are flush left) carry a two-digit index - `01`, `02` - counted in
+  document order, and the deeper headings carry a bullet. The title is
+  truncated to leave room for the index or the bullet, and the row
+  still fills the panel's width.
+- A new note starts the outline at its top: both cursors reset to the
+  first heading, and the pin is dropped. The selection's index means
+  nothing across notes.
 - With no note open, or a note with no headings, the panel shows the
   empty state `no headings`.
 - While the sidebar is focused, the status bar shows the selected

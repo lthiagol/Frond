@@ -5,6 +5,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- The outline's headings are numbered, the way leaf numbers them: the
+  top-level headings carry a two-digit index (`01`, `02`) counted in
+  document order, and the deeper ones a bullet.
 - The outline follows the note: the heading the reader is looking at is
   marked in the accent colour, and the panel scrolls it into view as the
   note scrolls. The reader's own cursor is a separate thing - it is what

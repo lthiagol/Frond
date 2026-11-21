@@ -1444,11 +1444,86 @@ fn outline_sidebar_renders_headings_indented_by_level() {
     );
     let top = row(area.y + 1 + OUTLINE_HEADER_ROWS);
     let deep = row(area.y + 2 + OUTLINE_HEADER_ROWS);
-    assert_eq!(top.trim_end(), "Top", "the level-1 heading is flush left");
     assert_eq!(
-        deep.find("Deep"),
-        Some(4),
-        "the level-3 heading is two 2-cell steps in: {deep:?}"
+        top.trim_end(),
+        "01 Top",
+        "the top heading carries its two-digit index"
+    );
+    assert_eq!(
+        deep.trim_end(),
+        "    • Deep",
+        "the level-3 heading is two 2-cell steps in, behind its bullet: {deep:?}"
+    );
+}
+
+#[test]
+fn outline_rows_carry_the_index_and_the_bullet() {
+    let vault_dir = TempDir::new("ui-outline-index");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    // No level-1 heading: the level-2 headings are the note's own top level,
+    // so they carry the count and the level-3 rows carry the bullet. The
+    // last heading is too long for the panel: it loses its tail, never its
+    // index.
+    let long = "a very long heading that cannot fit in the sidebar panel";
+    let body = format!(
+        "## Alpha\n\nbody\n\n### Alpha child\n\nbody\n\n## Beta\n\nbody\n\n\
+         ### Beta child\n\nbody\n\n## {long}\n\nbody\n"
+    );
+    let file = ui_viewer("ui-outline-index.md", &body);
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('j')));
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let area = app.layout.sidebar_area.expect("sidebar visible");
+    let row = |y: u16| -> String {
+        (area.x + 1..area.right() - 1)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
+    };
+    let top = area.y + 1 + OUTLINE_HEADER_ROWS;
+    assert_eq!(
+        row(top).trim_end(),
+        "01 Alpha",
+        "a note whose top level is 2 numbers its own top level"
+    );
+    assert_eq!(row(top + 1).trim_end(), "  • Alpha child");
+    assert_eq!(row(top + 2).trim_end(), "02 Beta");
+    assert_eq!(row(top + 3).trim_end(), "  • Beta child");
+    assert!(
+        row(top + 4).starts_with(&outline_index_prefix(3)) && row(top + 4).contains('…'),
+        "the long heading keeps its index and loses its tail: {:?}",
+        row(top + 4)
+    );
+    assert_eq!(
+        buffer[(area.right() - 2, top + 4)].symbol(),
+        "…",
+        "the truncated row draws out to the panel's last inner column"
+    );
+
+    // The active row's index is the accent; an inactive row's is the dimmed
+    // role. The fixture keeps the selection (row 1) off the active row (0),
+    // so the two marks are told apart.
+    assert_eq!(app.outline.active, 0);
+    assert_eq!(app.outline.selected, 1);
+    assert_eq!(
+        buffer[(area.x + 1, top)].fg,
+        app.theme_ui.sidebar_border_focused,
+        "the active row's index takes the accent"
+    );
+    assert_eq!(
+        buffer[(area.x + 1, top + 2)].fg,
+        app.theme_ui.dimmed_fg,
+        "an inactive row's index is dimmed"
+    );
+    assert_eq!(
+        buffer[(area.x + 3, top + 3)].fg,
+        app.theme_ui.dimmed_fg,
+        "an inactive row's bullet is dimmed"
     );
 }
 
@@ -1717,23 +1792,25 @@ fn outline_active_heading_is_marked_in_the_accent_without_moving_the_selection()
         "the panel scrolled the active heading into view"
     );
     let y = list_top + (expected - app.outline.scroll) as u16;
+    // The title starts past the row's `NN ` index.
+    let title_x = area.x + 1 + outline_index_width() as u16;
     assert!(
         row_symbols(buffer, y).contains(&format!("heading {expected}")),
         "the active heading is drawn in the panel: {:?}",
         row_symbols(buffer, y)
     );
     assert_eq!(
-        buffer[(area.x + 1, y)].fg,
+        buffer[(title_x, y)].fg,
         app.theme_ui.sidebar_border_focused,
-        "the active heading takes the accent"
+        "the active heading's title takes the accent"
     );
     assert!(
-        buffer[(area.x + 1, y)].modifier.contains(Modifier::BOLD),
+        buffer[(title_x, y)].modifier.contains(Modifier::BOLD),
         "the active heading is bold"
     );
     // The heading above it is not active: the mark is not just "any row".
     assert_ne!(
-        buffer[(area.x + 1, list_top)].fg,
+        buffer[(title_x, list_top)].fg,
         app.theme_ui.sidebar_border_focused,
         "an inactive heading is not in the accent"
     );
@@ -1783,8 +1860,10 @@ fn outline_follows_the_note_to_its_end_and_scrolls_the_active_heading_into_view(
         "the last heading is on the panel: {:?}",
         row_symbols(buffer, y)
     );
+    // The title starts past the row's `NN ` index.
+    let title_x = area.x + 1 + outline_index_width() as u16;
     assert_eq!(
-        buffer[(area.x + 1, y)].fg,
+        buffer[(title_x, y)].fg,
         app.theme_ui.sidebar_border_focused,
         "and it is marked active"
     );
@@ -1846,6 +1925,39 @@ fn outline_jump_pins_the_heading_until_the_reader_scrolls_the_note() {
         app.outline.selected,
         len - 1,
         "releasing the pin does not move the selection"
+    );
+}
+
+/// Two headings share a title: the pin must name the one that was jumped
+/// to, not the first row carrying the title. `follow_note` runs on every
+/// frame, so the wrong mark would move on the very frame after the jump.
+#[test]
+fn outline_jump_to_a_duplicate_title_pins_the_selected_occurrence() {
+    let vault_dir = TempDir::new("ui-outline-dup-pin");
+    std::fs::write(vault_dir.path().join("other.md"), "other\n").unwrap();
+    let file = ui_viewer("ui-outline-dup-pin.md", "# Dup\n\nbody\n\n# Dup\n\nbody\n");
+    let mut app = app_with_index(&file, &vault_dir);
+    app.handle_key(key(KeyCode::Char('o')));
+    app.handle_key(key(KeyCode::Char('h')));
+    let len = app.viewer.toc.len();
+    assert_eq!(len, 2, "precondition: two identically-titled headings");
+    app.outline.select(1, len);
+    app.handle_key(key(KeyCode::Enter));
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(
+        app.outline.active, 1,
+        "the jumped-to duplicate is the active row"
+    );
+
+    // The drawer resolves the pin again: the mark must not slide back to
+    // the first heading carrying the title.
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    assert_eq!(
+        app.outline.active, 1,
+        "the next frame keeps the same duplicate"
     );
 }
 
