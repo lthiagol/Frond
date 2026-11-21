@@ -364,7 +364,7 @@ mod tests {
     /// because an empty warning list would mean "every directory read" and
     /// would clear a warning whose condition still holds.
     #[test]
-    fn a_root_that_cannot_be_walked_reports_no_warnings_not_an_empty_list() {
+    fn a_root_that_cannot_be_walked_reports_none_not_an_empty_list() {
         let dir = TempDir::new("watch-rootfail");
         write(&dir.path().join("a.md"), "a\n");
         std::fs::create_dir_all(dir.path().join("locked")).unwrap();
