@@ -5,6 +5,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- The outline panel says what it is: while the outline is shown, a
+  `TABLE OF CONTENTS` label sits at the top of the panel, above the
+  headings, with a rule under it. The headings scroll under the label,
+  which takes its rows from the list.
 - The `.base` table's scrollbar is a position control: a press on the bar
   jumps the table to that row of its content, and a drag keeps the table
   following the pointer until the button is released. Until now the

@@ -1605,7 +1605,10 @@ fn outline_click_jumps_to_the_clicked_heading() {
     app.handle_key(key(KeyCode::Char('o')));
     app.layout.sidebar_area = Some(Rect::new(0, 0, 30, 10));
 
-    app.handle_click(5, 2); // the second inner row: `## Two`
+    // The first heading is the row below the panel's border and the TOC
+    // header; the second is the next row.
+    let first = 1 + crate::ui::OUTLINE_HEADER_ROWS;
+    app.handle_click(5, first + 1); // `## Two`
     assert_eq!(app.outline.selected, 1);
     assert_eq!(app.viewer.scroll, app.viewer.toc[1].line as u32);
     assert_eq!(app.focus, Focus::Content, "a row click jumps like Enter");

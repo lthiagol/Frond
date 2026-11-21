@@ -503,6 +503,12 @@ last shown.
   the content pane. A click on a row does the same.
 - `l` moves the focus to the content pane; `h` does nothing (a heading
   list has no hierarchy to collapse).
+- The panel says what it is: while the outline is shown, a
+  `TABLE OF CONTENTS` label sits at the top of the panel, above the
+  headings, with a rule under it - the shape leaf gives the same panel.
+  The label takes its rows from the list, and the headings scroll under
+  it. The panel's border title keeps naming the mode (` outline `), as
+  the tree's and the tags' do.
 - With no note open, or a note with no headings, the panel shows the
   empty state `no headings`.
 - While the sidebar is focused, the status bar shows the selected
