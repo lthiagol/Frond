@@ -1827,6 +1827,66 @@ fn a_directory_locked_after_startup_surfaces_a_warning_that_clears() {
     );
 }
 
+/// A walk that fails outright (the root cannot be read) is not evidence the
+/// directory became readable — it is the opposite. The warning stands until
+/// a walk can check again, and still clears once the directory reads.
+#[test]
+fn a_directory_warning_stands_while_the_whole_walk_fails() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    let sub = vault_dir.path().join("sub");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    app.poll();
+    let message = app
+        .walk_warning
+        .clone()
+        .unwrap_or_else(|| panic!("the unreadable directory is silent"));
+
+    // The root cannot be read either: the whole walk fails and reports no
+    // warnings. That says nothing about `sub`, so the warning stands.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(vault_dir.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert_eq!(
+        app.walk_warning.as_deref(),
+        Some(message.as_str()),
+        "a failed walk cleared a warning whose condition still holds"
+    );
+
+    // The root reads again but `sub` is still locked: the walk re-reports
+    // it, and the message is unchanged.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(vault_dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert_eq!(
+        app.walk_warning.as_deref(),
+        Some(message.as_str()),
+        "the directory is still unreadable"
+    );
+
+    // The condition ends: the next walk clears the warning.
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    app.last_vault_scan = None; // test clock: force the 1 s scan
+    app.poll();
+    assert!(
+        app.walk_warning.is_none(),
+        "a readable directory still clears the warning: {:?}",
+        app.walk_warning
+    );
+}
+
 /// A real error the user still needs survives the background walk warning:
 /// the warning lives in its own slot, so the scan tick cannot replace the
 /// error with a stale "unreadable" notice.
