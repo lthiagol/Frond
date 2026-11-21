@@ -45,6 +45,15 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 42 - the four carried lows are closed: the code was right and
+    something around it said something the code did not mean. The two
+    guards now say what they are for (the merge guard never fires - the
+    walk warns on directories only and the index's files exclude them -
+    and the disambiguation check guards a state no input path reaches);
+    the colliding-prefix fixture says what it pins and what it does not;
+    and the older test takes its popup's geometry from the helper the
+    renderer uses. Comments and test wiring only - nothing in the app
+    changed. Two reviewers, 0 blocking, 2 low (carried).
   - The parked sidebar scroll position is **dropped**, by the human's
     decision: the sidebar's scroll is a selection cursor, not a document
     position, so the idea is closed rather than carried.
@@ -281,6 +290,14 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 42's review (two lows, carried): the drag-side comment says
+      "defensive" only by delegation ("see `handle_press`") where the brief
+      asked each guard to say why - a note, not a gap; and the
+      colliding-prefix comment enumerates two of the six frontmatter
+      diagnostics' opening phrases, so a reader re-verifying the invariant
+      by grepping those two finds four of six - the invariant holds, the
+      list is loose. An enumeration in a comment rots: state the invariant
+      and how to check it instead.
   - From unit 38's review (one low, carried): a permission-only break
       changes no stamp, so the watcher never feeds the path to the index
       and no report appears - the condition's end needs no event, but its
