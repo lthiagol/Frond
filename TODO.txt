@@ -401,23 +401,29 @@ OPEN
       through the new helper.
 
 NEXT
-  1. The five carried lows under OPEN, in my order of value:
+  1. The eight carried lows under OPEN, in my order of value:
      - the permission-only break stays silent (the condition's start needs
-       an event, its end does not);
+       an event, its end does not) - the only one with user-visible
+       behaviour, and it wants its own unit;
+     - the pin's doc comment overclaims (an identically-titled heading
+       inserted above it moves the mark - no textual key can tell two
+       same-titled headings apart, so the comment must say so);
+     - the too-wide-label path is reachable but unpinned (a long vault
+       name in a narrow sidebar);
      - the index's "one message, not two" guard is unreachable as written;
      - the disambiguation guard around the help popup's bar names a state
        no input path can produce;
+     - the drag-side comment says "defensive" only by delegation, and the
+       colliding-prefix comment enumerates two of the six frontmatter
+       diagnostics' opening phrases - an enumeration in a comment rots:
+       state the invariant and how to check it instead;
      - the colliding-prefix fixture pins the reader but no producer path
        carries that text;
      - the older test that still hardcodes the disambiguation popup's
        derived geometry.
-     The four that are cleanup can be one unit; the permission-only break
-     is a behaviour change and wants its own.
-  2. Then the outline work the human asked for: a `TABLE OF CONTENTS`
-     label at the bottom of the outline panel, an outline that follows the
-     note's scroll (the heading being read is the one highlighted), and
-     the outline's rendering brought up to leaf's.
-  3. **No release cut this cycle**: the human's call - the notes stay in
+     Seven of the eight are cleanup and can be one unit; the
+     permission-only break is a behaviour change and wants its own.
+  2. **No release cut this cycle**: the human's call - the notes stay in
      the `## [Unreleased]` section and are kept current as the work
      lands. `Cargo.toml` still says 0.6.5.
-  4. Otherwise: the next cycle starts from the human's requests.
+  3. Otherwise: the next cycle starts from the human's requests.
