@@ -45,6 +45,16 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 44 - the outline panel says what it is: a bold `TABLE OF CONTENTS`
+    label at the top of the panel, over a rule that tees into the border
+    with leaf's corner - the shape leaf gives the same panel. The label
+    takes its rows from the list, so the headings scroll under it, the
+    scrollbar's track and row mapping start below it, and a click on the
+    label no longer selects a heading three rows below the pointer. One
+    home for the geometry: the header's rows, the viewport, the bar and
+    the click mapping all derive from the same two constants. Two
+    reviewers, 0 blocking, 4 low (2 carried, one fixed in the round - the
+    changelog line - and one folded into unit 45).
   - Unit 43 - a file that turns unreadable is reported, even when nothing
     changed: a `chmod` moves neither the mtime nor the size, so the
     watcher never fed the path to the index and nothing was reported. The
