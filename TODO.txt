@@ -45,6 +45,13 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - The open list is pruned again: unit 51's entry was still there, and
+    unit 20 had already closed it (the comment's release half is a pure
+    pointer and the jump test reads only the panel's columns). One entry
+    is genuinely open. **The list needs pruning at the end of every unit,
+    not once per cycle**: a unit closes lows that were recorded as open,
+    and the entry stays unless someone removes it. Two prunings in two
+    days is the pattern the rule about enumerations warns about.
   - Unit 52 - the last two one-liners: the pin field's comment names no
     trigger of its own (both halves point at the functions that own the
     rules), and the drawn-output assertion reads only the outline panel's
@@ -420,16 +427,8 @@ OPEN
       to leave them. **This class is better swept than picked**: every
       comment that names a trigger or a rule is a copy of it, and the
       review will keep finding the next copy. Grep for the paraphrases
-      (the triggers, the rules) and point them all at their owners in one
-      unit, rather than one comment per round.
-  - From unit 51's review (two lows, carried, both one-liners): the pin
-      field's comment still names one release trigger ("a note scroll
-      releases it") where `note_scrolled`'s doc lists three - a scroll, a
-      search jump, a link's heading - so make that half a pure pointer
-      too, like the drop half; and the drawn-output assertion reads the
-      whole terminal row, so the note pane's own copy of the heading could
-      satisfy it - bound the read to the panel's columns, the way the
-      neighbouring wheel test does.
+      (the triggers, the rules, the whole-row reads) and point them all at
+      their owners in one unit, rather than one comment per round.
 NEXT
   1. The header's symmetry, the human's own change: the label is centred,
      but the block leaves a blank line above it and none below, so it does
