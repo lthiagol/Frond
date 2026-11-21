@@ -366,6 +366,11 @@ own keys, and they take them instead of the app:
   that was skipped is a note the reader cannot find, so it is never
   silent — the same condition reported twice (once at startup, once by a
   later walk) is one message, not two.
+  A file that becomes unreadable **later** is reported the same way: the
+  reindex that fails to read it records the problem, and the report
+  appears in the same slot, with the path relative to the vault root. It
+  stays for as long as the file stays unreadable, and the note returns to
+  the index with the report's end.
 
 ## Status bar
 

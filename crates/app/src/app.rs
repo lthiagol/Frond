@@ -269,42 +269,24 @@ pub struct App {
     /// warning or the walk warning) outranks it.
     pub last_status: Option<StatusMessage>,
     /// The vault's unreadable-path warning (a directory the walk cannot
-    /// read, or a file the startup index could not read), rendered on the
-    /// status bar after the real error and the `.base` warnings. It is
-    /// persistent state, not an event: it tracks the condition and clears
-    /// itself when the next walk reads cleanly, so it never replaces a
-    /// newer error the user still needs. `None` = every path readable.
+    /// read, or a file the index could not read), rendered on the status
+    /// bar after the real error and the `.base` warnings. It is persistent
+    /// state, not an event: it tracks the condition and clears itself when
+    /// the condition ends, so it never replaces a newer error the user
+    /// still needs. `None` = every path readable.
     pub walk_warning: Option<String>,
-    /// The unreadable paths the index recorded while it was built. The
-    /// startup report is one snapshot, so it is kept here: every walk
-    /// re-reports a directory, but nothing re-walks a file, and the
-    /// warning must outlive the frame it was first shown in until the path
-    /// reads again. Empty = the startup walk skipped nothing.
-    startup_unreadable: Vec<vault::IndexWarning>,
     /// A clipboard copy requested by a click, waiting for the event loop
     /// to write its OSC 52 sequence to the terminal (kept out of the
     /// render buffer; see `main.rs`).
     pub pending_clipboard: Option<String>,
 }
 
-/// Whether a startup warning's condition still holds. A directory's state
-/// is re-reported by every walk (its notes are walked again), so absence
-/// from the walk means it reads again. A file is not walked: the index
-/// only touches it on a stamp change, which a permission fix need not
-/// cause, so test the read the index would do. A path that vanished no
-/// longer names a skipped note.
-fn startup_warning_still_stands(
-    warning: &vault::IndexWarning,
-    walk: &[vault::IndexWarning],
-) -> bool {
-    if !warning.path.exists() {
-        return false;
-    }
-    if warning.path.is_dir() {
-        walk.iter().any(|current| current.path == warning.path)
-    } else {
-        std::fs::read_to_string(&warning.path).is_err()
-    }
+/// Whether an index warning about a file still stands. The index records
+/// one only when it could not read the path; a path that vanished names no
+/// skipped note any more. A file is not walked, and a permission fix
+/// changes no stamp, so the read the index would do is the test.
+fn file_warning_still_stands(warning: &vault::IndexWarning) -> bool {
+    warning.path.exists() && std::fs::read_to_string(&warning.path).is_err()
 }
 
 impl App {
@@ -372,22 +354,8 @@ impl App {
             base: None,
             last_status: None,
             walk_warning: None,
-            startup_unreadable: Vec::new(),
             pending_clipboard: None,
         };
-        app.startup_unreadable = app
-            .index
-            .as_ref()
-            .map(|index| {
-                index
-                    .borrow()
-                    .warnings()
-                    .iter()
-                    .filter(|warning| warning.is_unreadable())
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
         // The first frame is drawn before the first walk runs: show the
         // index's snapshot now, then let the walk tick take over.
         app.surface_startup_warnings();
@@ -1609,12 +1577,12 @@ impl App {
     }
 
     /// Records the vault's unreadable-path warning for the status bar: the
-    /// warnings from the walk that just ran plus any startup warning whose
-    /// condition still holds. A directory is re-reported by every walk, so
-    /// a walk that ran is authoritative for it; a file is not part of the
-    /// walk, so its startup warning is re-checked against the read until
-    /// the file can be indexed again. The same path from both sources is
-    /// one message, not two.
+    /// warnings from the walk that just ran plus the index's own unreadable
+    /// files. A directory is re-reported by every walk, so a walk that ran
+    /// is authoritative for it; a file is not part of the walk, so the
+    /// index's record of it is the report — from the startup build, or from
+    /// any later reindex that could not read it. The same path from both
+    /// sources is one message, not two.
     ///
     /// `walk` is `None` when the walk itself failed (the root could not be
     /// read). That is not an empty report: the walk could not look, and a
@@ -1636,16 +1604,13 @@ impl App {
         };
         // A file that reads again is healed, not merely silent: reindex it
         // so the note is back in the index when its warning goes. A
-        // directory is re-walked, and a vanished path names no note, so
-        // only a present file whose read now succeeds is healed here.
-        let mut healed = Vec::new();
-        self.startup_unreadable.retain(|warning| {
-            let stands = startup_warning_still_stands(warning, walk);
-            if !stands && !warning.path.is_dir() && warning.path.exists() {
-                healed.push(warning.path.clone());
-            }
-            stands
-        });
+        // permission fix changes no stamp, so nothing else re-feeds it.
+        let healed: Vec<PathBuf> = self
+            .index_unreadable_files()
+            .into_iter()
+            .filter(|warning| !file_warning_still_stands(warning))
+            .map(|warning| warning.path)
+            .collect();
         let index_changed = !healed.is_empty();
         if let Some(index) = &self.index {
             let mut index = index.borrow_mut();
@@ -1654,20 +1619,46 @@ impl App {
             }
         }
         let mut warnings = walk.to_vec();
-        for warning in &self.startup_unreadable {
+        for warning in self.index_unreadable_files() {
             if !warnings.iter().any(|current| current.path == warning.path) {
-                warnings.push(warning.clone());
+                warnings.push(warning);
             }
         }
         self.store_walk_warning(&warnings);
         index_changed
     }
 
-    /// Shows the index's startup snapshot before the first walk has run.
-    /// Directories are re-reported by that walk; files are kept here until
-    /// `surface_walk_warnings` re-checks them.
+    /// The index's own unreadable-path warnings: the paths the startup
+    /// build skipped, and any a later reindex could not read.
+    fn index_unreadable(&self) -> Vec<vault::IndexWarning> {
+        self.index
+            .as_ref()
+            .map(|index| {
+                index
+                    .borrow()
+                    .warnings()
+                    .iter()
+                    .filter(|warning| warning.is_unreadable())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// [`Self::index_unreadable`] minus directories: every walk re-reports
+    /// a directory and is its authority, while the index records one only
+    /// at build and never clears it when the directory reads again.
+    fn index_unreadable_files(&self) -> Vec<vault::IndexWarning> {
+        let mut warnings = self.index_unreadable();
+        warnings.retain(|warning| !warning.path.is_dir());
+        warnings
+    }
+
+    /// Shows the index's unreadable paths before the first walk has run.
+    /// Directories are re-reported by that walk; files are kept from the
+    /// index until `surface_walk_warnings` re-checks them.
     fn surface_startup_warnings(&mut self) {
-        let warnings = self.startup_unreadable.clone();
+        let warnings = self.index_unreadable();
         self.store_walk_warning(&warnings);
     }
 
