@@ -15,17 +15,32 @@ use engine::TocEntry;
 pub struct Row<'a> {
     pub entry: &'a TocEntry,
     pub depth: usize,
+    /// The row's place among the note's depth-0 headings, 1-based; `None`
+    /// for a deeper row. The panel draws it as the two-digit index leaf's
+    /// table of contents carries, and draws a bullet instead when absent.
+    pub index: Option<usize>,
 }
 
 /// The outline's rows for a note: document order, indented by the heading
 /// level relative to the shallowest level present (level 1, 4 → depths
-/// 0, 3). An empty table has no rows.
+/// 0, 3), the depth-0 rows indexed in that same order. An empty table has
+/// no rows.
 pub fn rows(toc: &[TocEntry]) -> Vec<Row<'_>> {
     let shallowest = toc.iter().map(|entry| entry.level).min();
+    let mut top_level = 0;
     toc.iter()
-        .map(|entry| Row {
-            entry,
-            depth: shallowest.map_or(0, |level| usize::from(entry.level.saturating_sub(level))),
+        .map(|entry| {
+            let depth =
+                shallowest.map_or(0, |level| usize::from(entry.level.saturating_sub(level)));
+            let index = (depth == 0).then(|| {
+                top_level += 1;
+                top_level
+            });
+            Row {
+                entry,
+                depth,
+                index,
+            }
         })
         .collect()
 }
@@ -67,7 +82,13 @@ pub struct Outline {
     /// First visible row index.
     pub scroll: usize,
     /// Heading a jump pinned as active, until the reader scrolls the note.
-    pin: Option<usize>,
+    /// Held by title and the heading's occurrence among the rows carrying
+    /// that title: the rows are rebuilt on every watch-triggered reparse,
+    /// and an edit that inserts or removes a heading above the pinned one
+    /// must not move the mark to a different heading (an index would). The
+    /// occurrence keeps two identically-titled headings apart. A heading
+    /// that is gone drops the pin.
+    pin: Option<(String, usize)>,
     /// Whether the window follows the active row (the note's scroll) or the
     /// selection. The reader's own cursor moves, a click and the panel's bar
     /// hand it to the selection; a note scroll hands it back.
@@ -92,11 +113,12 @@ impl Outline {
         }
     }
 
-    /// Re-clamps the cursors to the current row count: the open note changed
-    /// (or its headings were rebuilt), so both indices must stay valid. The
-    /// selection survives by index where it can and is clamped to the last
-    /// row otherwise. The window is positioned by [`Self::follow_note`]
-    /// (from the drawer) or by the selection's own moves.
+    /// Re-clamps the cursors to the current row count: the open note or its
+    /// headings changed, so both indices must stay valid. The selection is
+    /// clamped to the last row. A pinned heading is resolved by title and
+    /// occurrence on the next [`Self::follow_note`]. The window is
+    /// positioned by that call (from the drawer) or by the selection's own
+    /// moves.
     pub fn sync(&mut self, len: usize) {
         if len == 0 {
             self.selected = 0;
@@ -107,15 +129,18 @@ impl Outline {
         }
         self.selected = self.selected.min(len - 1);
         self.active = self.active.min(len - 1);
-        self.pin = self.pin.filter(|pin| *pin < len);
         self.clamp_scroll(len);
     }
 
-    /// The open note changed: the new note starts at its top, so the panel
-    /// does too — no pin, and the window follows the note again.
+    /// The open note changed: both cursors start at the new note's first
+    /// heading. The selection's index means nothing across notes — row 7 of
+    /// the new note is a different heading — so it does not survive; the
+    /// pin belonged to the old note and is dropped, and the window follows
+    /// the note again.
     pub fn on_note_change(&mut self, len: usize) {
         self.pin = None;
         self.follow = true;
+        self.selected = 0;
         self.active = 0;
         self.scroll = 0;
         self.sync(len);
@@ -129,10 +154,20 @@ impl Outline {
         self.follow = true;
     }
 
-    /// A jump to `index` pinned it as the active row: the computed row is
-    /// overridden until the reader scrolls the note ([`Self::note_scrolled`]).
-    pub fn pin_active(&mut self, index: usize) {
-        self.pin = Some(index);
+    /// A jump to row `index` of `entries` pinned it as the active row: the
+    /// computed row is overridden until the reader scrolls the note
+    /// ([`Self::note_scrolled`]). The pin holds the heading's title and
+    /// which occurrence of that title it is, so a reparse resolves the same
+    /// heading rather than the first row carrying the title.
+    pub fn pin_active(&mut self, entries: &[TocEntry], index: usize) {
+        let Some(entry) = entries.get(index) else {
+            return;
+        };
+        let occurrence = entries[..index]
+            .iter()
+            .filter(|other| other.title == entry.title)
+            .count();
+        self.pin = Some((entry.title.clone(), occurrence));
         self.active = index;
     }
 
@@ -142,14 +177,35 @@ impl Outline {
     /// viewport are known there, and the frame is what the reader sees.
     pub fn follow_note(&mut self, entries: &[TocEntry], scroll: u32, at_end: bool) {
         self.sync(entries.len());
-        let Some(computed) = active_row(entries, scroll, at_end) else {
+        let Some(active) = self
+            .pinned_row(entries)
+            .or_else(|| active_row(entries, scroll, at_end))
+        else {
             self.active = 0;
             return;
         };
-        self.active = self.pin.unwrap_or(computed).min(entries.len() - 1);
+        self.active = active;
         if self.follow {
             self.scroll_row_into_view(self.active, entries.len());
         }
+    }
+
+    /// The pinned heading's row, matched by title and occurrence in
+    /// document order: the correct one of two identically-titled headings.
+    /// A title or occurrence no heading carries drops the pin and yields
+    /// `None`, so the note's scroll names the active row again.
+    fn pinned_row(&mut self, entries: &[TocEntry]) -> Option<usize> {
+        let (title, occurrence) = self.pin.as_ref()?;
+        let row = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.title == *title)
+            .nth(*occurrence)
+            .map(|(row, _)| row);
+        if row.is_none() {
+            self.pin = None;
+        }
+        row
     }
 
     /// Selects a row (a click) and keeps it visible. Out-of-range indices
@@ -240,6 +296,20 @@ mod tests {
             .collect()
     }
 
+    /// One row per title, all level 1: a reparse builds a new table from a
+    /// changed note, and the titles are what a pin follows.
+    fn titled(titles: &[&str]) -> Vec<TocEntry> {
+        titles
+            .iter()
+            .enumerate()
+            .map(|(i, &title)| TocEntry {
+                level: 1,
+                title: title.to_string(),
+                line: i,
+            })
+            .collect()
+    }
+
     #[test]
     fn rows_are_indented_relative_to_the_shallowest_level() {
         let entries = toc(&[2, 3, 4, 2]);
@@ -247,6 +317,30 @@ mod tests {
         let depths: Vec<usize> = rows.iter().map(|row| row.depth).collect();
         assert_eq!(depths, vec![0, 1, 2, 0], "level 2 is flush left");
         assert_eq!(rows[1].entry.title, "h1", "document order is kept");
+    }
+
+    #[test]
+    fn rows_number_the_depth_zero_headings_in_document_order() {
+        let entries = toc(&[1, 2, 2, 1, 3]);
+        let rows = rows(&entries);
+        let indices: Vec<Option<usize>> = rows.iter().map(|row| row.index).collect();
+        assert_eq!(
+            indices,
+            vec![Some(1), None, None, Some(2), None],
+            "the flush-left headings carry the count; the deeper rows a bullet"
+        );
+    }
+
+    #[test]
+    fn rows_number_the_shallowest_level_when_the_note_has_no_level_1() {
+        let entries = toc(&[3, 4, 3]);
+        let rows = rows(&entries);
+        let indices: Vec<Option<usize>> = rows.iter().map(|row| row.index).collect();
+        assert_eq!(
+            indices,
+            vec![Some(1), None, Some(2)],
+            "a note whose top level is 3 numbers its own top level"
+        );
     }
 
     #[test]
@@ -323,7 +417,7 @@ mod tests {
         let entries = spaced(&lines);
 
         outline.select(11, entries.len());
-        outline.pin_active(11);
+        outline.pin_active(&entries, 11);
         outline.follow_note(&entries, 20, false);
         assert_eq!(
             outline.active, 11,
@@ -362,21 +456,84 @@ mod tests {
     }
 
     #[test]
-    fn a_note_change_drops_the_pin_and_starts_at_the_top() {
+    fn a_note_change_resets_both_cursors_and_drops_the_pin() {
         let mut outline = Outline::new();
         outline.viewport = 3;
         let lines: Vec<usize> = (0..12).map(|i| i * 10).collect();
         let entries = spaced(&lines);
 
         outline.select(11, entries.len());
-        outline.pin_active(11);
-        outline.on_note_change(2);
-        assert_eq!(outline.selected, 1, "selection clamped to the new list");
+        outline.pin_active(&entries, 11);
+        // The new note has as many headings as the old one, so the old
+        // selection index would still be a valid row: only a reset puts the
+        // reader back at the top.
+        outline.on_note_change(12);
+        assert_eq!(
+            outline.selected, 0,
+            "the selection's index means nothing across notes"
+        );
         assert_eq!(outline.active, 0);
         assert_eq!(outline.scroll, 0);
 
         outline.follow_note(&entries, 90, false);
         assert_eq!(outline.active, 9, "the old note's pin is gone");
+    }
+
+    #[test]
+    fn a_pin_follows_its_heading_by_title_when_a_reparse_shifts_the_rows() {
+        let mut outline = Outline::new();
+        outline.viewport = 4;
+        let original = titled(&["zero", "one", "two", "three"]);
+        outline.pin_active(&original, 3);
+
+        // An external edit inserted a heading above the pinned one: the
+        // rows moved, the heading did not.
+        let inserted = titled(&["zero", "inserted", "one", "two", "three"]);
+        outline.follow_note(&inserted, 0, false);
+        assert_eq!(
+            outline.active, 4,
+            "the pin named the heading, not the old row index"
+        );
+
+        // The heading itself is gone: the pin is dropped and the note's
+        // scroll names the active row again.
+        let removed = titled(&["zero", "inserted", "one", "two"]);
+        outline.follow_note(&removed, 0, false);
+        assert_eq!(outline.active, 0, "the dropped pin yields to the scroll");
+
+        // A later reparse that brings the title back does not revive it:
+        // the jump's pin ended with its heading.
+        let restored = titled(&["zero", "inserted", "one", "two", "three"]);
+        outline.follow_note(&restored, 1, false);
+        assert_eq!(outline.active, 1, "the dropped pin does not come back");
+    }
+
+    #[test]
+    fn a_pin_to_a_duplicate_title_marks_the_right_occurrence() {
+        let mut outline = Outline::new();
+        outline.viewport = 3;
+        let entries = titled(&["dup", "other", "dup"]);
+        outline.pin_active(&entries, 2);
+        outline.follow_note(&entries, 0, false);
+        assert_eq!(
+            outline.active, 2,
+            "the second duplicate, not the first row carrying the title"
+        );
+
+        // An edit inserts a differently-titled heading above: the mark
+        // stays on the same occurrence of the title.
+        let inserted = titled(&["new", "dup", "other", "dup"]);
+        outline.follow_note(&inserted, 0, false);
+        assert_eq!(
+            outline.active, 3,
+            "the title and its occurrence name the heading, not the row"
+        );
+
+        // Removing the second duplicate leaves the occurrence unclaimed:
+        // the pin is dropped rather than sliding onto the first one.
+        let removed = titled(&["new", "dup", "other"]);
+        outline.follow_note(&removed, 0, false);
+        assert_eq!(outline.active, 0, "the pinned occurrence is gone");
     }
 
     #[test]

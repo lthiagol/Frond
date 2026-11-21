@@ -45,6 +45,16 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 46 - the outline's headings are numbered, the way leaf numbers
+    them: the top-level headings carry a two-digit index counted in document
+    order, the deeper ones a bullet. A new note starts the outline at its
+    top - both cursors reset, because the selection's index means nothing
+    across notes - and the jump pin holds its heading by title *and* which
+    occurrence of that title it is, so an edit above it cannot move the mark
+    and a duplicate title resolves to the right row. The review caught the
+    title-only pin mis-marking a duplicate heading on the very next frame;
+    the fix round closed it. Two reviewers, 1 blocking (fixed in a fix
+    round), 3 low (one carried).
   - Unit 45 - the outline follows the note: the heading the reader is
     looking at is the active one, marked in the accent colour and in bold,
     and the panel scrolls it into view as the note scrolls. The two cursors
@@ -327,6 +337,17 @@ HAPPENED
     so; write the brief from the code, not from memory.
 
 OPEN
+  - From unit 46's delta review (one low, carried): the pin's doc comment
+      states an absolute guarantee - an edit above the pinned heading must
+      not move the mark - with one exception it does not name: an edit that
+      inserts an *identically titled* heading above the pinned occurrence
+      shifts every later duplicate's occurrence number, so the mark lands
+      on the inserted heading. No textual key can tell two same-titled
+      headings apart after a reparse, and the behaviour is strictly
+      better than the title-only pin it replaced (which mis-marked with no
+      external edit at all); the reader's next note scroll releases it.
+      The comment overclaims - soften it. The overclaim came from the
+      orchestrator's brief, which stated the property too absolutely.
   - From unit 42's review (two lows, carried): the drag-side comment says
       "defensive" only by delegation ("see `handle_press`") where the brief
       asked each guard to say why - a note, not a gap; and the
