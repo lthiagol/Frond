@@ -13,16 +13,26 @@ HOW TO RESUME
   The per-unit history is in the git log (`git log v0.6.4..v0.6.5`).
 
 WHERE WE ARE
-  Nothing is in flight. **0.6.5 is tagged** (`v0.6.5`) and committed, not
-  pushed (pushing is the human's call): this cycle shipped the selection
-  bar, the interactive scrollbars, the scrollbar hover, the link hover,
-  the regex search, the match-next, the line-number gutter and the startup
-  warnings - the release notes cover every one of them.
+  Nothing is in flight. The cycle of nine units is committed and the tree
+  is clean; **`main` is ahead of `origin/main`** and the push is the
+  human's call. The cycle shipped: the search popup's bar reaches its
+  inner edge (the snippet no longer overshoots its budget), the
+  disambiguation popup's bar is pinned, the walk warning's kind is
+  structural, a directory's warning survives a failed walk, a file that
+  turns unreadable mid-session is surfaced, the `.base` table's and the
+  help popup's scrollbars are position controls, and the cycle's own
+  review lows are closed. The release notes cover every user-visible
+  change.
 
-  Every unit went builder -> two fresh-context reviewers (a delta reviewer
-  on the fix round) -> verdict -> commit, and the gate was run by the
-  orchestrator, never taken on trust. The parked list is empty; what is
-  left sits under OPEN.
+  Every unit went builder -> two fresh-context reviewers -> verdict ->
+  commit, and the gate was run by the orchestrator, never taken on trust.
+  **No unit came back blocking from either axis**, so no fix round was
+  needed and the five-round budget was never touched. The nine units are
+  in the git log (`git log v0.6.5..HEAD`).
+
+  **0.6.5 is tagged** (`v0.6.5`) and committed, not pushed; the next cut
+  is the human's call, and the notes for it are already in the
+  `## [Unreleased]` section.
 
   Before this cycle: the whole-project audit is done and released:
   **0.6.4 is tagged and pushed** (`v0.6.4`), CI is green on the push, and
@@ -304,17 +314,17 @@ OPEN
       document position.
 
 NEXT
-  1. The parked list is done (the interactive scrollbar, the link hover,
-     regex + match-next, the line-number gutter) and the open
-     startup-warnings item is closed. What is left is the carried lows
-     under OPEN, in my order of value:
-     - the `snippet_line` width overshoot (the search popup's bar can miss
-       the edge with wide characters);
-     - the disambiguation popup's bar has no end-position test;
-     - a file that becomes unreadable mid-session is recorded but never
-       surfaced;
-     - the index classifies an unreadable path by a message prefix (a
-       `kind` field would make it structural);
-     - the duplicated doc comment in `tags.rs`.
-  2. Cut the next release when a cycle's worth of work has landed.
+  1. Cut the next release when the human says so: the cycle's four
+     user-visible changes are in the `## [Unreleased]` section with their
+     notes, and `Cargo.toml` still says 0.6.5.
+  2. Then the carried lows under OPEN, in my order of value:
+     - the permission-only break stays silent (the condition's start needs
+       an event, its end does not);
+     - the index's "one message, not two" guard is unreachable as written;
+     - the disambiguation guard around the help popup's bar names a state
+       no input path can produce;
+     - the colliding-prefix fixture pins the reader but no producer path
+       carries that text;
+     - the older test that still hardcodes the disambiguation popup's
+       derived geometry.
   3. Otherwise: the next cycle starts from the human's requests.
