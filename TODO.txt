@@ -45,6 +45,9 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - The parked sidebar scroll position is **dropped**, by the human's
+    decision: the sidebar's scroll is a selection cursor, not a document
+    position, so the idea is closed rather than carried.
   - Unit 41 - the review lows are closed: nine of them, from the cycle's own
     reviews. Five were the same shape - the code was right and its
     description had drifted (a test name stating the opposite of its
@@ -305,15 +308,9 @@ OPEN
       the disambiguation popup's derived geometry in hardcoded
       coordinates, so a future width change breaks it instead of flowing
       through the new helper.
-  - Parked: a scroll position for the sidebar tree - the recommendation is
-      to **drop** it: the sidebar's scroll is a selection cursor, not a
-      document position.
 
 NEXT
-  1. Cut the next release when the human says so: the cycle's four
-     user-visible changes are in the `## [Unreleased]` section with their
-     notes, and `Cargo.toml` still says 0.6.5.
-  2. Then the carried lows under OPEN, in my order of value:
+  1. The five carried lows under OPEN, in my order of value:
      - the permission-only break stays silent (the condition's start needs
        an event, its end does not);
      - the index's "one message, not two" guard is unreachable as written;
@@ -323,4 +320,13 @@ NEXT
        carries that text;
      - the older test that still hardcodes the disambiguation popup's
        derived geometry.
-  3. Otherwise: the next cycle starts from the human's requests.
+     The four that are cleanup can be one unit; the permission-only break
+     is a behaviour change and wants its own.
+  2. Then the outline work the human asked for: a `TABLE OF CONTENTS`
+     label at the bottom of the outline panel, an outline that follows the
+     note's scroll (the heading being read is the one highlighted), and
+     the outline's rendering brought up to leaf's.
+  3. **No release cut this cycle**: the human's call - the notes stay in
+     the `## [Unreleased]` section and are kept current as the work
+     lands. `Cargo.toml` still says 0.6.5.
+  4. Otherwise: the next cycle starts from the human's requests.
