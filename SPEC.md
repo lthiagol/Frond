@@ -509,6 +509,19 @@ last shown.
   The label takes its rows from the list, and the headings scroll under
   it. The panel's border title keeps naming the mode (` outline `), as
   the tree's and the tags' do.
+- The outline **follows the note**: the heading the reader is looking at
+  is the **active** one, marked in the accent colour and in bold, and
+  the panel scrolls it into view as the note scrolls. The active
+  heading is the last one at or above the top of the note's viewport;
+  at the end of the note it is the last heading, and above the first
+  heading it is the first one. Where the active heading is also the
+  selected one - right after a jump pins it - the selection's bar is the
+  mark: the reader chose that row, and the bar says so.
+- The active heading and the panel's **selection** are different things.
+  The selection is the cursor the reader moves (`j`/`k`, a click), the
+  thing `Enter` jumps to, and it is never moved by a scroll. Jumping to
+  a heading **pins** it as the active one until the reader scrolls the
+  note themselves; then the outline follows the scroll again.
 - With no note open, or a note with no headings, the panel shows the
   empty state `no headings`.
 - While the sidebar is focused, the status bar shows the selected

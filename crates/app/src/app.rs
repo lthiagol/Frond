@@ -701,6 +701,11 @@ impl App {
     /// heading and hand the focus to the content pane. Empty lists and open
     /// `.base` tables have nothing to jump to — the rows come from
     /// [`outline_rows`], the one place that decides.
+    ///
+    /// The jump pins the heading as the active one: a heading near the
+    /// note's end cannot scroll to the top, so the scroll alone would name
+    /// an earlier heading there. The reader's next scroll of the note
+    /// releases the pin ([`Outline::note_scrolled`]).
     fn jump_to_outline_heading(&mut self) {
         let Some(line) = outline_rows(&self.base, &self.viewer)
             .get(self.outline.selected)
@@ -709,6 +714,7 @@ impl App {
             return;
         };
         self.viewer.set_scroll(line);
+        self.outline.pin_active(self.outline.selected);
         self.focus = Focus::Content;
     }
 
@@ -813,10 +819,10 @@ impl App {
             sidebar.reveal(path);
         }
         self.refresh_backlinks();
-        // The outline lists the note in the content pane: keep its cursor
-        // valid against the new heading table right away (the next draw
-        // would sync it too, but a key can arrive before that).
-        self.outline.sync(self.outline_len());
+        // The outline lists the note in the content pane: the new note
+        // starts at its top, so the outline's cursors do too (the next draw
+        // would sync them too, but a key can arrive before that).
+        self.outline.on_note_change(self.outline_len());
         // Debounce-gated ("rate-limited trivially"): skipped entirely when
         // the last spawn is recent — the status cannot have gone stale in
         // that window through anything this app did not already see.
@@ -866,6 +872,9 @@ impl App {
         if let Some(heading) = heading {
             if self.base.is_none() {
                 self.viewer.scroll_to_heading(heading);
+                // A link's heading is a jump like a search hit: it releases
+                // an outline pin and follows the landing scroll.
+                self.outline.note_scrolled();
             }
         }
     }
@@ -1165,6 +1174,7 @@ impl App {
                 self.bar_drag = Some(BarTarget::Note);
                 if let Some(scroll) = self.bar_scroll_at(row) {
                     self.viewer.set_scroll(scroll);
+                    self.outline.note_scrolled();
                 }
                 return;
             }
@@ -1227,6 +1237,7 @@ impl App {
             BarTarget::Note => {
                 if let Some(scroll) = self.bar_scroll_at(row) {
                     self.viewer.set_scroll(scroll);
+                    self.outline.note_scrolled();
                 }
             }
             BarTarget::Base => {
@@ -1591,6 +1602,10 @@ impl App {
         } else {
             self.viewer.open_file(path)?;
             self.base = None;
+            // A history move is a new note context like any open: its
+            // outline starts at the top (the restored scroll moves the
+            // active heading at the next draw).
+            self.outline.on_note_change(self.outline_len());
             Ok(())
         }
     }
@@ -2171,7 +2186,11 @@ impl App {
     fn scroll_content_down(&mut self, n: u32) {
         match &mut self.base {
             Some(base) => base.scroll_down(n as usize),
-            None => self.viewer.scroll_down(n),
+            None => {
+                self.viewer.scroll_down(n);
+                // The reader's own scroll: the outline follows it again.
+                self.outline.note_scrolled();
+            }
         }
     }
 
@@ -2179,7 +2198,10 @@ impl App {
     fn scroll_content_up(&mut self, n: u32) {
         match &mut self.base {
             Some(base) => base.scroll_up(n as usize),
-            None => self.viewer.scroll_up(n),
+            None => {
+                self.viewer.scroll_up(n);
+                self.outline.note_scrolled();
+            }
         }
     }
 
@@ -2188,8 +2210,14 @@ impl App {
         match (&mut self.base, bottom) {
             (Some(base), true) => base.scroll_bottom(),
             (Some(base), false) => base.scroll_top(),
-            (None, true) => self.viewer.scroll_bottom(),
-            (None, false) => self.viewer.scroll_top(),
+            (None, true) => {
+                self.viewer.scroll_bottom();
+                self.outline.note_scrolled();
+            }
+            (None, false) => {
+                self.viewer.scroll_top();
+                self.outline.note_scrolled();
+            }
         }
     }
 
@@ -2229,6 +2257,9 @@ impl App {
                 .unwrap_or(occurrences[occurrences.len() - 1])
         };
         self.viewer.scroll_to_source_line(target);
+        // A search jump is the reader moving the note, not a heading
+        // choice: it releases a jump's pin like any scroll.
+        self.outline.note_scrolled();
     }
 
     /// Mouse wheel with the cursor position: a wheel over the visible
@@ -2391,6 +2422,7 @@ impl App {
             return;
         }
         self.viewer.scroll_to_source_line(hit.line);
+        self.outline.note_scrolled();
         self.search.close();
         // Consistent with the sidebar/backlinks open paths: the reader's
         // context moves to the opened note.

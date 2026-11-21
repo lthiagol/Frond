@@ -352,7 +352,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 ..
             } = app;
             let entries = crate::app::outline_rows(base, viewer);
-            outline.sync(entries.len());
+            // At the note's bottom the last heading is the active one: the
+            // final lines cannot scroll up to meet it (leaf's end rule).
+            let max_scroll = viewer.max_scroll();
+            let at_end = max_scroll > 0 && viewer.scroll >= max_scroll;
+            outline.follow_note(entries, viewer.scroll, at_end);
             sidebar_bar = draw_outline(f, sidebar_rect, outline, entries, ui, focused, pointer);
         } else if let Some(sidebar) = &mut app.sidebar {
             sidebar_bar = draw_sidebar(
@@ -854,7 +858,15 @@ fn draw_outline(
             .enumerate()
             .skip(outline.scroll)
             .take(list_height)
-            .map(|(i, row)| outline_line(row, i == outline.selected, inner_width, ui))
+            .map(|(i, row)| {
+                outline_line(
+                    row,
+                    i == outline.selected,
+                    i == outline.active,
+                    inner_width,
+                    ui,
+                )
+            })
             .collect()
     };
 
@@ -874,9 +886,10 @@ fn draw_outline(
         ui,
         pointer,
     );
-    // The header is chrome inside the border, so it paints after the rows
-    // (the list area starts below it; this keeps the label legible even if a
-    // future row count overshoots the panel).
+    // The header is chrome inside the border, so it paints after the panel:
+    // the rule's `┤` tee overwrites the border's `│` on the rule row. (The
+    // rows cannot reach it: they render into `text_area`, which starts below
+    // the header, and ratatui clips a Paragraph to its rect.)
     draw_outline_header(f, area, ui, focused);
     bar
 }
@@ -943,10 +956,13 @@ fn draw_outline_header(f: &mut Frame, area: Rect, ui: UiTheme, focused: bool) {
 }
 
 /// One outline row: the heading indented by its depth relative to the
-/// note's shallowest level, truncated to the list width.
+/// note's shallowest level, truncated to the list width. The selection is
+/// the reader's bar; the active heading (the one the note's scroll is at)
+/// takes the theme's accent in bold, so the two cursors read apart.
 fn outline_line(
     row: &crate::outline::Row<'_>,
     selected: bool,
+    active: bool,
     inner_width: usize,
     ui: UiTheme,
 ) -> Line<'static> {
@@ -960,6 +976,14 @@ fn outline_line(
     let mut line = Line::from(spans);
     if selected {
         highlight_selection(&mut line, inner_width, ui.sidebar_bg, ui);
+    } else if active {
+        for span in &mut line.spans {
+            span.style = span
+                .style
+                .fg(ui.sidebar_border_focused)
+                .bg(ui.sidebar_bg)
+                .add_modifier(Modifier::BOLD);
+        }
     }
     line
 }

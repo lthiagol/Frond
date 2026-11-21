@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- The outline follows the note: the heading the reader is looking at is
+  marked in the accent colour, and the panel scrolls it into view as the
+  note scrolls. The reader's own cursor is a separate thing - it is what
+  `Enter` jumps to, and a scroll never moves it. Jumping to a heading
+  keeps it marked until the reader scrolls the note themselves.
 - The outline panel says what it is: while the outline is shown, a
   `TABLE OF CONTENTS` label sits at the top of the panel, above the
   headings, with a rule under it. The headings scroll under the label,
