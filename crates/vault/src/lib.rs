@@ -53,6 +53,7 @@ pub use git::{read_status as read_git_status, repo_toplevel, GitStatus};
 pub use index::SEARCH_RESULT_CAP;
 pub use index::{
     IndexWarning, NoteMeta, Resolution, SearchHit, SearchPattern, SearchResults, VaultIndex,
+    WarningKind,
 };
 pub use tasks::{TaskHit, TaskState};
 pub use wikilink::LinkRef;

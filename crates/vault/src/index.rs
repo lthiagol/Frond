@@ -192,12 +192,25 @@ pub struct NoteMeta {
     pub links: Vec<LinkRef>,
 }
 
+/// What an [`IndexWarning`] is about. The classification is structural:
+/// readers and producers use the kind, never the wording of `message`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WarningKind {
+    /// The path itself could not be read (a file the index could not
+    /// open, or a directory the walk could not descend into).
+    Unreadable,
+    /// A diagnostic about a note that *was* indexed (missing frontmatter,
+    /// an unterminated fence, a malformed frontmatter line).
+    Frontmatter,
+}
+
 /// Something worth surfacing about a note that could not be indexed
 /// cleanly (no frontmatter, unterminated fence, malformed line,
 /// unreadable file).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexWarning {
     pub path: PathBuf,
+    pub kind: WarningKind,
     pub message: String,
 }
 
@@ -207,7 +220,19 @@ impl IndexWarning {
     /// diagnostic about a note that was indexed. The app's startup report
     /// is about notes that are missing, so it filters with this.
     pub fn is_unreadable(&self) -> bool {
-        self.message.starts_with(UNREADABLE_PREFIX)
+        self.kind == WarningKind::Unreadable
+    }
+}
+
+impl From<crate::walk::WalkWarning> for IndexWarning {
+    /// A warning the walk raised is always about a directory it could not
+    /// read — the walk has no other kind.
+    fn from(warning: crate::walk::WalkWarning) -> Self {
+        Self {
+            path: warning.path,
+            kind: WarningKind::Unreadable,
+            message: warning.message,
+        }
     }
 }
 
@@ -282,10 +307,7 @@ impl VaultIndex {
         // unreadable file: its notes are skipped, but the user is told.
         index
             .warnings
-            .extend(walk.warnings.into_iter().map(|w| IndexWarning {
-                path: w.path,
-                message: w.message,
-            }));
+            .extend(walk.warnings.into_iter().map(IndexWarning::from));
         for entry in walk.entries {
             if is_base_path(&entry.path) {
                 index.bases.insert(entry.path);
@@ -295,6 +317,7 @@ impl VaultIndex {
                 Ok(source) => index.insert_note(&entry.path, &source),
                 Err(err) => index.warnings.push(IndexWarning {
                     path: entry.path,
+                    kind: WarningKind::Unreadable,
                     message: format!("{UNREADABLE_PREFIX}{err}"),
                 }),
             }
@@ -701,6 +724,7 @@ impl VaultIndex {
                     self.warnings.retain(|w| w.path != path);
                     self.warnings.push(IndexWarning {
                         path: path.to_path_buf(),
+                        kind: WarningKind::Unreadable,
                         message: format!("{UNREADABLE_PREFIX}{err}"),
                     });
                 }
@@ -729,6 +753,7 @@ impl VaultIndex {
         for message in warnings {
             self.warnings.push(IndexWarning {
                 path: path.to_path_buf(),
+                kind: WarningKind::Frontmatter,
                 message,
             });
         }
@@ -1554,6 +1579,8 @@ mod tests {
             index.warnings()[0].message,
             "frontmatter fence never closed"
         );
+        assert_eq!(index.warnings()[0].kind, WarningKind::Frontmatter);
+        assert!(!index.warnings()[0].is_unreadable());
     }
 
     #[test]
@@ -1571,9 +1598,56 @@ mod tests {
             assert!(index
                 .warnings()
                 .iter()
-                .any(|w| w.path.ends_with("locked.md") && w.message.contains("unreadable")));
+                .any(|w| w.path.ends_with("locked.md")
+                    && w.message.contains("unreadable")
+                    && w.is_unreadable()));
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
         }
+    }
+
+    #[test]
+    fn a_warning_is_classified_by_kind_not_by_its_message_text() {
+        let vault = TempDir::new("vk-warning-kind");
+        write(&vault.path().join("plain.md"), "no frontmatter\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = vault.path().join("locked.md");
+            write(&locked, "secret\n");
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+            let index = VaultIndex::build(vault.path()).unwrap();
+
+            let diagnostic = index
+                .warnings()
+                .iter()
+                .find(|w| w.path.ends_with("plain.md"))
+                .unwrap_or_else(|| panic!("no frontmatter warning: {:?}", index.warnings()));
+            assert_eq!(diagnostic.kind, WarningKind::Frontmatter);
+            assert!(
+                !diagnostic.is_unreadable(),
+                "a diagnostic about an indexed note is not an unreadable path"
+            );
+
+            let unreadable = index
+                .warnings()
+                .iter()
+                .find(|w| w.path.ends_with("locked.md"))
+                .unwrap_or_else(|| panic!("no unreadable warning: {:?}", index.warnings()));
+            assert_eq!(unreadable.kind, WarningKind::Unreadable);
+            assert!(unreadable.is_unreadable());
+
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+
+        // The spelling of the message is not the classification: a
+        // diagnostic whose text happens to open with "unreadable: " is
+        // still a diagnostic.
+        let colliding = IndexWarning {
+            path: vault.path().join("plain.md"),
+            kind: WarningKind::Frontmatter,
+            message: format!("{UNREADABLE_PREFIX}this is the note's own text"),
+        };
+        assert!(!colliding.is_unreadable());
     }
 
     #[test]
@@ -1754,10 +1828,9 @@ mod tests {
             let index = VaultIndex::build(vault.path()).unwrap();
             assert_eq!(index.len(), 1, "notes in the locked folder are skipped");
             assert!(
-                index
-                    .warnings()
-                    .iter()
-                    .any(|w| w.path.ends_with("locked") && w.message.contains("unreadable")),
+                index.warnings().iter().any(|w| w.path.ends_with("locked")
+                    && w.message.contains("unreadable")
+                    && w.is_unreadable()),
                 "warning names the directory: {:?}",
                 index.warnings()
             );
