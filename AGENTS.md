@@ -23,16 +23,14 @@ closed unit.
   spec is the orchestrator's to write; a builder that finds a rule missing
   reports it instead of editing it.
 - `README.md` — the user-facing description and the config keys.
-- `TODO.txt` — the orchestrator's state file: the unit in flight, the open
-  work, the order.
+- `TODO.md` — the orchestrator's state file: the unit in flight, the open
+  work, the order. It is tracked, so it travels with the repository.
 - `CHANGELOG.md` — the release notes. The `## [Unreleased]` section is the
   orchestrator's: a release's notes describe what shipped, every
   user-visible change included.
 - `docs/COLORS.md` — the theme vocabulary (`UiTheme` keys).
 - `crates/engine/VENDORED.md` — the vendored engine's boundary: every
   intentional deviation from upstream leaf, and what the app may change.
-- `TODO.md` — local planning file (gitignored): past investigations and the
-  measurements behind them.
 
 ## Project rules
 
@@ -53,7 +51,21 @@ closed unit.
 - **A rule written in more than one place drifts.** Give it one home, and
   find the other copies by *grepping for the pattern* — never by line
   number: a brief that enumerated instances by line number missed one twice
-  in a row, and the review caught both.
+  in a row, and the review caught both. **A rule that grows has to grow
+  its enumeration too** — the enumeration is part of the rule. And a comment
+  that restates a rule is a second home for it: point at the rule's owner
+  instead, because a pointer cannot drift.
+- **One gate at a time.** The orchestrator's gate and a builder's gate
+  must not overlap: the smoke suites append to fixed paths, so two
+  concurrent `make check` runs fail each other.
+- **A test that asserts "it moved" cannot catch "it stops short".** Assert
+  the end positions, not the motion.
+- **A background fact goes in its own slot, with its own precedence.** It
+  never replaces a newer error the user still needs, and it does not
+  outlive the condition it reports.
+- **Write a brief from the code, not from memory.** A brief can describe
+  the code's polarity backwards; the builders follow the code, and the
+  reviewers say so.
 - Match the surrounding code: one concern per module under
   `crates/app/src/`. A module with a large suite keeps it in
   `<module>/tests.rs` — `ui.rs` for the frame and `ui/tests.rs` for its
