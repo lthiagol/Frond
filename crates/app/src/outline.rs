@@ -71,11 +71,11 @@ pub fn active_row(entries: &[TocEntry], scroll: u32, at_end: bool) -> Option<usi
 /// The outline's two cursors over the open note's heading rows.
 pub struct Outline {
     /// Index of the selected row: the reader's cursor (`j`/`k`, a click,
-    /// the panel's bar). It is what `Enter` jumps to and a note scroll
-    /// never moves it.
+    /// the panel's bar) and the thing `Enter` jumps to. A note scroll takes
+    /// it to the active row; until then it stays where the reader put it.
     pub selected: usize,
     /// Index of the active row: the heading the reader is looking at, which
-    /// the note's scroll moves. It is marked, not selected.
+    /// the note's scroll moves. It is marked, and a note scroll selects it.
     pub active: usize,
     /// Viewport height fed back from `ui::draw` (inner height in rows).
     pub viewport: usize,
@@ -93,6 +93,11 @@ pub struct Outline {
     /// selection. The reader's own cursor moves, a click and the panel's bar
     /// hand it to the selection; a note scroll hands it back.
     follow: bool,
+    /// A note scroll has happened and the selection must take the active
+    /// row on the next [`Self::follow_note`]: the bar marks the heading the
+    /// reader is looking at. A reader move or a note change cancels it, so a
+    /// redraw before the next scroll cannot pull a fresh cursor away.
+    take_selection: bool,
 }
 
 impl Default for Outline {
@@ -110,6 +115,7 @@ impl Outline {
             scroll: 0,
             pin: None,
             follow: true,
+            take_selection: false,
         }
     }
 
@@ -140,6 +146,7 @@ impl Outline {
     pub fn on_note_change(&mut self, len: usize) {
         self.pin = None;
         self.follow = true;
+        self.take_selection = false;
         self.selected = 0;
         self.active = 0;
         self.scroll = 0;
@@ -147,11 +154,13 @@ impl Outline {
     }
 
     /// The reader moved the note themselves (a scroll, a search jump, a
-    /// link's heading): the outline follows the note again, and a jump's
-    /// pin is released.
+    /// link's heading): the outline follows the note again, a jump's pin is
+    /// released, and the selection goes with the scroll — the bar marks the
+    /// heading being read from the next frame on.
     pub fn note_scrolled(&mut self) {
         self.pin = None;
         self.follow = true;
+        self.take_selection = true;
     }
 
     /// A jump to row `index` of `entries` pinned it as the active row: the
@@ -172,9 +181,10 @@ impl Outline {
     }
 
     /// Recomputes the active row from the note's scroll position (a pin
-    /// wins) and, while the window follows the note, scrolls it into view.
-    /// Called from the drawer on every frame: the note's scroll and the
-    /// viewport are known there, and the frame is what the reader sees.
+    /// wins), takes the selection with a pending note scroll, and, while
+    /// the window follows the note, scrolls it into view. Called from the
+    /// drawer on every frame: the note's scroll and the viewport are known
+    /// there, and the frame is what the reader sees.
     pub fn follow_note(&mut self, entries: &[TocEntry], scroll: u32, at_end: bool) {
         self.sync(entries.len());
         let Some(active) = self
@@ -185,6 +195,10 @@ impl Outline {
             return;
         };
         self.active = active;
+        if self.take_selection {
+            self.selected = self.active;
+            self.take_selection = false;
+        }
         if self.follow {
             self.scroll_row_into_view(self.active, entries.len());
         }
@@ -216,6 +230,7 @@ impl Outline {
         }
         self.selected = index;
         self.follow = false;
+        self.take_selection = false;
         self.scroll_selection_into_view(len);
     }
 
@@ -233,6 +248,7 @@ impl Outline {
         }
         self.selected = (self.selected as isize + delta).clamp(0, len as isize - 1) as usize;
         self.follow = false;
+        self.take_selection = false;
         self.scroll_selection_into_view(len);
     }
 
@@ -389,23 +405,31 @@ mod tests {
     }
 
     #[test]
-    fn follow_note_scrolls_the_active_row_into_view_without_moving_the_selection() {
+    fn follow_note_scrolls_the_active_row_into_view_and_takes_the_selection() {
         let mut outline = Outline::new();
         outline.viewport = 3;
         let lines: Vec<usize> = (0..12).map(|i| i * 10).collect();
         let entries = spaced(&lines);
 
+        outline.note_scrolled();
         outline.follow_note(&entries, 70, false);
         assert_eq!(outline.active, 7, "the heading at or above the top");
         assert_eq!(outline.scroll, 5, "the active row is the last visible one");
-        assert_eq!(outline.selected, 0, "the scroll never moves the selection");
+        assert_eq!(
+            outline.selected, 7,
+            "the bar marks the heading the reader is looking at"
+        );
 
+        outline.note_scrolled();
         outline.follow_note(&entries, 0, false);
         assert_eq!(outline.active, 0);
+        assert_eq!(outline.selected, 0, "scrolling up brings the bar back");
         assert_eq!(outline.scroll, 0, "scrolling up brings the heading back");
 
+        outline.note_scrolled();
         outline.follow_note(&entries, 0, true);
         assert_eq!(outline.active, 11, "the end of the note is its last row");
+        assert_eq!(outline.selected, 11);
         assert_eq!(outline.scroll, 9);
     }
 
@@ -423,11 +447,15 @@ mod tests {
             outline.active, 11,
             "the pinned heading stays active under the note's scroll"
         );
+        assert_eq!(outline.selected, 11, "and it stays the selection");
 
         outline.note_scrolled();
         outline.follow_note(&entries, 20, false);
         assert_eq!(outline.active, 2, "the reader's scroll releases the pin");
-        assert_eq!(outline.selected, 11, "the selection still does not move");
+        assert_eq!(
+            outline.selected, 2,
+            "and the scroll takes the selection with it"
+        );
     }
 
     #[test]
@@ -437,9 +465,10 @@ mod tests {
         let lines: Vec<usize> = (0..12).map(|i| i * 10).collect();
         let entries = spaced(&lines);
 
+        outline.note_scrolled();
         outline.follow_note(&entries, 90, false);
         assert_eq!(outline.active, 9);
-        outline.move_up(1, entries.len());
+        outline.move_up(100, entries.len());
         assert_eq!(outline.selected, 0, "clamped at the first row");
         assert_eq!(outline.scroll, 0, "the window follows the reader's move");
 
@@ -448,11 +477,18 @@ mod tests {
             outline.scroll, 0,
             "a redraw alone does not drag the window to the active row"
         );
+        assert_eq!(
+            outline.selected, 0,
+            "nor does a redraw move the reader's own cursor"
+        );
 
         outline.note_scrolled();
         outline.follow_note(&entries, 90, false);
         assert_eq!(outline.scroll, 7, "the note's scroll took the window back");
-        assert_eq!(outline.selected, 0, "and the selection stayed put");
+        assert_eq!(
+            outline.selected, 9,
+            "and the selection went with the scroll"
+        );
     }
 
     #[test]

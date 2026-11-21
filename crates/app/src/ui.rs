@@ -330,17 +330,27 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     let mut sidebar_bar = None;
     if let Some(sidebar_rect) = sidebar_area {
+        // The header the tree and tag views carry: the vault directory's
+        // name. It comes from the tree's root (the same path the index
+        // holds); the index is the fallback when there is no tree.
+        let vault_label = app
+            .sidebar
+            .as_ref()
+            .map(|sidebar| vault_name(&sidebar.root))
+            .or_else(|| {
+                app.index
+                    .as_ref()
+                    .map(|index| vault_name(index.borrow().root()))
+            });
         let index = app.index.as_ref().map(|i| i.borrow());
+        let chrome = ListChrome {
+            vault_name: vault_label.as_deref().unwrap_or(""),
+            ui,
+            focused: app.focus == Focus::Sidebar,
+            pointer,
+        };
         if app.sidebar_mode == SidebarMode::Tags {
-            sidebar_bar = draw_tag_list(
-                f,
-                sidebar_rect,
-                &mut app.tags,
-                ui,
-                app.focus == Focus::Sidebar,
-                index.as_deref(),
-                pointer,
-            );
+            sidebar_bar = draw_tag_list(f, sidebar_rect, &mut app.tags, chrome, index.as_deref());
         } else if app.sidebar_mode == SidebarMode::Outline {
             let focused = app.focus == Focus::Sidebar;
             // The `.base`-table rule lives in `app::outline_rows`; split
@@ -363,13 +373,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 f,
                 sidebar_rect,
                 sidebar,
-                ui,
-                app.focus == Focus::Sidebar,
+                chrome,
                 RowFacts {
                     index: index.as_deref(),
                     git: app.git.as_ref(),
                 },
-                pointer,
             );
         }
     }
@@ -577,16 +585,38 @@ struct RowFacts<'a> {
     git: Option<&'a GitStatus>,
 }
 
+/// The vault's display name: the directory name the tree and tag views show
+/// in their header block. A root with no final component (the filesystem
+/// root) falls back to its full display form, so the header always names
+/// what it lists.
+fn vault_name(root: &Path) -> String {
+    root.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| root.display().to_string())
+}
+
+/// The chrome the tree and tag views draw with: the vault name their header
+/// shows, the palette, and the pointer for the bars' hover. Bundled so both
+/// renderers take one chrome argument instead of four.
+#[derive(Clone, Copy)]
+struct ListChrome<'a> {
+    /// The vault directory's name, centred in the header block.
+    vault_name: &'a str,
+    ui: UiTheme,
+    focused: bool,
+    pointer: Option<Position>,
+}
+
 fn draw_sidebar(
     f: &mut Frame,
     area: Rect,
     sidebar: &mut crate::sidebar::Sidebar,
-    ui: UiTheme,
-    focused: bool,
+    chrome: ListChrome<'_>,
     facts: RowFacts<'_>,
-    pointer: Option<Position>,
 ) -> Option<Rect> {
-    let inner_height = area.height.saturating_sub(2) as usize;
+    let ui = chrome.ui;
+    let list_area = list_body_area(area);
+    let inner_height = list_area.height.saturating_sub(2) as usize;
     sidebar.on_viewport_height(inner_height.max(1));
     sidebar.scroll_selection_into_view();
 
@@ -596,7 +626,7 @@ fn draw_sidebar(
     // Text area: the bordered inner area, minus the scrollbar column when
     // the rows overflow (the bar sits on the inner right edge, so the
     // border itself stays intact).
-    let text_area = list_text_area(area, overflow);
+    let text_area = list_text_area(list_area, overflow);
     let inner_width = text_area.width as usize;
 
     let window: Vec<Line<'static>> = rows
@@ -621,17 +651,18 @@ fn draw_sidebar(
         f,
         ListPanel {
             area,
-            list_area: area,
+            list_area,
             text_area,
             title: " vault ".into(),
-            focused,
+            header: Some(chrome.vault_name.to_string()),
+            focused: chrome.focused,
             scroll: sidebar.scroll,
             rows_total,
             overflow,
         },
         window,
         ui,
-        pointer,
+        chrome.pointer,
     )
 }
 
@@ -641,11 +672,14 @@ struct ListPanel {
     /// The whole bordered panel.
     area: Rect,
     /// The panel rect whose inner rows are the list. It differs from `area`
-    /// only when a header sits above the rows (the outline's TOC label):
+    /// only when a header sits above the rows (every sidebar mode's label):
     /// the bar's track and its row mapping start below it.
     list_area: Rect,
     text_area: Rect,
     title: String,
+    /// The label the header block centres above the rows. The tree and tag
+    /// views name the vault; the outline says `TABLE OF CONTENTS`.
+    header: Option<String>,
     focused: bool,
     scroll: usize,
     rows_total: usize,
@@ -680,6 +714,13 @@ fn render_list_panel(
         Paragraph::new(window).style(Style::new().bg(ui.sidebar_bg)),
         panel.text_area,
     );
+    if let Some(label) = &panel.header {
+        // Chrome inside the border: paint it after the rows so the rule's
+        // `┤` tee overwrites the border's `│`. The rows cannot reach it:
+        // they render into `text_area`, which starts below the header, and
+        // ratatui clips a Paragraph to its rect.
+        draw_list_header(f, panel.area, label, ui, panel.focused);
+    }
     if panel.overflow {
         let bar = list_scrollbar_area(panel.list_area);
         draw_scrollbar(
@@ -794,31 +835,31 @@ fn sidebar_line(
     line
 }
 
-/// The outline panel's `TABLE OF CONTENTS` header, top to bottom: a blank
-/// row, the label, and the rule under it — leaf's `render/toc.rs` header
-/// chunk. The list (its viewport, its bar and its row clicks) starts below
-/// these rows.
-enum OutlineHeaderRow {
+/// The header block every sidebar list mode carries above its rows, top to
+/// bottom: a blank row, the label, and the rule under it — leaf's
+/// `render/toc.rs` header chunk. The list (its viewport, its bar and its row
+/// clicks) starts below these rows.
+enum ListHeaderRow {
     Blank,
     Label,
     Rule,
 }
 
-const OUTLINE_HEADER: [OutlineHeaderRow; 3] = [
-    OutlineHeaderRow::Blank,
-    OutlineHeaderRow::Label,
-    OutlineHeaderRow::Rule,
+const LIST_HEADER: [ListHeaderRow; 3] = [
+    ListHeaderRow::Blank,
+    ListHeaderRow::Label,
+    ListHeaderRow::Rule,
 ];
 
 /// Rows the header takes above the list. Derived from the row sequence so
 /// the renderer, the viewport and the click mapping cannot disagree.
-pub(crate) const OUTLINE_HEADER_ROWS: u16 = OUTLINE_HEADER.len() as u16;
+pub(crate) const LIST_HEADER_ROWS: u16 = LIST_HEADER.len() as u16;
 
-/// The panel rect whose inner rows are the outline's headings: the panel
-/// minus the TOC header. `list_row_at` adds the top border itself, so this
-/// skips the header only; the bar drawn from it starts below the rule.
-pub(crate) fn outline_list_area(area: Rect) -> Rect {
-    let header = OUTLINE_HEADER_ROWS.min(area.height.saturating_sub(2));
+/// The panel rect whose inner rows are the list: the panel minus the
+/// header. `list_row_at` adds the top border itself, so this skips the
+/// header only; the bar drawn from it starts below the rule.
+pub(crate) fn list_body_area(area: Rect) -> Rect {
+    let header = LIST_HEADER_ROWS.min(area.height.saturating_sub(2));
     Rect {
         y: area.y.saturating_add(header),
         height: area.height.saturating_sub(header),
@@ -839,7 +880,7 @@ fn draw_outline(
     focused: bool,
     pointer: Option<Position>,
 ) -> Option<Rect> {
-    let list_area = outline_list_area(area);
+    let list_area = list_body_area(area);
     let list_height = list_area.height.saturating_sub(2) as usize;
     let rows_total = entries.len();
     outline.on_viewport_height(list_height.max(1), rows_total);
@@ -871,13 +912,14 @@ fn draw_outline(
             .collect()
     };
 
-    let bar = render_list_panel(
+    render_list_panel(
         f,
         ListPanel {
             area,
             list_area,
             text_area,
             title: " outline ".into(),
+            header: Some("TABLE OF CONTENTS".into()),
             focused,
             scroll: outline.scroll,
             rows_total,
@@ -886,21 +928,15 @@ fn draw_outline(
         window,
         ui,
         pointer,
-    );
-    // The header is chrome inside the border, so it paints after the panel:
-    // the rule's `┤` tee overwrites the border's `│` on the rule row. (The
-    // rows cannot reach it: they render into `text_area`, which starts below
-    // the header, and ratatui clips a Paragraph to its rect.)
-    draw_outline_header(f, area, ui, focused);
-    bar
+    )
 }
 
-/// Paints the outline's label and its rule inside the panel's top border,
-/// row for row from [`OUTLINE_HEADER`]: a blank row, a bold
-/// ` TABLE OF CONTENTS`, then a rule that tees into the panel's right
-/// border with leaf's `┤` corner. The rows come out of the list (see
-/// [`outline_list_area`]), never out of the headings.
-fn draw_outline_header(f: &mut Frame, area: Rect, ui: UiTheme, focused: bool) {
+/// Paints a list panel's label and its rule inside the panel's top border,
+/// row for row from [`LIST_HEADER`]: a blank row, a centred bold label, then
+/// a rule that tees into the panel's right border with leaf's `┤` corner.
+/// The rows come out of the list (see [`list_body_area`]); this is chrome
+/// above them.
+fn draw_list_header(f: &mut Frame, area: Rect, label: &str, ui: UiTheme, focused: bool) {
     let inner = Rect {
         x: area.x + 1,
         y: area.y + 1,
@@ -916,32 +952,35 @@ fn draw_outline_header(f: &mut Frame, area: Rect, ui: UiTheme, focused: bool) {
         ui.sidebar_border_unfocused
     };
     let rule_style = Style::new().fg(border).bg(ui.sidebar_bg);
-    for (row, kind) in OUTLINE_HEADER.iter().enumerate() {
+    for (row, kind) in LIST_HEADER.iter().enumerate() {
         let y = inner.y + row as u16;
         if y >= inner.bottom() {
             break;
         }
         match kind {
-            OutlineHeaderRow::Blank => {}
-            OutlineHeaderRow::Label => {
-                let label = Rect {
-                    y,
-                    height: 1,
-                    ..inner
+            ListHeaderRow::Blank => {}
+            ListHeaderRow::Label => {
+                let style = Style::new()
+                    .fg(ui.dimmed_fg)
+                    .bg(ui.sidebar_bg)
+                    .add_modifier(Modifier::BOLD);
+                let width = UnicodeWidthStr::width(label) as u16;
+                // Centre the label in the panel; a panel too narrow for it
+                // falls back to the left edge rather than offsetting it.
+                let x = if width < inner.width {
+                    inner.x + (inner.width - width) / 2
+                } else {
+                    inner.x
                 };
-                f.render_widget(
-                    Paragraph::new(Line::from(Span::styled(
-                        " TABLE OF CONTENTS",
-                        Style::new()
-                            .fg(ui.dimmed_fg)
-                            .bg(ui.sidebar_bg)
-                            .add_modifier(Modifier::BOLD),
-                    )))
-                    .style(Style::new().bg(ui.sidebar_bg)),
+                f.buffer_mut().set_stringn(
+                    x,
+                    y,
                     label,
+                    inner.right().saturating_sub(x) as usize,
+                    style,
                 );
             }
-            OutlineHeaderRow::Rule => {
+            ListHeaderRow::Rule => {
                 f.buffer_mut().set_stringn(
                     inner.x,
                     y,
@@ -1016,18 +1055,18 @@ fn draw_tag_list(
     f: &mut Frame,
     area: Rect,
     tags: &mut crate::tags::TagList,
-    ui: UiTheme,
-    focused: bool,
+    chrome: ListChrome<'_>,
     index: Option<&VaultIndex>,
-    pointer: Option<Position>,
 ) -> Option<Rect> {
-    let inner_height = area.height.saturating_sub(2) as usize;
+    let ui = chrome.ui;
+    let list_area = list_body_area(area);
+    let inner_height = list_area.height.saturating_sub(2) as usize;
     tags.on_viewport_height(inner_height.max(1));
     tags.scroll_selection_into_view();
 
     let rows_total = tags.rows().len();
     let overflow = rows_total > inner_height;
-    let text_area = list_text_area(area, overflow);
+    let text_area = list_text_area(list_area, overflow);
     let inner_width = text_area.width as usize;
 
     let rows = tags.rows();
@@ -1045,17 +1084,18 @@ fn draw_tag_list(
         f,
         ListPanel {
             area,
-            list_area: area,
+            list_area,
             text_area,
             title: " tags ".into(),
-            focused,
+            header: Some(chrome.vault_name.to_string()),
+            focused: chrome.focused,
             scroll: tags.scroll,
             rows_total,
             overflow,
         },
         window,
         ui,
-        pointer,
+        chrome.pointer,
     )
 }
 
@@ -1153,6 +1193,7 @@ fn draw_backlinks(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme, focused
             list_area: area,
             text_area,
             title: format!(" backlinks ({}) ", app.backlinks.len()),
+            header: None,
             focused,
             scroll: app.backlink_scroll,
             rows_total,

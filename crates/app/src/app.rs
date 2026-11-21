@@ -1495,10 +1495,13 @@ impl App {
     /// path (nav push, scroll reset, error surfacing). Returns whether a
     /// note/base table was opened (and focus moved to `Content`).
     fn sidebar_click(&mut self, row: u16, area: Rect) -> bool {
+        // Every sidebar mode carries the same header block above its rows:
+        // the click mapping starts below it, like the viewport and the bar.
+        let list_area = crate::ui::list_body_area(area);
         match self.sidebar_mode {
             SidebarMode::Tree => {
                 let clicked = self.sidebar.as_mut().and_then(|sidebar| {
-                    let index = sidebar.row_index_at_screen_row(area, row)?;
+                    let index = sidebar.row_index_at_screen_row(list_area, row)?;
                     sidebar.click(index)
                 });
                 self.open_sidebar_path(clicked)
@@ -1507,16 +1510,13 @@ impl App {
                 let clicked = {
                     let scroll = self.tags.scroll;
                     let len = self.tags.rows().len();
-                    crate::sidebar::list_row_at(row, area, scroll, len)
+                    crate::sidebar::list_row_at(row, list_area, scroll, len)
                         .and_then(|index| self.tags.click(index))
                 };
                 self.open_sidebar_path(clicked)
             }
             SidebarMode::Outline => {
                 let len = self.outline_len();
-                // The TOC label's header rows are inside the panel, above
-                // the headings: the row mapping starts below them.
-                let list_area = crate::ui::outline_list_area(area);
                 let Some(index) =
                     crate::sidebar::list_row_at(row, list_area, self.outline.scroll, len)
                 else {
