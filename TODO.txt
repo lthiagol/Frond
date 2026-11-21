@@ -45,6 +45,13 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - The 0.6.6 cut: `Cargo.toml` and `Cargo.lock` bumped 0.6.5 -> 0.6.6,
+    and the changelog released as `## [0.6.6] - 2026-11-21` with a fresh
+    empty `## [Unreleased]` above it. **No tag**: the human's decision -
+    the version lives in the tree, and the tag can follow whenever. The
+    cycle's nine entries are the release's notes: the sidebar's header and
+    the outline's label, numbering and scroll-following, the outline's wheel
+    scrolling its view, and the two vault warnings that no longer go quiet.
   - Unit 50 - the wheel over the outline scrolls the panel's **view**, the
     way leaf's table of contents does: the reading position stays where the
     note put it, and the panel stops following the note until the reader

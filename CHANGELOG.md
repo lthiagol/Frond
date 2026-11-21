@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+
+### Fixed
+
+### Changed
+
+## [0.6.6] — 2026-11-21
+
+### Added
 - The sidebar's panels say what they list: the tree and tag views carry
   the vault's name in a header block over a rule, the way the outline's
   `TABLE OF CONTENTS` label does, and every label is centred, with a
