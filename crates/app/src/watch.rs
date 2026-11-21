@@ -16,14 +16,19 @@ use vault::{IndexWarning, VaultIndex};
 
 use crate::viewer::FileStamp;
 
-/// One poll's outcome: the paths whose index entries changed, plus the
-/// walk's warnings (directories that could not be read this tick). The
+/// One poll's outcome: the paths whose index entries changed, plus what the
+/// walk could say about directories that could not be read this tick. The
 /// caller must surface the warnings — a directory dropping out of the
 /// index is never silent.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PollOutcome {
     pub changed: Vec<PathBuf>,
-    pub warnings: Vec<IndexWarning>,
+    /// The walk's warnings; `None` when the walk failed outright (the root
+    /// itself could not be read). The two are opposites to the caller: an
+    /// empty list is evidence that every directory read, so a warning's
+    /// condition ended; `None` is evidence of nothing, so it must not clear
+    /// a warning.
+    pub warnings: Option<Vec<IndexWarning>>,
 }
 
 /// Fingerprint of every currently-indexed note.
@@ -55,18 +60,25 @@ impl VaultWatcher {
     /// One vault-wide poll: reindexes every changed/new/removed file and
     /// returns the changed paths plus the walk's warnings (empty
     /// `changed` = nothing happened). A root that cannot be walked at all
-    /// is skipped entirely (retry next tick).
+    /// is skipped entirely (retry next tick) and reports no warnings: the
+    /// walk could not look, which is not the same as finding every
+    /// directory readable.
     pub fn poll(&mut self, index: &mut VaultIndex) -> PollOutcome {
         let Ok(report) = walk_vault_with_warnings(index.root()) else {
-            return PollOutcome::default();
+            return PollOutcome {
+                changed: Vec::new(),
+                warnings: None,
+            };
         };
         PollOutcome {
             changed: self.reconcile(index, &report.entries),
-            warnings: report
-                .warnings
-                .into_iter()
-                .map(IndexWarning::from)
-                .collect(),
+            warnings: Some(
+                report
+                    .warnings
+                    .into_iter()
+                    .map(IndexWarning::from)
+                    .collect(),
+            ),
         }
     }
 
@@ -325,13 +337,14 @@ mod tests {
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
         }
         let outcome = watcher.poll(&mut index);
+        let warnings = outcome
+            .warnings
+            .expect("the walk could read the root and reported");
         assert!(
-            outcome
-                .warnings
+            warnings
                 .iter()
                 .any(|w| w.path == locked && w.message.contains("unreadable")),
-            "the locked directory is reported: {:?}",
-            outcome.warnings
+            "the locked directory is reported: {warnings:?}"
         );
 
         // Readable again: the warning clears and the note comes back.
@@ -340,7 +353,51 @@ mod tests {
             fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
         }
         let outcome = watcher.poll(&mut index);
-        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+        let warnings = outcome
+            .warnings
+            .expect("the walk could read the root and reported");
+        assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(index.len(), 2, "the note is back in the index");
+    }
+
+    /// A root the walk cannot read fails the whole walk: it must say so,
+    /// because an empty warning list would mean "every directory read" and
+    /// would clear a warning whose condition still holds.
+    #[test]
+    fn a_root_that_cannot_be_walked_reports_no_warnings_not_an_empty_list() {
+        let dir = TempDir::new("watch-rootfail");
+        write(&dir.path().join("a.md"), "a\n");
+        std::fs::create_dir_all(dir.path().join("locked")).unwrap();
+        let mut index = VaultIndex::build(dir.path()).unwrap();
+        let mut watcher = VaultWatcher::new(&index);
+
+        let sub = dir.path().join("locked");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&sub, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        // The first poll reports the locked directory (the root reads).
+        let outcome = watcher.poll(&mut index);
+        assert!(outcome.warnings.is_some(), "the walk ran");
+
+        // Now the root itself cannot be read: the walk fails outright.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let outcome = watcher.poll(&mut index);
+        assert!(
+            outcome.warnings.is_none(),
+            "a failed walk is not an empty report: {:?}",
+            outcome.warnings
+        );
+        assert!(outcome.changed.is_empty(), "and nothing was reindexed");
+
+        // Restore so the fixture can be removed.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 }

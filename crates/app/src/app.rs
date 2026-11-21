@@ -1549,7 +1549,7 @@ impl App {
         let mut vault_changed = false;
         // `Some` only when a scan actually ran this tick: a poll between
         // scans must not look like "no warnings" and clear the condition.
-        let mut walk_warnings = None;
+        let mut walk_outcome = None;
         if let Some(index) = &self.index {
             if current_reloaded {
                 index.borrow_mut().reindex_one(&self.viewer.path);
@@ -1562,14 +1562,13 @@ impl App {
             {
                 self.last_vault_scan = Some(now);
                 if let Some(watcher) = &mut self.watcher {
-                    let outcome = watcher.poll(&mut index.borrow_mut());
-                    vault_changed |= !outcome.changed.is_empty();
-                    walk_warnings = Some(outcome.warnings);
+                    walk_outcome = Some(watcher.poll(&mut index.borrow_mut()));
                 }
             }
         }
-        if let Some(warnings) = walk_warnings {
-            vault_changed |= self.surface_walk_warnings(&warnings);
+        if let Some(outcome) = walk_outcome {
+            vault_changed |= !outcome.changed.is_empty();
+            vault_changed |= self.surface_walk_warnings(outcome.warnings.as_deref());
         }
 
         if vault_changed {
@@ -1612,10 +1611,16 @@ impl App {
     /// Records the vault's unreadable-path warning for the status bar: the
     /// warnings from the walk that just ran plus any startup warning whose
     /// condition still holds. A directory is re-reported by every walk, so
-    /// the walk's list is authoritative for it; a file is not part of the
+    /// a walk that ran is authoritative for it; a file is not part of the
     /// walk, so its startup warning is re-checked against the read until
     /// the file can be indexed again. The same path from both sources is
     /// one message, not two.
+    ///
+    /// `walk` is `None` when the walk itself failed (the root could not be
+    /// read). That is not an empty report: the walk could not look, and a
+    /// root that cannot be walked leaves every path under it unreadable, so
+    /// it is never evidence that a warning's condition ended. The slot is
+    /// left exactly as it is until a walk can check again.
     ///
     /// This is state, not an event: an empty set clears the slot, and an
     /// unchanged set leaves it untouched. A file that now reads is
@@ -1625,7 +1630,10 @@ impl App {
     /// `viewer.last_error` — a background condition must never replace a
     /// newer error (a refused write, a failed open) that still needs the
     /// user.
-    fn surface_walk_warnings(&mut self, walk: &[vault::IndexWarning]) -> bool {
+    fn surface_walk_warnings(&mut self, walk: Option<&[vault::IndexWarning]>) -> bool {
+        let Some(walk) = walk else {
+            return false;
+        };
         // A file that reads again is healed, not merely silent: reindex it
         // so the note is back in the index when its warning goes. A
         // directory is re-walked, and a vanished path names no note, so

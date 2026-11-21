@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ### Added
 
 ### Fixed
+- The status bar's warning for a directory the vault cannot read no longer
+  disappears when the vault walk itself fails. A walk that could not look
+  is not evidence that every directory reads, so the warning stays until a
+  walk can check again; before, a failed walk cleared it and the notes
+  inside the unreadable directory were missing with no word about it.
 
 ### Changed
 
