@@ -35,6 +35,14 @@ WHERE WE ARE
   orchestrator, and the release notes covering every user-visible change.
 
 DONE
+  - Unit 37 - the directory's warning survives a failed walk: when the whole
+    vault walk failed, the status bar's warning for an unreadable directory
+    disappeared and the notes inside it were missing with no word about it.
+    The poll's warnings are an `Option` now - `None` when the walk could
+    not look, `Some` (even empty) after a real walk - so a failed walk is
+    no evidence and clears nothing; `Default` is gone, so no call site can
+    build the old ambiguous state. Two reviewers, 0 blocking, 3 low (all
+    carried; one folded into unit 41).
   - Unit 36 - the walk warning's kind is structural: `IndexWarning` was
     `{ path, message }` and told an unreadable path apart from a
     frontmatter diagnostic by matching the message against the
