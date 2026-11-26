@@ -69,6 +69,8 @@ if pid == 0:
     os.environ["TERM"] = "xterm-256color"
     # The quit-time session save must not touch the real ~/.local/state.
     os.environ["FROND_SESSION"] = smoke_tmp.path("frond-m4-session")
+    # Never the real ~/.config: a missing file is the default config.
+    os.environ["FROND_CONFIG"] = smoke_tmp.path("frond-no-config.toml")
     # NO_COLOR would strip every SGR color; the mouse-flow checks compare
     # cell backgrounds, so the child must emit colors.
     os.environ.pop("NO_COLOR", None)

@@ -37,6 +37,8 @@ if pid == 0:
     os.environ["TERM"] = "xterm-256color"
     # The quit-time session save must not touch the real ~/.local/state.
     os.environ["FROND_SESSION"] = smoke_tmp.path("frond-smoke-session")
+    # Never the real ~/.config: a missing file is the default config.
+    os.environ["FROND_CONFIG"] = smoke_tmp.path("frond-no-config.toml")
     fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
     os.execv(APP, [APP, TMP])
 

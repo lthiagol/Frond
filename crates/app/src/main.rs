@@ -1,11 +1,13 @@
 //! Read-only TUI shell with sidebar (tree/tags), backlinks panel,
 //! wikilink navigation, navigation history, watch mode.
 //!
-//! Usage: `frond [--vault <dir>] [file.md]` — `frond --help` for all flags
-//! (`--config-show` prints a commented default config file).
+//! Usage: `frond [--vault <dir|name>] [file.md]` — `frond --help` for all
+//! flags (`--config-show` prints a commented default config file).
 //!
-//! With neither `--vault` (nor a config `vault`) nor a file argument, the app
-//! prompts for the vault directory. A file argument without a vault is
+//! Which vault opens is SPEC.md "Data flow" step 1 ([`choose_vault`]): with
+//! two or more config `[vaults]` and neither `--vault` nor a file argument,
+//! the vault picker ([`vault_picker`]) runs first; with nothing to go on,
+//! the app prompts for the vault directory. A file argument without a vault is
 //! opened on its own, without a sidebar; the vault index is then the
 //! current directory. With a vault, `Tab` shows/hides the sidebar tree; `h`/`l` move focus between
 //! sidebar and content; `Backspace`/`Ctrl+O` walk the navigation history.
@@ -43,6 +45,7 @@ mod tasks;
 mod testutil;
 mod theme;
 mod ui;
+mod vault_picker;
 mod viewer;
 mod watch;
 
@@ -96,10 +99,11 @@ enum Info {
 const HELP_TEXT: &str = "\
 frond — a terminal markdown vault reader
 
-Usage: frond [--vault <dir>] [--theme <name>] [file.md | file.base]
+Usage: frond [--vault <dir|name>] [--theme <name>] [file.md | file.base]
 
 Options:
-  --vault <dir>         Vault directory to index (config: vault)
+  --vault <dir|name>    Vault directory to index, or a [vaults] name
+                        (config: vault)
   --theme <name>        Theme by name (config: theme)
   --watch[=true|false]  Live re-render on vault changes (config: watch)
   --mouse[=true|false]  Mouse capture on/off; off = native text selection
@@ -108,8 +112,9 @@ Options:
   --version             Print the version and exit
   --help                Print this help and exit
 
-With neither --vault (nor a config vault) nor a file argument, frond
-prompts for the vault directory. Config file:
+With two or more config [vaults] and neither --vault nor a file argument,
+frond opens on a vault picker. With no vault at all and no file argument,
+it prompts for the vault directory. Config file:
 ~/.config/frond/config.toml (frond --config-show prints a template).
 ";
 
@@ -137,7 +142,7 @@ fn parse_args_from(args: impl Iterator<Item = String>) -> Result<Args, String> {
             "--vault" => {
                 let value = args
                     .get(index + 1)
-                    .ok_or("--vault requires a directory argument")?;
+                    .ok_or("--vault requires a directory or vault name argument")?;
                 index += 1;
                 vault = Some(value.into());
             }
@@ -297,11 +302,115 @@ fn expand_tilde(path: &Path) -> PathBuf {
     }
 }
 
+/// Where the vault comes from (SPEC.md "Data flow" step 1).
+#[derive(Debug, PartialEq, Eq)]
+enum VaultChoice {
+    /// This path (a `[vaults]` name already resolved; not yet absolutized).
+    Path(PathBuf),
+    /// Two or more `[vaults]` entries: ask in the vault picker.
+    Picker,
+    /// Nothing to go on and no file argument: prompt on stdin.
+    Prompt,
+    /// A file argument without a vault: the cwd indexes.
+    None,
+}
+
+fn choose_vault(flag: Option<&Path>, has_file: bool, config: &config::Config) -> VaultChoice {
+    let resolve = |value: &Path| VaultChoice::Path(resolve_vault_name(value, &config.vaults));
+    if let Some(flag) = flag {
+        return resolve(flag);
+    }
+    if !has_file && config.vaults.len() >= 2 {
+        return VaultChoice::Picker;
+    }
+    if let Some(key) = &config.vault {
+        return resolve(key);
+    }
+    if config.vaults.len() == 1 {
+        if let Some(path) = config.vaults.values().next() {
+            return VaultChoice::Path(path.clone());
+        }
+    }
+    if has_file {
+        VaultChoice::None
+    } else {
+        VaultChoice::Prompt
+    }
+}
+
+/// A `--vault`/`vault` value: a `[vaults]` name resolves to its entry's
+/// path; anything else is a path. A name wins over a same-named relative
+/// path (`./work` reaches the directory).
+fn resolve_vault_name(
+    value: &Path,
+    vaults: &std::collections::BTreeMap<String, PathBuf>,
+) -> PathBuf {
+    value
+        .to_str()
+        .and_then(|name| vaults.get(name))
+        .unwrap_or(&value.to_path_buf())
+        .clone()
+}
+
+/// The picker's entries, in name order, `~` expanded.
+fn picker_entries(config: &config::Config) -> Vec<vault_picker::VaultEntry> {
+    let home = std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from);
+    config
+        .vaults
+        .iter()
+        .map(|(name, path)| {
+            vault_picker::VaultEntry::new(name.clone(), expand_tilde(path), home.as_deref())
+        })
+        .collect()
+}
+
+/// The picker's preselected entry (`vault_picker::preselect` owns the
+/// order). The `vault` key's `~` is expanded first, as the entries' paths
+/// are, so a `~` path key finds its entry.
+fn picker_preselection(entries: &[vault_picker::VaultEntry], config: &config::Config) -> usize {
+    let last = session::load_last_vault();
+    let key = config.vault.as_deref().map(expand_tilde);
+    vault_picker::preselect(entries, last.as_deref(), key.as_deref())
+}
+
+/// The UI palette of the startup theme, for the picker (drawn before the
+/// App exists). Theme warnings are left to the App's own resolution.
+fn picker_palette(theme_name: &str) -> theme::UiTheme {
+    let custom = theme::discover_custom_themes(&theme::default_theme_dirs());
+    theme::resolve_theme(theme_name, &custom)
+        .or_else(|_| theme::resolve_theme(theme::DEFAULT_THEME, &custom))
+        .map(|resolved| resolved.theme.ui)
+        .unwrap_or_else(|_| theme::preset_theme(Default::default()).ui)
+}
+
+/// The startup picker loop. `Ok(None)` = the user quit.
+fn run_picker(
+    terminal: &mut Tui,
+    picker: &mut vault_picker::PickerState,
+    ui: theme::UiTheme,
+) -> io::Result<Option<PathBuf>> {
+    loop {
+        terminal.draw(|f| ui::draw_vault_picker(f, picker, ui))?;
+        if let Event::Key(key) = event::read()? {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match picker.handle_key(key) {
+                vault_picker::PickerFlow::Continue => {}
+                vault_picker::PickerFlow::Open(path) => return Ok(Some(path)),
+                vault_picker::PickerFlow::Quit => return Ok(None),
+            }
+        }
+    }
+}
+
 fn main() {
-    let mut args = match parse_args() {
+    let args = match parse_args() {
         Ok(args) => args,
         Err(msg) => {
-            eprintln!("usage: frond [--vault <dir>] [--theme <name>] [--watch[=true|false]] [--mouse[=true|false]] [file.md | file.base]");
+            eprintln!("usage: frond [--vault <dir|name>] [--theme <name>] [--watch[=true|false]] [--mouse[=true|false]] [file.md | file.base]");
             eprintln!("error: {msg}");
             std::process::exit(2);
         }
@@ -326,7 +435,7 @@ fn main() {
 
     // Config file (~/.config/frond/config.toml; FROND_CONFIG overrides for
     // tests/smokes). Missing = defaults; malformed = warning + defaults.
-    let (mut config, config_warnings) = match config::config_path() {
+    let (config, config_warnings) = match config::config_path() {
         Some(path) => config::load(&path),
         None => (config::Config::default(), Vec::new()),
     };
@@ -336,29 +445,54 @@ fn main() {
 
     // Precedence: CLI flags > config values (theme: flag > FROND_THEME env
     // > config > default).
-    // No vault from flags/config and no file argument: prompt for one
-    // (before raw mode, so the line editor works normally).
-    let vault = match args.vault.take().or(config.vault.take()) {
-        Some(v) => Some(absolutize(&v)),
-        None if args.file.is_none() => match prompt_vault_path() {
+    let theme_name = theme::effective_theme_name(
+        args.theme.as_deref(),
+        std::env::var("FROND_THEME").ok().as_deref(),
+        config.theme.as_deref(),
+    );
+    let mouse = effective_mouse(args.mouse, config.mouse);
+    install_panic_hook();
+    // The picker runs in the TUI, so the terminal is set up before the
+    // vault is known; the App then reuses it.
+    let mut early_terminal: Option<Tui> = None;
+    let vault = match choose_vault(args.vault.as_deref(), args.file.is_some(), &config) {
+        VaultChoice::Path(v) => Some(absolutize(&v)),
+        VaultChoice::Picker => {
+            let entries = picker_entries(&config);
+            let pre = picker_preselection(&entries, &config);
+            let mut picker = vault_picker::PickerState::new(entries, pre);
+            let mut terminal = setup_terminal_or_exit(mouse);
+            match run_picker(&mut terminal, &mut picker, picker_palette(&theme_name)) {
+                Ok(Some(v)) => {
+                    early_terminal = Some(terminal);
+                    Some(absolutize(&v))
+                }
+                Ok(None) => {
+                    // Esc/Ctrl+C: a quiet exit, status 0.
+                    let _ = restore_terminal(&mut terminal);
+                    return;
+                }
+                Err(err) => {
+                    let _ = restore_terminal(&mut terminal);
+                    eprintln!("error: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // Before raw mode, so the line editor works normally.
+        VaultChoice::Prompt => match prompt_vault_path() {
             Ok(v) => Some(v),
             Err(msg) => {
                 eprintln!("error: {msg}");
                 std::process::exit(2);
             }
         },
-        None => None,
+        VaultChoice::None => None,
     };
     let watch = args.watch.unwrap_or_else(|| config.watch_default());
     // Mouse capture: CLI flag > config `mouse` key > on (the historical
     // default). Off = the terminal keeps the mouse for native text
     // selection; `m` toggles at runtime either way.
-    let mouse = effective_mouse(args.mouse, config.mouse);
-    let theme_name = theme::effective_theme_name(
-        args.theme.as_deref(),
-        std::env::var("FROND_THEME").ok().as_deref(),
-        config.theme.as_deref(),
-    );
 
     // Default the note to the vault's index, matching Obsidian's entry note.
     // Whether the note came from an explicit argument matters later (an
@@ -389,18 +523,9 @@ fn main() {
         }
     };
 
-    install_panic_hook();
-    let mut terminal = match setup_terminal(mouse) {
-        Ok(t) => t,
-        Err(err) => {
-            eprintln!("cannot enter terminal mode: {err}");
-            // Setup may have partially succeeded (e.g. raw mode on, alt
-            // screen failed): best-effort restore before exiting.
-            if let Err(restore_err) = restore_terminal_state() {
-                eprintln!("error restoring terminal: {restore_err}");
-            }
-            std::process::exit(1);
-        }
+    let mut terminal = match early_terminal {
+        Some(terminal) => terminal,
+        None => setup_terminal_or_exit(mouse),
     };
 
     let width = crossterm::terminal::size()
@@ -500,6 +625,21 @@ fn main() {
     if let Err(err) = result {
         eprintln!("error: {err}");
         std::process::exit(1);
+    }
+}
+
+fn setup_terminal_or_exit(capture_mouse: bool) -> Tui {
+    match setup_terminal(capture_mouse) {
+        Ok(t) => t,
+        Err(err) => {
+            eprintln!("cannot enter terminal mode: {err}");
+            // Setup may have partially succeeded (e.g. raw mode on, alt
+            // screen failed): best-effort restore before exiting.
+            if let Err(restore_err) = restore_terminal_state() {
+                eprintln!("error restoring terminal: {restore_err}");
+            }
+            std::process::exit(1);
+        }
     }
 }
 
@@ -644,12 +784,14 @@ fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::
         }
     }
     // Clean quit: persist the session (last note + scroll, sidebar mode,
-    // selection and expansion) for the next run. Best-effort — a failed
-    // write must never turn a quit into an error.
+    // selection and expansion) and the last vault (the picker's
+    // preselection) for the next run. Best-effort — a failed write must
+    // never turn a quit into an error.
     if let Some(root) = vault_root {
         if let Some(path) = session::session_file(root) {
             let _ = app.session_state(root).save(&path);
         }
+        let _ = session::save_last_vault(root);
     }
     Ok(())
 }
@@ -791,5 +933,104 @@ mod tests {
         // No usable $HOME: unchanged.
         env.remove("HOME");
         assert_eq!(expand_tilde(Path::new("~/notes")), Path::new("~/notes"));
+    }
+
+    fn config_with(vault: Option<&str>, vaults: &[(&str, &str)]) -> config::Config {
+        config::Config {
+            vault: vault.map(PathBuf::from),
+            vaults: vaults
+                .iter()
+                .map(|(name, path)| (name.to_string(), PathBuf::from(path)))
+                .collect(),
+            ..config::Config::default()
+        }
+    }
+
+    fn chosen(path: &str) -> VaultChoice {
+        VaultChoice::Path(PathBuf::from(path))
+    }
+
+    #[test]
+    fn vault_choice_follows_the_spec_order() {
+        let two = config_with(Some("work"), &[("home", "~/h"), ("work", "/w")]);
+        // --vault wins, a name resolving through [vaults].
+        assert_eq!(
+            choose_vault(Some(Path::new("home")), false, &two),
+            chosen("~/h")
+        );
+        assert_eq!(
+            choose_vault(Some(Path::new("/x")), false, &two),
+            chosen("/x")
+        );
+        // Two or more entries, no file: the picker, even with a vault key.
+        assert_eq!(choose_vault(None, false, &two), VaultChoice::Picker);
+        // A file argument skips the picker: the vault key, by name.
+        assert_eq!(choose_vault(None, true, &two), chosen("/w"));
+        let two_no_key = config_with(None, &[("home", "~/h"), ("work", "/w")]);
+        assert_eq!(choose_vault(None, true, &two_no_key), VaultChoice::None);
+        // Exactly one entry and no key: that entry, file or not.
+        let one = config_with(None, &[("home", "~/h")]);
+        assert_eq!(choose_vault(None, false, &one), chosen("~/h"));
+        assert_eq!(choose_vault(None, true, &one), chosen("~/h"));
+        // One entry and a key: the key.
+        let one_key = config_with(Some("/k"), &[("home", "~/h")]);
+        assert_eq!(choose_vault(None, false, &one_key), chosen("/k"));
+        // Zero entries: today's behaviour.
+        let none = config_with(None, &[]);
+        assert_eq!(choose_vault(None, false, &none), VaultChoice::Prompt);
+        assert_eq!(choose_vault(None, true, &none), VaultChoice::None);
+        assert_eq!(
+            choose_vault(None, false, &config_with(Some("/k"), &[])),
+            chosen("/k")
+        );
+    }
+
+    #[test]
+    fn a_name_wins_over_a_same_named_relative_path() {
+        let vaults = config_with(None, &[("work", "/srv/work")]).vaults;
+        assert_eq!(
+            resolve_vault_name(Path::new("work"), &vaults),
+            Path::new("/srv/work")
+        );
+        assert_eq!(
+            resolve_vault_name(Path::new("./work"), &vaults),
+            Path::new("./work")
+        );
+        assert_eq!(
+            resolve_vault_name(Path::new("other"), &vaults),
+            Path::new("other")
+        );
+    }
+
+    #[test]
+    fn picker_entries_expand_and_redisplay_the_tilde() {
+        let home = TempDir::new("picker-home");
+        let mut env = testutil::EnvGuard::lock();
+        env.set("HOME", home.path());
+        let config = config_with(None, &[("b", "~/notes"), ("a", "/srv/a")]);
+        let entries = picker_entries(&config);
+        env.remove("HOME");
+        assert_eq!(entries[0].name, "a", "name order");
+        assert_eq!(entries[1].path, home.path().join("notes"));
+        assert_eq!(entries[1].display, "~/notes");
+        assert_eq!(entries[0].display, "/srv/a");
+    }
+
+    #[test]
+    fn picker_preselects_a_tilde_vault_key_by_its_path() {
+        let home = TempDir::new("preselect-home");
+        std::fs::create_dir_all(home.path().join("notes")).unwrap();
+        std::fs::create_dir_all(home.path().join("work")).unwrap();
+        let mut env = testutil::EnvGuard::lock();
+        env.set("HOME", home.path());
+        // No last-vault file: the key alone decides.
+        env.set("FROND_SESSION", home.path().join("state"));
+        let config = config_with(Some("~/work"), &[("notes", "~/notes"), ("work", "~/work")]);
+        let entries = picker_entries(&config);
+        assert_eq!(
+            picker_preselection(&entries, &config),
+            1,
+            "the entry at ~/work (name order: notes, work), not the first"
+        );
     }
 }

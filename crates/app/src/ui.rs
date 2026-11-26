@@ -18,7 +18,7 @@ use crate::app::{App, Disambiguation, Focus, SidebarMode};
 use crate::search::SearchMode;
 use crate::sidebar::{truncate_ellipsis, NodeKind, Row};
 use crate::theme::UiTheme;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vault::GitStatus;
 
 /// Sidebar width: ~30% of the terminal, with sane bounds.
@@ -1420,41 +1420,8 @@ fn quick_item_line(
     selected: bool,
     ui: UiTheme,
 ) -> Line<'static> {
-    let match_style = Style::new().fg(ui.popup_match_fg).bg(ui.popup_match_bg);
-    let chars: Vec<char> = item.label.chars().collect();
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut run_match = false;
-    let mut run = String::new();
-    for (i, ch) in chars.iter().enumerate() {
-        let is_match = item.positions.contains(&i);
-        if is_match != run_match {
-            if !run.is_empty() {
-                spans.push(Span::styled(
-                    std::mem::take(&mut run),
-                    if run_match { match_style } else { Style::new() },
-                ));
-            }
-            run_match = is_match;
-        }
-        run.push(*ch);
-    }
-    if !run.is_empty() {
-        spans.push(Span::styled(
-            run,
-            if run_match { match_style } else { Style::new() },
-        ));
-    }
-    // Truncate to the popup width (keeping whole characters).
-    let mut used = 0usize;
-    let mut truncated: Vec<Span<'static>> = Vec::new();
-    for span in spans {
-        let w: usize = UnicodeWidthStr::width(span.content.as_ref());
-        if used + w > inner_width {
-            break;
-        }
-        used += w;
-        truncated.push(span);
-    }
+    let spans = match_spans(&item.label, &item.positions, Style::new(), ui);
+    let truncated = truncate_spans(spans, inner_width);
     let mut line = Line::from(truncated);
     if selected {
         // The bar leaves the matched characters' highlight intact (the
@@ -1462,6 +1429,172 @@ fn quick_item_line(
         highlight_selection(&mut line, inner_width, ui.content_bg, ui);
     }
     line
+}
+
+/// `text` as spans, the characters at `positions` in the fuzzy-match
+/// highlight and the rest in `base`.
+fn match_spans(text: &str, positions: &[usize], base: Style, ui: UiTheme) -> Vec<Span<'static>> {
+    let match_style = Style::new().fg(ui.popup_match_fg).bg(ui.popup_match_bg);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut run_match = false;
+    let mut run = String::new();
+    for (i, ch) in text.chars().enumerate() {
+        let is_match = positions.contains(&i);
+        if is_match != run_match {
+            if !run.is_empty() {
+                spans.push(Span::styled(
+                    std::mem::take(&mut run),
+                    if run_match { match_style } else { base },
+                ));
+            }
+            run_match = is_match;
+        }
+        run.push(ch);
+    }
+    if !run.is_empty() {
+        spans.push(Span::styled(
+            run,
+            if run_match { match_style } else { base },
+        ));
+    }
+    spans
+}
+
+/// The spans that fit in `width` columns: whole spans while they fit, then
+/// the first that does not is cut at its last character that fits and ends
+/// in `…`, so a long path stays visible up to the cut. Shared by the quick
+/// switcher and the vault picker rows.
+fn truncate_spans(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
+    let mut used = 0usize;
+    let mut truncated: Vec<Span<'static>> = Vec::new();
+    for span in spans {
+        let w: usize = UnicodeWidthStr::width(span.content.as_ref());
+        if used + w <= width {
+            used += w;
+            truncated.push(span);
+            continue;
+        }
+        // The `…` takes the last column. When the kept spans fill the width
+        // exactly, that column comes off their tail: the row still overflows,
+        // so it still ends in `…`.
+        let room = width - used;
+        if room > 0 {
+            let budget = room - 1;
+            let mut cut = String::new();
+            let mut cut_width = 0usize;
+            for ch in span.content.chars() {
+                let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if cut_width + cw > budget {
+                    break;
+                }
+                cut.push(ch);
+                cut_width += cw;
+            }
+            cut.push('…');
+            truncated.push(Span::styled(cut, span.style));
+        } else if let Some(style) = give_back_column(&mut truncated) {
+            truncated.push(Span::styled("…", style));
+        }
+        break;
+    }
+    truncated
+}
+
+/// Takes characters off the tail of `kept` until a column is free, for the
+/// `…` of a row whose kept spans fill its width. Returns the style the `…`
+/// takes: the span the tail ends in, or the last span trimmed when no text is
+/// left. `None` when there is nothing to trim (a zero-width row).
+fn give_back_column(kept: &mut Vec<Span<'static>>) -> Option<Style> {
+    let mut freed = 0usize;
+    let mut last_style = None;
+    while freed == 0 {
+        let last = kept.last_mut()?;
+        last_style = Some(last.style);
+        if let Some(ch) = last.content.to_mut().pop() {
+            freed += UnicodeWidthChar::width(ch).unwrap_or(0);
+        }
+        if last.content.is_empty() {
+            kept.pop();
+        }
+    }
+    kept.last().map(|span| span.style).or(last_style)
+}
+
+/// The vault picker (SPEC "Vault picker"), full-screen over the content
+/// background: the quick switcher's popup chrome — filter prompt, the
+/// entries (name, then the path dimmed, matches highlighted), and a footer
+/// that carries the not-a-directory error when there is one.
+pub fn draw_vault_picker(f: &mut Frame, picker: &crate::vault_picker::PickerState, ui: UiTheme) {
+    let area = f.area();
+    f.render_widget(Block::new().style(Style::new().bg(ui.content_bg)), area);
+    let popup = crate::quick::popup_geometry(area, picker.items.len());
+    let inner_width = popup.width.saturating_sub(2) as usize;
+    let list = crate::quick::CHROME.list(popup, picker.selected, picker.items.len());
+    let name_width = picker
+        .entries
+        .iter()
+        .map(|entry| UnicodeWidthStr::width(entry.name.as_str()))
+        .max()
+        .unwrap_or(0);
+
+    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::raw(format!(">{}▏", picker.query)))];
+    if picker.items.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "no matches",
+            Style::new().fg(ui.popup_dimmed_fg),
+        )));
+    } else {
+        lines.extend(
+            picker
+                .items
+                .iter()
+                .enumerate()
+                .skip(list.start)
+                .take(list.rows)
+                .map(|(i, item)| {
+                    let entry = &picker.entries[item.entry];
+                    let pad = name_width - UnicodeWidthStr::width(entry.name.as_str()) + 2;
+                    let mut spans =
+                        match_spans(&entry.name, &item.name_positions, Style::new(), ui);
+                    spans.push(Span::raw(" ".repeat(pad)));
+                    spans.extend(match_spans(
+                        &entry.display,
+                        &item.path_positions,
+                        Style::new().fg(ui.popup_dimmed_fg),
+                        ui,
+                    ));
+                    let mut line = Line::from(truncate_spans(spans, inner_width));
+                    if i == picker.selected {
+                        highlight_selection(&mut line, inner_width, ui.content_bg, ui);
+                    }
+                    line
+                }),
+        );
+    }
+    lines.push(match &picker.error {
+        Some(error) => Line::from(Span::styled(
+            error.clone(),
+            Style::new().fg(ui.status_error_fg),
+        )),
+        None => Line::from(Span::styled(
+            "↑/↓ move · Enter open · Esc quit",
+            Style::new().fg(ui.popup_dimmed_fg),
+        )),
+    });
+
+    let title = format!(" vaults: {} ", picker.items.len());
+    f.render_widget(Clear, popup);
+    f.render_widget(
+        Paragraph::new(lines)
+            .style(Style::new().bg(ui.content_bg))
+            .block(
+                Block::new()
+                    .borders(Borders::ALL)
+                    .border_style(Style::new().fg(ui.popup_border_fg))
+                    .title(title),
+            ),
+        popup,
+    );
 }
 
 /// Global search popup (`s`): input prompt or results list, depending on

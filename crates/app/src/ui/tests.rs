@@ -5860,3 +5860,165 @@ fn quick_switcher_highlights_the_matched_characters() {
         "the matched characters are highlighted differently"
     );
 }
+
+// --- the vault picker (startup) ---------------------------------------------
+
+#[test]
+fn vault_picker_cuts_an_overlong_path_with_an_ellipsis() {
+    use crate::vault_picker::{PickerState, VaultEntry};
+    // 74 columns of name, padding and path in a 68-column popup.
+    let long = "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Main Vault";
+    let entry = |name: &str, display: &str| VaultEntry {
+        name: name.to_string(),
+        path: Path::new("/unused").to_path_buf(),
+        display: display.to_string(),
+    };
+    let state = PickerState::new(vec![entry("icloud", long), entry("work", "~/work")], 0);
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let ui = crate::theme::ui_by_preset(engine::MarkdownThemePreset::default());
+    terminal.draw(|f| draw_vault_picker(f, &state, ui)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = crate::quick::popup_geometry(Rect::new(0, 0, 100, 24), state.items.len());
+    // The prompt is the first inner row; the entries follow.
+    let row = |y: u16| -> String {
+        (popup.x + 1..popup.right() - 1)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    };
+    // Name, the two-column gap, then the path cut to the 59 columns that
+    // leave room for the `…` in a 68-column row.
+    assert_eq!(
+        row(popup.y + 2),
+        format!("icloud  {}…", &long[..59]),
+        "the overlong path is cut and ends in an ellipsis"
+    );
+    assert_eq!(
+        row(popup.y + 3),
+        "work    ~/work",
+        "a path that fits is shown whole, with no ellipsis"
+    );
+}
+
+// --- truncate_spans (quick switcher and picker rows) ------------------------
+
+/// The text of `spans` joined: what the row shows.
+fn spans_text(spans: &[Span<'static>]) -> String {
+    spans.iter().map(|span| span.content.as_ref()).collect()
+}
+
+#[test]
+fn truncate_spans_keeps_a_row_that_fits_exactly_unchanged() {
+    let red = Style::new().fg(Color::Red);
+    let spans = vec![Span::raw("abc"), Span::styled("de", red)];
+    let out = truncate_spans(spans.clone(), 5);
+    assert_eq!(spans_text(&out), "abcde", "no overflow, no ellipsis");
+    assert_eq!(out, spans, "every span is kept as it was");
+}
+
+#[test]
+fn truncate_spans_ends_a_row_in_an_ellipsis_when_the_overflow_starts_at_a_span_boundary() {
+    // "abc" and "de" fill the 5 columns exactly; "f" overflows. The tail of
+    // "de" gives way to the `…`, which keeps the span's style.
+    let red = Style::new().fg(Color::Red);
+    let spans = vec![Span::raw("abc"), Span::styled("de", red), Span::raw("f")];
+    let out = truncate_spans(spans, 5);
+    assert_eq!(spans_text(&out), "abcd…");
+    assert_eq!(out.last().map(|span| span.style), Some(red));
+}
+
+#[test]
+fn truncate_spans_steps_back_to_an_earlier_span_when_the_tail_span_empties() {
+    // "d" is the only column of its span: it empties, so the `…` takes the
+    // style of "abc", the span the row now ends in.
+    let blue = Style::new().fg(Color::Blue);
+    let red = Style::new().fg(Color::Red);
+    let spans = vec![
+        Span::styled("abc", blue),
+        Span::styled("d", red),
+        Span::raw("f"),
+    ];
+    let out = truncate_spans(spans, 4);
+    assert_eq!(spans_text(&out), "abc…");
+    assert_eq!(out.last().map(|span| span.style), Some(blue));
+}
+
+#[test]
+fn truncate_spans_frees_a_wide_character_whole_for_the_ellipsis() {
+    // "中" is two columns: the row keeps "ab" and the `…` in the three
+    // columns that fit, rather than splitting the wide character.
+    let spans = vec![Span::raw("ab中"), Span::raw("x")];
+    let out = truncate_spans(spans, 4);
+    assert_eq!(spans_text(&out), "ab…");
+}
+
+#[test]
+fn truncate_spans_in_one_column_shows_only_the_ellipsis() {
+    let out = truncate_spans(vec![Span::raw("a"), Span::raw("b")], 1);
+    assert_eq!(spans_text(&out), "…");
+}
+
+#[test]
+fn truncate_spans_of_no_width_draws_nothing() {
+    let out = truncate_spans(vec![Span::raw("a")], 0);
+    assert!(out.is_empty(), "no room for the ellipsis either");
+}
+
+#[test]
+fn vault_picker_row_that_fits_exactly_is_shown_whole() {
+    use crate::vault_picker::{PickerState, VaultEntry};
+    // "vault" and its two-column gap fill 7 of the 68 columns; a 61-column
+    // path makes the row exactly 68 wide, so it is not cut.
+    let path = "x".repeat(61);
+    let entry = VaultEntry {
+        name: "vault".to_string(),
+        path: Path::new("/unused").to_path_buf(),
+        display: path.clone(),
+    };
+    let state = PickerState::new(vec![entry], 0);
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let ui = crate::theme::ui_by_preset(engine::MarkdownThemePreset::default());
+    terminal.draw(|f| draw_vault_picker(f, &state, ui)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = crate::quick::popup_geometry(Rect::new(0, 0, 100, 24), state.items.len());
+    let row: String = (popup.x + 1..popup.right() - 1)
+        .map(|x| buffer[(x, popup.y + 2)].symbol())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert_eq!(row, format!("vault  {path}"), "a row that fits is not cut");
+}
+
+#[test]
+fn vault_picker_row_overflowing_at_a_span_boundary_ends_in_an_ellipsis() {
+    use crate::vault_picker::{PickerState, VaultEntry};
+    // The path's 62nd column is a match, so the overflow starts exactly where
+    // the unmatched path ends the 68-column row: the `…` must still show.
+    let display = format!("{}yz", "x".repeat(61));
+    let entry = VaultEntry {
+        name: "vault".to_string(),
+        path: Path::new("/unused").to_path_buf(),
+        display,
+    };
+    let mut state = PickerState::new(vec![entry], 0);
+    state.items[0].path_positions = vec![61];
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let ui = crate::theme::ui_by_preset(engine::MarkdownThemePreset::default());
+    terminal.draw(|f| draw_vault_picker(f, &state, ui)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let popup = crate::quick::popup_geometry(Rect::new(0, 0, 100, 24), state.items.len());
+    let row: String = (popup.x + 1..popup.right() - 1)
+        .map(|x| buffer[(x, popup.y + 2)].symbol())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert_eq!(
+        row,
+        format!("vault  {}…", "x".repeat(60)),
+        "the row is cut one column early and ends in an ellipsis"
+    );
+}

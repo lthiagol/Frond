@@ -57,13 +57,21 @@ make release    # release build: target/release/frond
 
 ```sh
 frond                          # no vault given: prompts for the vault directory
+                               # (two or more [vaults] in the config: the vault picker)
 frond --vault ~/notes          # open a vault (index.md is shown first, unless a saved session restores another note)
 frond --vault ~/notes project.md   # open a specific note inside the vault
+frond --vault work             # open the [vaults] entry named work
 frond some-note.md             # open a file without a vault: no sidebar
 ```
 
-If you start `frond` without `--vault` (and no `vault` key in the config
-file), it asks for the vault directory. Relative paths and `~/` are accepted.
+With two or more `[vaults]` in the config, `frond` with no `--vault` and no
+file opens on a vault picker: type to filter (by name or path), `↑`/`↓` to
+select, `Enter` to open, `Esc` to quit. The last vault you opened (else the
+`vault` key) is preselected. With exactly one `[vaults]` entry and no
+`vault` key, that vault opens directly.
+
+If you start `frond` without `--vault` (and no `vault` key or `[vaults]` in
+the config file), it asks for the vault directory. Relative paths and `~/` are accepted.
 Without `--vault` there is no sidebar, but the current directory is still
 indexed (the opened file's own folder is *not* searched), so wikilinks,
 backlinks and the search keep working.
@@ -72,7 +80,7 @@ Options (all optional; flags override the config file):
 
 | Flag | Meaning |
 |---|---|
-| `--vault <dir>` | Vault directory (wikilinks, tags, backlinks, search, sidebar) |
+| `--vault <dir\|name>` | Vault directory (wikilinks, tags, backlinks, search, sidebar), or a `[vaults]` name |
 | `--theme <name>` | Theme name (see Themes below) |
 | `--watch[=true\|false]` | Start with watch mode on or off (reload on file changes) |
 | `--mouse[=true\|false]` | Mouse capture on/off (off = native text selection; `m` toggles at runtime) |
@@ -132,7 +140,8 @@ vocabulary.
 
 ```toml
 theme = "ocean"                 # theme name
-vault = "~/notes"               # default vault when --vault is not given (~ is expanded)
+vault = "~/notes"               # default vault when --vault is not given (~ is expanded);
+                                # a [vaults] name works too (write ./work for a directory named like one)
 watch = true                    # reload on file changes
 mouse = true                    # mouse capture (off = native text selection)
 sidebar_width = 40              # sidebar columns, clamped 24-120
@@ -142,6 +151,10 @@ margin = 2                      # blank columns on each side of the note (0-10)
 margin_y = 1                    # blank rows above and below the note (0-5)
 icons = "nerd"                  # status-bar icons: nerd (needs a Nerd Font) or unicode
 line_numbers = false            # show a gutter with the note's source line numbers
+
+[vaults]                        # named vaults: the vault picker's entries (keep this table last)
+notes = "~/notes"
+work = "~/work/notes"
 ```
 
 Missing file means defaults. A malformed file prints a warning and falls back
@@ -150,7 +163,8 @@ to defaults.
 frond also remembers where you were: the last open note with its scroll and
 the sidebar's state (mode, selection, folder expansion) are saved per vault on
 quit (`~/.local/state/frond/`, `FROND_SESSION` overrides the directory) and
-restored on the next start.
+restored on the next start. The last vault opened is recorded there too
+(`last-vault`), for the vault picker's preselection.
 
 ## Themes
 

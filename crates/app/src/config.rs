@@ -1,6 +1,8 @@
 //! `~/.config/frond/config.toml`: persistent settings read at startup.
 //!
-//! Keys: `theme` (string), `vault` (path), `watch` (bool), `mouse` (bool),
+//! Keys: `theme` (string), `vault` (path or `[vaults]` name), `vaults`
+//! (table of `name = "path"`: the vault picker's entries), `watch` (bool),
+//! `mouse` (bool),
 //! `sidebar_width` (columns), `metadata` (bool), `theme_rotation`
 //! ("all"/"light"/"dark"), `margin` (columns), `margin_y` (rows), `icons`
 //! ("nerd"/"unicode"), `line_numbers` (bool). Missing file = defaults;
@@ -23,6 +25,9 @@ use crate::viewer::FileStamp;
 pub struct Config {
     pub theme: Option<String>,
     pub vault: Option<PathBuf>,
+    /// Named vaults (`[vaults]`), in name order. Paths as written: `~` is
+    /// expanded where they are resolved (`main.rs`).
+    pub vaults: BTreeMap<String, PathBuf>,
     pub watch: Option<bool>,
     /// Mouse capture on/off (off = native terminal text selection).
     pub mouse: Option<bool>,
@@ -101,6 +106,7 @@ pub const DEFAULT_MARGIN_Y: u16 = 1;
 struct ConfigRaw {
     theme: Option<String>,
     vault: Option<PathBuf>,
+    vaults: BTreeMap<String, PathBuf>,
     watch: Option<bool>,
     mouse: Option<bool>,
     sidebar_width: Option<u16>,
@@ -151,7 +157,8 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # or "dark"; see docs/COLORS.md). Default: ocean.
 # theme = "catppuccin-macchiato"
 
-# Vault directory the sidebar indexes. Default: the current directory.
+# Vault directory the sidebar indexes: a path, or a name from [vaults].
+# Default: the current directory.
 # vault = "~/notes"
 
 # Re-render live on vault changes (watcher). Default: true.
@@ -189,6 +196,14 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # source line number (a wrapped continuation shows an empty cell). The text
 # is narrower by the gutter's width. Default: false.
 # line_numbers = false
+
+# Named vaults. With two or more and neither --vault nor a file argument,
+# frond opens on a vault picker (the `vault` key only preselects); with
+# exactly one and no `vault` key, frond opens it. --vault takes a name too.
+# A table: keep it last in the file (TOML puts the keys after it inside it).
+# [vaults]
+# notes = "~/notes"
+# work = "~/work/notes"
 "#;
 
 /// Loads the config from `path`. Returns the config plus warnings:
@@ -224,6 +239,7 @@ fn load_status(path: &Path) -> (Config, Vec<String>, bool) {
                 Config {
                     theme: raw.theme,
                     vault: raw.vault,
+                    vaults: raw.vaults,
                     watch: raw.watch,
                     mouse: raw.mouse,
                     sidebar_width: raw.sidebar_width,
@@ -292,7 +308,7 @@ impl ConfigWatch {
     }
 
     /// Polls the config file's stamp; on a change re-reads it. Only the
-    /// `theme` key is live-applied — the `vault` path applies on the next
+    /// `theme` key is live-applied — `vault` and `vaults` apply on the next
     /// launch (rebooting the index/watcher mid-session is not safe) and
     /// `watch` toggling is left to the `w` key. A **malformed** re-read
     /// keeps the current theme and only warns (the key is not updated, so
@@ -431,13 +447,18 @@ mod tests {
         assert_eq!(config.margin_y, Some(3));
     }
 
-    /// The template's `# key = value` lines with the leading `# `
-    /// removed; the value lines the drift test below feeds back to the
-    /// loader. Lines that are not key assignments stay empty.
+    /// The template's `# key = value` (and `# [table]`) lines with the
+    /// leading `# ` removed; the value lines the drift test below feeds
+    /// back to the loader. Other lines stay empty.
     fn template_active_lines() -> Vec<String> {
         DEFAULT_CONFIG_TEMPLATE
             .lines()
             .map(|line| {
+                if let Some(table) = line.strip_prefix("# [") {
+                    if table.ends_with(']') {
+                        return line.replacen("# ", "", 1);
+                    }
+                }
                 match line
                     .strip_prefix("# ")
                     .and_then(|rest| rest.split_once('='))
@@ -461,12 +482,22 @@ mod tests {
     /// pins the template to the loader; the module-header guard takes its
     /// expected list from here, so a new key cannot pass the guard with a
     /// stale header.
+    /// A `[table]` header counts as its key; the entries inside it are
+    /// the table's values, not keys of their own.
     fn template_keys() -> Vec<String> {
-        template_active_lines()
-            .iter()
-            .filter_map(|line| line.split_once('='))
-            .map(|(key, _)| key.trim().to_string())
-            .collect()
+        let mut keys = Vec::new();
+        let mut in_table = false;
+        for line in template_active_lines() {
+            if let Some(table) = line.strip_prefix('[') {
+                keys.push(table.trim_end_matches(']').to_string());
+                in_table = true;
+            } else if let Some((key, _)) = line.split_once('=') {
+                if !in_table {
+                    keys.push(key.trim().to_string());
+                }
+            }
+        }
+        keys
     }
 
     #[test]
@@ -487,6 +518,44 @@ mod tests {
         assert_eq!(config.metadata, Some(true));
         assert_eq!(config.margin_y, Some(1));
         assert_eq!(config.line_numbers, Some(false));
+        assert_eq!(
+            config.vaults.get("work").map(PathBuf::as_path),
+            Some(Path::new("~/work/notes"))
+        );
+    }
+
+    #[test]
+    fn vaults_table_parses_in_name_order() {
+        let dir = TempDir::new("cfg-vaults");
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "vault = \"work\"\n[vaults]\nwork = \"~/w\"\nhome = \"/srv/home\"\n",
+        )
+        .unwrap();
+        let (config, warnings) = load_at(&dir, "config.toml");
+        assert!(warnings.is_empty(), "vaults is a known key: {warnings:?}");
+        assert_eq!(config.vault.as_deref(), Some(Path::new("work")));
+        let entries: Vec<(&str, &Path)> = config
+            .vaults
+            .iter()
+            .map(|(name, path)| (name.as_str(), path.as_path()))
+            .collect();
+        assert_eq!(
+            entries,
+            vec![("home", Path::new("/srv/home")), ("work", Path::new("~/w"))],
+            "name order; `~` kept as written (expanded at resolution)"
+        );
+    }
+
+    #[test]
+    fn malformed_vaults_value_is_a_malformed_file() {
+        let dir = TempDir::new("cfg-vaults-bad");
+        for text in ["vaults = \"~/notes\"\n", "[vaults]\nwork = 3\n"] {
+            std::fs::write(dir.path().join("config.toml"), text).unwrap();
+            let (config, warnings) = load_at(&dir, "config.toml");
+            assert_eq!(config, Config::default(), "{text}");
+            assert!(warnings[0].contains("could not parse config"), "{text}");
+        }
     }
 
     #[test]

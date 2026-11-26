@@ -10,6 +10,9 @@
 //! stored verbatim but never restored (`App::restore_session` honors
 //! vault-relative entries only).
 //!
+//! `last-vault` (same directory) holds the canonical root of the last vault
+//! open at a clean quit: the vault picker's preselection, nothing more.
+//!
 //! `FROND_SESSION` overrides the state directory (tests and smokes only —
 //! they must never write to the real `~/.local/state`).
 
@@ -38,21 +41,11 @@ pub struct SessionState {
 }
 
 impl SessionState {
-    /// Writes the snapshot atomically (temp file + rename in the same
-    /// directory) so a crash mid-write cannot leave a truncated file.
+    /// Writes the snapshot atomically ([`write_atomic`]).
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         let text = toml::to_string(self)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
-        // pid-suffixed: two instances quitting on the same vault must not
-        // truncate each other's temp file.
-        let tmp = path.with_extension(format!("toml.{}.tmp", std::process::id()));
-        fs::write(&tmp, text)?;
-        fs::rename(&tmp, path).inspect_err(|_| {
-            let _ = fs::remove_file(&tmp);
-        })
+        write_atomic(path, &text)
     }
 
     /// Reads a snapshot: `None` when the file is missing or malformed —
@@ -61,6 +54,44 @@ impl SessionState {
         let text = fs::read_to_string(path).ok()?;
         toml::from_str(&text).ok()
     }
+}
+
+/// Temp file + rename in the same directory, so a crash mid-write cannot
+/// leave a truncated file.
+fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // pid-suffixed: two instances quitting at once must not truncate each
+    // other's temp file.
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let tmp = path.with_file_name(format!("{name}.{}.tmp", std::process::id()));
+    fs::write(&tmp, text)?;
+    fs::rename(&tmp, path).inspect_err(|_| {
+        let _ = fs::remove_file(&tmp);
+    })
+}
+
+/// The `last-vault` file; `None` when no state directory is resolvable.
+fn last_vault_file() -> Option<PathBuf> {
+    Some(state_dir()?.join("last-vault"))
+}
+
+/// Records `vault_root` (canonicalized) as the last vault opened.
+pub fn save_last_vault(vault_root: &Path) -> io::Result<()> {
+    let path = last_vault_file()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no state directory"))?;
+    let canon = vault_root
+        .canonicalize()
+        .unwrap_or_else(|_| vault_root.to_path_buf());
+    write_atomic(&path, &format!("{}\n", canon.display()))
+}
+
+/// The last vault opened, as recorded; `None` when missing or empty.
+pub fn load_last_vault() -> Option<PathBuf> {
+    let text = fs::read_to_string(last_vault_file()?).ok()?;
+    let line = text.lines().next()?.trim_end();
+    (!line.is_empty()).then(|| PathBuf::from(line))
 }
 
 /// `FROND_SESSION` overrides the directory; else the XDG state dir:
@@ -169,6 +200,27 @@ mod tests {
         assert_ne!(a, b, "distinct vaults get distinct files");
         assert!(a.starts_with(dir.path()), "override directory respected");
         assert_eq!(a, a_again);
+    }
+
+    #[test]
+    fn last_vault_round_trips_canonically() {
+        let state = TempDir::new("sess-last");
+        let vault = TempDir::new("sess-last-vault");
+        let mut env = crate::testutil::EnvGuard::lock();
+        env.set("FROND_SESSION", state.path());
+        assert_eq!(load_last_vault(), None, "no file yet");
+        let noisy = vault.path().join(".");
+        save_last_vault(&noisy).unwrap();
+        let loaded = load_last_vault();
+        env.remove("FROND_SESSION");
+        assert_eq!(loaded, Some(vault.path().canonicalize().unwrap()));
+        assert!(state.path().join("last-vault").is_file());
+        let leftovers = fs::read_dir(state.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0, "atomic write leaves no temp file");
     }
 
     #[test]

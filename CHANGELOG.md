@@ -5,10 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+- Several vaults: a `[vaults]` table in `config.toml` names them
+  (`work = "~/work/notes"`), and `--vault` and the `vault` key take a
+  name as well as a path. With two or more vaults and no `--vault` or
+  file argument, frond opens on a vault picker: type to filter by name or
+  path, `Enter` to open, `Esc` to quit. The last vault opened is
+  preselected next time, else the one the `vault` key names.
 
 ### Fixed
 
 ### Changed
+- A quick-switcher row wider than the popup is cut with `…` instead of
+  losing the text that does not fit.
 
 ## [0.6.6] — 2026-11-21
 

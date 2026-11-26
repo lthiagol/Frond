@@ -45,7 +45,7 @@ crates/
 
 ### Data flow
 
-1. Startup: `vault::index` walks the vault (fast, no daemon), builds link/tag maps. The vault root is `--vault`, else the config's `vault` key, else (with a file argument) the current directory; with neither, the app prompts for the vault directory.
+1. Startup: `vault::index` walks the vault (fast, no daemon), builds link/tag maps. The vault root is `--vault`, else (with no file argument and two or more `[vaults]` entries) the one chosen in the vault picker, else the config's `vault` key, else the only `[vaults]` entry, else (with a file argument) the current directory; with none of these, the app prompts for the vault directory. A `--vault` or `vault` value that is a `[vaults]` name resolves to that entry's path; any other value is a path (write `./work` to mean the directory when a name `work` exists).
 2. Note opened: raw md → wikilink preprocessing (`[[target|alias]]` → `[alias](vault://<n>/<target>)`, the target percent-encoded, an optional `#heading` appended) → `engine::parse` → styled lines.
 3. Watch tick (every 250 ms): the open file's mtime+size stamp is polled
    (re-parse + redraw when it changed); once a second the whole vault is
@@ -147,6 +147,20 @@ frontmatter at all — the whole file is body.
   are saved on clean quit and restored on the next start (an explicit note
   argument wins over the restore). `frond --config-show` prints a
   commented default config file; `--help`/`--version` print usage/version.
+- **Vault picker** (startup): with no `--vault`, no file argument and two
+  or more `[vaults]` entries, frond opens full-screen on a picker before
+  any vault is indexed. It lists every entry as its name and its path
+  (`~` for `$HOME`), in name order; typing filters it with the quick
+  switcher's case-insensitive subsequence match over the name and the
+  path, ranked best match first (ties in name order) with the best match
+  selected; `↑`/`↓` move the selection; `Enter` opens the selected vault;
+  `Esc` or `Ctrl+C` quits without a message, exit status 0. The
+  preselected entry is the last vault opened (when it is still an entry),
+  else the one the `vault` key names, else the first. An entry whose path
+  is not a directory stays listed; choosing it shows `not a directory:
+  <path>` inside the picker and keeps it open. The last vault opened is
+  recorded on a clean quit (`last-vault` in the session dir, the vault's
+  canonical root) — the app's own state, never the vault's.
 
 ## Scrollbars
 
@@ -345,7 +359,9 @@ own keys, and they take them instead of the app:
   (never silently). An unknown theme warns and falls back to the
   default; a custom theme's unknown `syntax` name falls back to the default
   syntect theme with a warning.
-- **Config `~/.config/frond/config.toml`:** `theme`, `vault`, `watch`
+- **Config `~/.config/frond/config.toml`:** `theme`, `vault` (a path,
+  or a `[vaults]` name), `vaults` (a table of `name = "path"`, `~`
+  expanded: the vault picker's entries), `watch`
   (bool, default on: the *open note* re-renders when the file changes —
   the vault-wide scan behind the sidebar and the index always runs),
   `mouse` (bool, default on; off = native text selection),
@@ -367,7 +383,7 @@ own keys, and they take them instead of the app:
   themes with an instant re-render, filtered by the current rotation group
   (session-only, never persists). The
   config file's mtime is polled on the 1 s watcher tick; a changed `theme`
-  key live-applies. `vault` path changes apply on the next launch; `watch`
+  key live-applies. `vault` and `vaults` changes apply on the next launch; `watch`
   stays the `w`-key session toggle.
 - **Unreadable directories:** a directory the vault scan cannot read is
   reported on the status bar — its notes are missing from the index, so
@@ -467,7 +483,9 @@ the switcher matches note *paths*.
   `archive/alpha-notes.md`.
 - The scoring rewards contiguous matches, word boundaries (path
   separators, dashes, camelCase humps), a substring match and an early
-  start; the matched characters are highlighted in the result row.
+  start; the matched characters are highlighted in the result row. A row
+  wider than the popup is cut at the last character that fits and ends
+  in `…` (the vault picker's rows cut the same way).
 - `↑`/`↓` (or `j`/`k`) move the selection, `PgUp`/`PgDn` move it by a
   page, `Enter` opens the selected note
   through the normal navigation stack (so `Backspace` returns to the

@@ -64,6 +64,8 @@ def start_run(args):
         os.environ["TERM"] = "xterm-256color"
         # The quit-time session save must never touch the real state dir.
         os.environ["FROND_SESSION"] = SESSION_DIR
+        # Never the real ~/.config: a missing file is the default config.
+        os.environ["FROND_CONFIG"] = smoke_tmp.path("frond-no-config.toml")
         # NO_COLOR would strip colors; nothing here compares them, but keep
         # the child deterministic anyway.
         os.environ.pop("NO_COLOR", None)

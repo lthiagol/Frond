@@ -45,12 +45,9 @@ and the tree is clean. What the cycle carries:
 
 **Multiple vaults** (the human's request, 2026-11-26). Two units, in order:
 
-1. **Config + startup picker.** A `[vaults]` table of `name = "path"` in
-   `config.toml`; `vault` stays the default and takes a name or a path;
-   `--vault` takes a name too. With several vaults and no `--vault`,
-   startup shows a fuzzy picker (name + path, built like the quick
-   switcher) with the default, or the last vault used, preselected, instead
-   of the path prompt. Spec, README and `--config-show` change with it.
+1. ~~Config + startup picker~~ — committed. The picker's state is
+   `crates/app/src/vault_picker.rs`, drawn by `ui::draw_vault_picker`,
+   driven at startup by `run_picker` in `main.rs`.
 2. **In-app switch.** A key opens the same picker while running; switching
    saves the current vault's session, re-indexes, moves the watcher and git
    status to the new root, and restores that vault's session.
