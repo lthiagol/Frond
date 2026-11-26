@@ -197,16 +197,17 @@ impl TagList {
         }
     }
 
-    /// `l`/Right on a collapsed tag: expand it (on a note the app moves
-    /// focus to the content pane instead).
-    pub fn expand_or_activate(&mut self) -> Option<PathBuf> {
-        let sel = self.selected.clone()?;
-        match sel {
-            Selection::Tag(tag) => {
-                self.expanded.insert(tag);
-                None
-            }
-            Selection::Note { path, .. } => Some(path),
+    /// `l`/Right on a tag: expand it; nothing on a note.
+    pub fn expand(&mut self) {
+        if let Some(Selection::Tag(tag)) = &self.selected {
+            self.expanded.insert(tag.clone());
+        }
+    }
+
+    /// `Space` on a tag: expand/collapse it; nothing on a note.
+    pub fn toggle_tag(&mut self) {
+        if matches!(self.selected, Some(Selection::Tag(_))) {
+            self.activate();
         }
     }
 

@@ -39,7 +39,7 @@ crates/
              - git: status --porcelain, rev-list ahead/behind, changed-files list
   app/       ratatui shell:
              - state: navigation stack, current note + scroll pos, sidebar mode,
-               search state, quick-switcher state
+               search state, quick-jumper state
              - layout, rendering, keybindings, mouse
 ```
 
@@ -124,7 +124,7 @@ frontmatter at all — the whole file is body.
   link in the note pane, that link is painted in the markdown theme's
   `link_hover` colour (the role every theme already sets). The highlight
   is only a colour: it does not move the link focus (`x` / `X`), and
-  clicking the link still opens it. Mouse capture off (`m`) disables it,
+  clicking the link still opens it. Mouse capture off (`M`) disables it,
   like every other mouse action.
 - The note pane has an optional **line-number gutter**: with the config
   key `line_numbers` on (default off), a column to the left of the note's
@@ -151,7 +151,7 @@ frontmatter at all — the whole file is body.
   or more `[vaults]` entries, frond opens full-screen on a picker before
   any vault is indexed. It lists every entry as its name and its path
   (`~` for `$HOME`), in name order; typing filters it with the quick
-  switcher's case-insensitive subsequence match over the name and the
+  jumper's case-insensitive subsequence match over the name and the
   path, ranked best match first (ties in name order) with the best match
   selected; `↑`/`↓` move the selection; `Enter` opens the selected vault;
   `Esc` or `Ctrl+C` quits without a message, exit status 0. The
@@ -161,10 +161,10 @@ frontmatter at all — the whole file is body.
   <path>` inside the picker and keeps it open. The last vault opened is
   recorded on a clean quit (`last-vault` in the session dir, the vault's
   canonical root) — the app's own state, never the vault's.
-- **Vault picker in the app** (`V`): the same picker opens as a modal
+- **Vault picker in the app** (`v`): the same picker opens as a modal
   popup over the main view, with the open vault preselected (when it is an
   entry; else as at startup). `Esc` closes it; `Ctrl+C` quits. The picker
-  takes no mouse input. With no `[vaults]` entries, `V` opens nothing and
+  takes no mouse input. With no `[vaults]` entries, `v` opens nothing and
   the status line says `no vaults configured ([vaults] in config.toml)`.
   Choosing the open vault closes the popup and changes nothing. Choosing
   another one is a clean quit of the open vault (its session and
@@ -180,7 +180,7 @@ frontmatter at all — the whole file is body.
   open vault: <error>`, and the open vault is untouched, its session not
   saved. The
   entries are the ones read at startup. Started on a file argument with
-  no vault, `V` works the same, with no session to save.
+  no vault, `v` works the same, with no session to save.
 
 ## Scrollbars
 
@@ -213,7 +213,7 @@ frontmatter at all — the whole file is body.
   bottom, so the pressed row names that fraction of the scroll range. The
   press does not move the keyboard focus, and the release that ends a drag
   is not a click (it must not open a link under the pointer). Mouse capture
-  off (`m`) disables it, like every other mouse action.
+  off (`M`) disables it, like every other mouse action.
 - The **list panels' bar positions the selection**: the sidebar tree, the
   tag list, the outline and the backlinks panel. A press on the bar column
   moves the selection to the row at that fraction of the list (the track's
@@ -221,7 +221,7 @@ frontmatter at all — the whole file is body.
   a drag keeps the selection following the pointer until the button is
   released. A press on the bar is **not** a row click: it never opens the
   row it lands on, and it does not move the keyboard focus. The release
-  that ends a drag is not a click. Mouse capture off (`m`) disables it.
+  that ends a drag is not a click. Mouse capture off (`M`) disables it.
 - The **`.base` table's bar is a position control**: a press on the bar
   column jumps the table to that row of its content, and a drag keeps
   the table following the pointer until the button is released. The
@@ -229,7 +229,7 @@ frontmatter at all — the whole file is body.
   table's scroll is a document position, not a selection cursor. The
   press does not move the keyboard focus, and the release that ends a
   drag is not a click (it must not open a row under the pointer). Mouse
-  capture off (`m`) disables it.
+  capture off (`M`) disables it.
 - The **help popup's bar is a position control**: a press on the bar
   column jumps the popup's body to that row, and a drag keeps the body
   following the pointer until the button is released. The mapping is
@@ -237,51 +237,53 @@ frontmatter at all — the whole file is body.
   `g`/`G`) keep scrolling the body; the bar is the mouse way into the
   same scroll. The press does not move the keyboard focus, and the
   release that ends a drag is not a click (it must not close the popup).
-  Mouse capture off (`m`) disables it.
+  Mouse capture off (`M`) disables it.
 - The **scrollbar's thumb highlights under the mouse**: while the pointer
   is over a bar column, that bar's thumb is painted in `scrollbar_hover_fg`
   (a new theme role; every theme's value is its accent). The track is
-  unchanged, and the thumb does not move. Mouse capture off (`m`) disables
+  unchanged, and the thumb does not move. Mouse capture off (`M`) disables
   the hover, like every other mouse action.
 
 ## Keybindings (v1)
 
 From leaf, the app inherited scroll keys, the mouse wheel, and the `?` help
 popup (leaf's app-layer `/` search, TOC `t` and history `Ctrl+H` were not
-vendored; the quick switcher `Ctrl+P` was re-implemented from scratch in
-frond — see "Quick switcher" below). The table below is the real key set —
+vendored; the quick jumper `Ctrl+K` was re-implemented from scratch in
+frond — see "Quick jumper" below). The table below is the real key set —
 verified against `crates/app/src/app.rs::handle_key` and the help popup in
 `crates/app/src/ui.rs`:
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Scroll (content); move selection (sidebar, backlinks) |
+| `j` / `k`, ↑ / ↓ | Scroll (content); move selection (sidebar, backlinks) |
 | PgUp / PgDn | Half page (content pane) |
 | `g` / `G`, Home / End | Top / bottom (content pane) |
-| Mouse wheel | Scroll the content pane; over the tree, the tag view, the backlinks panel, the search popup or the quick switcher it moves that pane's selection instead; over the outline it scrolls the panel's view |
+| Mouse wheel | Scroll the content pane; over the tree, the tag view, the backlinks panel, the search popup or the quick jumper it moves that pane's selection instead; over the outline it scrolls the panel's view |
 | Press / drag on the note pane's scrollbar | Jump the note to that position; a drag follows the pointer until the button is released |
 | Press / drag on a list panel's scrollbar | Move that panel's selection to that position; a drag follows the pointer until the button is released |
 | Press / drag on the `.base` table's scrollbar | Jump the table to that row of its content; a drag follows the pointer until the button is released |
 | Press / drag on the help popup's scrollbar | Jump the popup's body to that row; a drag follows the pointer until the button is released |
 | Hover over a link (note pane) | Highlights the link in the theme's `link_hover` colour; the link focus does not move |
 | `n` / `N` (note pane) | Move to the next / previous occurrence of the last search in the open note |
-| Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a row of the search or quick-switcher popup selects it (a second click on the selected row opens it), while the disambiguation popup takes no clicks at all; a click on a popup's chrome — its borders, the quick switcher's prompt, its footer — does nothing |
+| Click (sidebar / content / backlinks / popup) | Moves keyboard focus to the clicked pane, then acts on the click; clicking a note opens it and moves focus to the content pane; a click on a row of the search or quick-jumper popup selects it (a second click on the selected row opens it), while the disambiguation popup takes no clicks at all; a click on a popup's chrome — its borders, the quick jumper's prompt, its footer — does nothing |
 | `Tab` | Hide/show sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
 | `o` | Sidebar mode: the open note's headings (the outline); `o` again returns to the tree |
 | `<` / `>` | Narrow / widen the sidebar (2-column steps, clamped) |
-| `h` / `l` (or ← / →) | Focus sidebar / content (`l` expands a folder, `l` on a note row moves the focus to the content; `h` collapses a folder, `h` on a note row collapses to its parent); from the backlinks panel `h` returns to the content |
+| `f` | Move the keyboard focus to the next pane: sidebar → note → backlinks → sidebar; a hidden sidebar or a closed backlinks panel is skipped |
+| `h` / `l` (or ← / →) | Sidebar tree and tag view only: `h` collapses a folder (on a note row, its parent), `l` expands a folder; anywhere else they do nothing — they never move the focus |
+| `Space` | Sidebar tree and tag view: expand / collapse the selected folder (on a note row, nothing) |
 | `x` / `X` | Focus next/previous link **or checkbox** (document order) |
-| `f` | Show / hide the note's frontmatter metadata block |
-| `m` | Toggle mouse capture (off = the terminal selects text natively) |
+| `m` | Show / hide the note's frontmatter metadata block |
+| `M` | Toggle mouse capture (off = the terminal selects text natively) |
 | `Enter` / click | Open focused link; Enter/click on a checkbox toggles it |
 | `Backspace` / `Ctrl+O` | Back / forward in the navigation stack (scroll restored) |
 | `b` | Toggle backlinks panel (opening moves the focus into it) |
 | `s` | Global vault search (Enter opens the hit line) |
-| `Ctrl+P` | Quick switcher: fuzzy jump to a note by name (Enter opens it) |
-| `V` | Vault picker: switch to another `[vaults]` entry (see "Vault picker") |
+| `Ctrl+K` | Quick jumper: fuzzy jump to a note by name (Enter opens it) |
+| `v` | Vault picker: switch to another `[vaults]` entry (see "Vault picker") |
 | `u` | Sync status refresh (also auto on watch events) |
-| `v` / `1`–`9` | Switch table view while a `.base` file is open |
+| `]` / `[`, `1`–`9` | While a `.base` file is open: next / previous table view (wrapping), or view N |
 | `w` | Toggle watch mode (content pane) |
 | `Shift+T` | Cycle theme within the current group: presets, built-ins, then custom themes (session-only) |
 | `Ctrl+T` | Theme group for `Shift+T`: all → light → dark → all. Changes the group only; the status line shows the group and its size (session-only) |
@@ -314,11 +316,11 @@ own keys, and they take them instead of the app:
   text — so a query finds the same places in the note as in the vault.
   With no active search, or with a note that has no occurrence, `n` and
   `N` do nothing.
-- **Quick switcher (`Ctrl+P`)** — a query line over the vault's notes:
+- **Quick jumper (`Ctrl+K`)** — a query line over the vault's notes:
   `Enter` opens the selected note, `Backspace` edits the query, `j`/`k`
   (or the arrows) and PgUp/PgDn move the selection, any typed character
   goes into the query, and `Esc` closes (`Ctrl+C` quits). See "Quick
-  switcher" below for the matching rules.
+  jumper" below for the matching rules.
 - **Disambiguation popup** (an ambiguous wikilink) — `j`/`k` or the
   arrows choose a candidate, `Enter` opens it, and any other key cancels
   the popup (`Ctrl+C` quits).
@@ -354,7 +356,7 @@ own keys, and they take them instead of the app:
   `base` preset is a hard load error (the file is skipped and named), and
   so is a missing or invalid `appearance`.
 - **The selected row** of every list panel (the sidebar tree, the outline,
-  the tag view, the backlinks panel, and the search, quick-switch and
+  the tag view, the backlinks panel, and the search, quick-jump and
   disambiguation popups) is one full-width bar: its background is
   `selection_bg` across the panel's whole inner width (up to the scrollbar
   column when one is drawn), and its text is painted in the panel's own
@@ -364,7 +366,7 @@ own keys, and they take them instead of the app:
   and the row's text colour are never the same colour, so the selected row
   stays legible in every theme. The selected row's own colours are dropped:
   the status glyph, the changed marker and the dimmed name keep their shape,
-  not their colour. A search or quick-switch match highlight inside the
+  not their colour. A search or quick-jump match highlight inside the
   selected row is kept as it is.
 - **Theme dirs:** `~/.config/frond/themes/` (frond-format TOML files only; the
   leaf compat directory is no longer read). `FROND_THEMES` overrides the
@@ -486,14 +488,14 @@ own keys, and they take them instead of the app:
 - Keyboard hints (`Tab sidebar · ⇧T theme · ? help`) sit at the right edge
   only when they fit whole, and are hidden while a message is shown.
 
-## Quick switcher (`Ctrl+P`)
+## Quick jumper (`Ctrl+K`)
 
 A modal popup that fuzzy-matches the typed query against the vault's
 notes and opens the selected one. It is the "jump to a note by name"
 counterpart to the global search (`s`): the search greps note *content*,
-the switcher matches note *paths*.
+the jumper matches note *paths*.
 
-- `Ctrl+P` opens the popup over every indexed note (an empty query lists
+- `Ctrl+K` opens the popup over every indexed note (an empty query lists
   them all, ranked alphabetically); typing filters the list live — no
   Enter needed, the matches update on every keystroke.
 - The match is a case-insensitive **subsequence** match (the query's
@@ -633,7 +635,7 @@ Opening a `.base` file (as a CLI argument, or from its row in the sidebar
 tree) renders its first `type: table`
 view instead of the markdown viewer: a bordered block, a header row
 built from the view's `order` (with `properties:` displayName mappings),
-and one row per matching note. `v` cycles views, `1`–`9` jump; `j/k`,
+and one row per matching note. `]`/`[` step through the views, `1`–`9` jump; `j/k`,
 PgUp/PgDn, `g/G`, and the wheel scroll the table. `sort` and `groupBy`
 apply (group headers render as bold `▸ label` rows); rows show the
 shared status glyph in the `status` column; `file.name` and
@@ -673,7 +675,7 @@ edits move rows between views through the normal watch pipeline.
 All four are shipped. The work after them (each documented in its own
 section above): the guarded checkbox write, the `.base` table views, the
 theme groups, the note margin, the status-bar icon sets, the quick
-switcher, the session memory, and — in 0.6.2 — the scrollbar geometry and
+jumper, the session memory, and — in 0.6.2 — the scrollbar geometry and
 symbols, and the scroll position in the status bar. In 0.6.5: the
 selection bar (every list panel), the interactive scrollbars (the note
 pane and the list panels) with the thumb's hover highlight, the link

@@ -17,7 +17,7 @@ use crate::links::{LinkState, RenderedLink};
 use crate::nav::Nav;
 use crate::outline::Outline;
 use crate::search::{ActiveSearch, SearchMode, SearchQuery, SearchState};
-use crate::sidebar::{NodeKind, Sidebar};
+use crate::sidebar::Sidebar;
 use crate::tags::TagList;
 use crate::theme::{Theme, ThemeChoices, ThemeRotation};
 use crate::ui;
@@ -192,7 +192,7 @@ pub struct Layout {
     /// The search popup (`None` while closed): routes result-row clicks and
     /// wheels by position.
     pub search_area: Option<Rect>,
-    /// The quick-switcher popup (`None` while closed): routes result-row
+    /// The quick-jumper popup (`None` while closed): routes result-row
     /// clicks and wheels by position.
     pub quick_area: Option<Rect>,
     /// The status bar's note-name segment (`None` when no name segment is
@@ -234,11 +234,11 @@ pub struct App {
     /// the open note. Each executed search replaces it; a query that never
     /// ran (blank, invalid pattern) keeps the previous one.
     pub active_search: Option<ActiveSearch>,
-    /// Quick note switcher (`Ctrl+P`): fuzzy note jump over the index.
+    /// Quick jumper (`Ctrl+K`): fuzzy note jump over the index.
     pub quick: crate::quick::QuickState,
     /// The `[vaults]` entries read at startup, for the in-app picker.
     pub vaults: crate::vault_picker::VaultList,
-    /// The in-app vault picker popup (`V`; `None` while closed).
+    /// The in-app vault picker popup (`v`; `None` while closed).
     pub vault_picker: Option<crate::vault_picker::PickerState>,
     /// Last read-only git sync status (`None` = unavailable: no git, not
     /// a repository, or every command failed — the status bar shows
@@ -262,7 +262,7 @@ pub struct App {
     /// Active theme (chrome + markdown palette). Cycled with `Shift+T`,
     /// replaced by config hot-reloads; session-only, never persisted.
     pub theme_ui: crate::theme::UiTheme,
-    /// Whether the app currently wants mouse capture on (`m` toggles, the
+    /// Whether the app currently wants mouse capture on (`M` toggles, the
     /// config `mouse` key sets the startup default; main.rs executes the
     /// actual capture switch when this diverges from the live state). Off
     /// = the terminal handles the mouse natively (text selection/copy).
@@ -1348,7 +1348,7 @@ impl App {
     /// sidebar is visible its column owns the click (no click-through
     /// into the note viewport, which shares the same screen rows).
     pub fn handle_click(&mut self, col: u16, row: u16) {
-        // The quick switcher is position-routed (result rows are
+        // The quick jumper is position-routed (result rows are
         // click-selectable); clicks elsewhere stay inert while it is open.
         if self.quick.open {
             self.quick_click(col, row);
@@ -1483,7 +1483,7 @@ impl App {
         }
     }
 
-    /// A click inside the quick switcher: a click on a result row selects
+    /// A click inside the quick jumper: a click on a result row selects
     /// it, and clicking the already-selected row opens it (the keyboard's
     /// Enter semantics). The prompt row, the footer and clicks outside the
     /// popup are no-ops.
@@ -1866,11 +1866,11 @@ impl App {
         base.rebuild(index.as_deref(), &crate::baseview::today());
     }
 
-    /// `v` / `1`–`9` while a base table is open: switch views.
-    pub fn base_cycle_view(&mut self) {
+    /// `]` / `[` / `1`–`9` while a base table is open: switch views.
+    pub fn base_step_view(&mut self, delta: isize) {
         let index = self.index.as_ref().map(|i| i.borrow());
         if let Some(base) = &mut self.base {
-            base.cycle_view(index.as_deref(), &crate::baseview::today());
+            base.step_view(delta, index.as_deref(), &crate::baseview::today());
         }
     }
 
@@ -2084,7 +2084,7 @@ impl App {
         Flow::Continue
     }
 
-    /// Handles one key press. The quick switcher (if open) gets the key
+    /// Handles one key press. The quick jumper (if open) gets the key
     /// first; then the search popup; then the disambiguation popup; then
     /// any key closes the help popup; `q` and Ctrl+C quit; everything
     /// else is focus-dependent.
@@ -2117,19 +2117,20 @@ impl App {
             KeyCode::Tab if plain => self.toggle_sidebar(),
             KeyCode::Char('t') if plain && self.sidebar.is_some() => self.toggle_sidebar_mode(),
             KeyCode::Char('o') if plain && self.sidebar.is_some() => self.toggle_outline(),
-            KeyCode::Char('m') if plain => self.toggle_mouse_capture(),
-            KeyCode::Char('f') if plain => self.viewer.toggle_metadata(),
+            KeyCode::Char('M') if plain => self.toggle_mouse_capture(),
+            KeyCode::Char('m') if plain => self.viewer.toggle_metadata(),
+            KeyCode::Char('f') if plain => self.cycle_focus(),
             KeyCode::Char('>') if plain => self.widen_sidebar(),
             KeyCode::Char('<') if plain => self.narrow_sidebar(),
             KeyCode::Char('b') if plain => self.toggle_backlinks(),
             KeyCode::Char('s') if plain && self.index.is_some() => self.search.open_input(),
-            KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => self.open_quick(),
+            KeyCode::Char('k') if key.modifiers == KeyModifiers::CONTROL => self.open_quick(),
             KeyCode::Char('u') if plain => self.refresh_git(true),
             // While a `.base` table is displayed the viewer's note is
             // invisible: viewer-focus actions (x/X link focusing, Enter
             // activate — including the checkbox toggle write) must be
             // inert so they cannot act on the hidden note. Only table
-            // interactions (v/1-9/scroll/clicks) act while a base is open.
+            // interactions (]/[/1-9/scroll/clicks) act while a base is open.
             KeyCode::Char('x') if plain && self.focus == Focus::Content && self.base.is_none() => {
                 self.viewer.focus_next_link();
             }
@@ -2151,6 +2152,7 @@ impl App {
             }
             KeyCode::Char('h') | KeyCode::Left if plain => self.key_left(),
             KeyCode::Char('l') | KeyCode::Right if plain => self.key_right(),
+            KeyCode::Char(' ') if plain => self.key_space(),
             KeyCode::Char('j') | KeyCode::Down if plain => match self.focus {
                 Focus::Sidebar => self.sidebar_move(1),
                 Focus::Backlinks => self.backlink_move(1),
@@ -2188,12 +2190,13 @@ impl App {
             // `Shift+T`: theme cycling (session-only). `t` stays the
             // sidebar-mode toggle; Shift is how terminals deliver `T`.
             KeyCode::Char('T') if plain => self.cycle_theme(),
-            KeyCode::Char('V') if plain => self.open_vault_picker(),
+            KeyCode::Char('v') if plain => self.open_vault_picker(),
             KeyCode::Char('t') if key.modifiers == KeyModifiers::CONTROL => {
                 self.rotate_theme_group()
             }
-            // `.base` table view switching: `v` cycles, digits jump.
-            KeyCode::Char('v') if plain && self.base.is_some() => self.base_cycle_view(),
+            // `.base` table view switching: `]`/`[` step, digits jump.
+            KeyCode::Char(']') if plain && self.base.is_some() => self.base_step_view(1),
+            KeyCode::Char('[') if plain && self.base.is_some() => self.base_step_view(-1),
             KeyCode::Char(c) if plain && self.base.is_some() && c.is_ascii_digit() && c != '0' => {
                 self.base_set_view(c.to_digit(10).unwrap() as usize - 1);
             }
@@ -2201,7 +2204,7 @@ impl App {
             KeyCode::Enter if plain && self.focus == Focus::Backlinks => self.open_from_backlinks(),
             _ => {}
         }
-        // A key may have opened a popup (`?`, `s`, Ctrl+P): the popup owns
+        // A key may have opened a popup (`?`, `s`, Ctrl+K): the popup owns
         // the pointer, so no link behind it may stay highlighted.
         if self.quick.open || self.search.open || self.any_popup_open() {
             self.viewer.clear_hover_link();
@@ -2363,7 +2366,7 @@ impl App {
         self.sidebar.as_ref().map(|sidebar| sidebar.root.as_path())
     }
 
-    /// `V`: opens the vault picker over the main view (SPEC's **Vault
+    /// `v`: opens the vault picker over the main view (SPEC's **Vault
     /// picker in the app**).
     pub fn open_vault_picker(&mut self) {
         if self.vaults.entries.is_empty() {
@@ -2442,7 +2445,7 @@ impl App {
         self.note_margin_y = display.note_margin_y;
     }
 
-    /// `Ctrl+P`: opens the quick note switcher over the vault index. The
+    /// `Ctrl+K`: opens the quick jumper over the vault index. The
     /// popup lists every note (fuzzy-matched against the typed query) and
     /// `Enter` opens the selected one through the normal navigation stack.
     pub fn open_quick(&mut self) {
@@ -2457,7 +2460,7 @@ impl App {
         self.quick.open(candidates);
     }
 
-    /// Keys while the quick switcher is open (modal: typed characters go
+    /// Keys while the quick jumper is open (modal: typed characters go
     /// into the query, never into the app). Ctrl+C still quits.
     fn handle_quick_key(&mut self, key: KeyEvent) -> Flow {
         let plain = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
@@ -2480,7 +2483,7 @@ impl App {
         Flow::Continue
     }
 
-    /// Enter on a quick-switcher row: opens that note through the normal
+    /// Enter on a quick-jumper row: opens that note through the normal
     /// navigation stack (so `Backspace` returns to the previous note) and
     /// closes the popup. A failed open surfaces the error and keeps the
     /// popup open.
@@ -2645,7 +2648,7 @@ impl App {
         }
     }
 
-    /// `m`: toggle mouse capture. Only flips the intent here — `main.rs`'s
+    /// `M`: toggle mouse capture. Only flips the intent here — `main.rs`'s
     /// event loop owns the terminal and executes the actual
     /// `EnableMouseCapture`/`DisableMouseCapture` when it sees the change.
     /// Off, the terminal handles the mouse natively (text selection/copy)
@@ -2788,58 +2791,73 @@ impl App {
         }
     }
 
-    /// `h`: from the content pane, move focus to the sidebar; from the
-    /// sidebar, collapse (the selected folder/tag, or the parent of a
-    /// note); from the backlinks panel, back to the content.
-    fn key_left(&mut self) {
-        match self.focus {
-            Focus::Content => {
-                if self.sidebar_visible {
-                    self.focus = Focus::Sidebar;
-                }
-            }
-            Focus::Backlinks => self.focus = Focus::Content,
-            Focus::Sidebar => match self.sidebar_mode {
-                SidebarMode::Tree => {
-                    if let Some(sidebar) = &mut self.sidebar {
-                        sidebar.collapse_or_parent();
-                    }
-                }
-                SidebarMode::Tags => self.tags.collapse_or_parent(),
-                // A heading list has no hierarchy to collapse.
-                SidebarMode::Outline => {}
-            },
+    /// `f`: the keyboard focus moves to the next visible pane, in the
+    /// order sidebar → note → backlinks → sidebar (SPEC's key table).
+    fn cycle_focus(&mut self) {
+        let order = [Focus::Sidebar, Focus::Content, Focus::Backlinks];
+        let shown = |pane: &Focus| match pane {
+            Focus::Sidebar => self.sidebar.is_some() && self.sidebar_visible,
+            Focus::Content => true,
+            Focus::Backlinks => self.backlinks_open,
+        };
+        let at = order.iter().position(|p| *p == self.focus).unwrap_or(1);
+        if let Some(next) = (1..order.len())
+            .map(|step| order[(at + step) % order.len()])
+            .find(|pane| shown(pane))
+        {
+            self.focus = next;
         }
     }
 
-    /// `l`: from the sidebar, expand a folder (on a folder) or move focus
-    /// to the content pane (on a note). From the content pane there is
-    /// nothing to the right, so it is a no-op.
+    /// `h`: in the sidebar tree or tag view, collapse (the selected
+    /// folder/tag, or the parent of a note). It never moves the focus.
+    fn key_left(&mut self) {
+        if self.focus != Focus::Sidebar {
+            return;
+        }
+        match self.sidebar_mode {
+            SidebarMode::Tree => {
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.collapse_or_parent();
+                }
+            }
+            SidebarMode::Tags => self.tags.collapse_or_parent(),
+            // A heading list has no hierarchy to collapse.
+            SidebarMode::Outline => {}
+        }
+    }
+
+    /// `l`: in the sidebar tree or tag view, expand the selected folder or
+    /// tag. It never moves the focus.
     fn key_right(&mut self) {
         if self.focus != Focus::Sidebar {
             return;
         }
         match self.sidebar_mode {
             SidebarMode::Tree => {
-                let Some(sidebar) = &mut self.sidebar else {
-                    return;
-                };
-                match sidebar.selected_kind() {
-                    Some(NodeKind::Dir) => {
-                        sidebar.expand_or_activate();
-                    }
-                    // Notes and `.base` tables both hand focus to content.
-                    Some(NodeKind::Note) | Some(NodeKind::Base) => self.focus = Focus::Content,
-                    None => {}
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.expand();
                 }
             }
-            SidebarMode::Tags => {
-                // On a tag: expand; on a note: focus the content pane.
-                if self.tags.expand_or_activate().is_some() {
-                    self.focus = Focus::Content;
+            SidebarMode::Tags => self.tags.expand(),
+            SidebarMode::Outline => {}
+        }
+    }
+
+    /// `Space`: in the sidebar tree or tag view, expand/collapse the
+    /// selected folder or tag; nothing on a note row.
+    fn key_space(&mut self) {
+        if self.focus != Focus::Sidebar {
+            return;
+        }
+        match self.sidebar_mode {
+            SidebarMode::Tree => {
+                if let Some(sidebar) = &mut self.sidebar {
+                    sidebar.toggle_folder();
                 }
             }
-            SidebarMode::Outline => self.focus = Focus::Content,
+            SidebarMode::Tags => self.tags.toggle_tag(),
+            SidebarMode::Outline => {}
         }
     }
 

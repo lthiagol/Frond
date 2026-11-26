@@ -1,7 +1,7 @@
-//! Quick note switcher (`Ctrl+P`): a modal popup that fuzzy-matches the
+//! Quick jumper (`Ctrl+K`): a modal popup that fuzzy-matches the
 //! typed query against the vault's notes and opens the selected one.
 //!
-//! Flow: `Ctrl+P` opens the popup with an empty query (every note is
+//! Flow: `Ctrl+K` opens the popup with an empty query (every note is
 //! listed); typing filters the list live (no Enter needed — the matches
 //! update on every keystroke); `↑`/`↓` move the selection, `Enter` opens
 //! the selected note through the normal navigation stack (so `Backspace`
@@ -47,13 +47,13 @@ const SCORE_STEM: i32 = 100;
 /// How many result rows the popup shows at once.
 pub const VISIBLE_ROWS: usize = 10;
 
-/// The quick switcher's chrome: the query prompt above the list and the
+/// The quick jumper's chrome: the query prompt above the list and the
 /// footer below it. [`popup_geometry`] sizes the popup from it and the
 /// renderer/click mappers take their [`crate::ui::PopupList`] from it, so
 /// the height and the chrome cannot disagree.
 pub const CHROME: PopupChrome = PopupChrome::PROMPT_AND_FOOTER;
 
-/// Geometry of the quick-switcher popup within the terminal `area`.
+/// Geometry of the quick-jumper popup within the terminal `area`.
 ///
 /// The popup is: a border, the query prompt, up to [`VISIBLE_ROWS`]
 /// result rows and a footer line. Shared by the renderer (`ui::draw_quick`,
@@ -79,7 +79,7 @@ pub fn popup_geometry(area: ratatui::layout::Rect, item_count: usize) -> ratatui
     }
 }
 
-/// A note the switcher can jump to.
+/// A note the jumper can jump to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QuickCandidate {
     /// Absolute path (opened through the normal nav stack).
@@ -159,7 +159,7 @@ pub struct QuickState {
 }
 
 impl QuickState {
-    /// `Ctrl+P`: opens the popup over the given candidates.
+    /// `Ctrl+K`: opens the popup over the given candidates.
     pub fn open(&mut self, candidates: Vec<QuickCandidate>) {
         self.open = true;
         self.query.clear();
@@ -424,7 +424,7 @@ mod tests {
         assert_eq!(matched, "alpha");
     }
 
-    /// The vault resolves `X.MD` exactly like `x.md`, so the switcher's
+    /// The vault resolves `X.MD` exactly like `x.md`, so the jumper's
     /// haystacks must agree: otherwise the note's extension is part of the
     /// match target and the typed highlight lands on `.MD`.
     #[test]

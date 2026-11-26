@@ -96,7 +96,7 @@ pub struct Viewer {
     pub render_width: usize,
     pub watch: bool,
     /// Whether the note's frontmatter metadata block renders at the top
-    /// (`f` toggles; the config `metadata` key sets the startup default).
+    /// (`m` toggles; the config `metadata` key sets the startup default).
     /// Off, the body renders as if the frontmatter were absent — purely
     /// visual: tags/status/wikilinks come from the vault index either way.
     pub show_metadata: bool,
@@ -746,7 +746,7 @@ impl Viewer {
         }
     }
 
-    /// `f`: show/hide the note's frontmatter metadata block. Purely a
+    /// `m`: show/hide the note's frontmatter metadata block. Purely a
     /// re-render: the vault index still sees the frontmatter, so tags,
     /// status, backlinks and frontmatter wikilinks are unaffected.
     pub fn toggle_metadata(&mut self) {

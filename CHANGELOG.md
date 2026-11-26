@@ -11,7 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   file argument, frond opens on a vault picker: type to filter by name or
   path, `Enter` to open, `Esc` to quit. The last vault opened is
   preselected next time, else the one the `vault` key names.
-- `V` switches vaults without quitting: the same picker opens over the
+- `v` switches vaults without quitting: the same picker opens over the
   note, the vault you leave keeps its session, the one you pick opens
   where you left it, and the theme and other display toggles stay as
   they are. A vault that cannot be opened keeps the picker open with the
@@ -26,7 +26,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   saved session too.
 
 ### Changed
-- A quick-switcher row wider than the popup is cut with `…` instead of
+- **The key map, reorganized** (old habits break):
+  - `f` moves the focus: sidebar → note → backlinks (when open). `h`/`l`
+    and the arrows only fold and unfold in the tree and tag view, and
+    `Space` toggles the selected folder or tag.
+  - `m` shows/hides the metadata block (was `f`); `M` toggles mouse
+    capture (was `m`).
+  - `Ctrl+K` opens the quick jumper — the quick switcher, renamed (was
+    `Ctrl+P`).
+  - `v` opens the vault picker everywhere; in a `.base` table `]`/`[`
+    step through the views (was `v`), and `1`–`9` still jump.
+- A quick-jumper row wider than the popup is cut with `…` instead of
   losing the text that does not fit.
 
 ## [0.6.6] — 2026-11-21

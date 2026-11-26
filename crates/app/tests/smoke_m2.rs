@@ -1,7 +1,7 @@
 //! End-to-end smoke test for the M2 shell: shells out to
 //! `scripts/smoke_m2.py`, which builds a fixture vault under /tmp and drives
 //! the real TUI binary through a pty with `pyte` terminal emulation.
-//! checks: sidebar layout/tree/fold/truncation, Tab toggle, h/l focus,
+//! checks: sidebar layout/tree/fold/truncation, Tab toggle, f focus, h/l fold,
 //! Enter-opens-note, Backspace/Ctrl+O history, watch reload + loose sidebar
 //! rescan, help popup, mouse clicks/wheel, theme support (fixture config +
 //! custom theme via FROND_CONFIG/FROND_THEMES: startup theme, Shift+T cycling,

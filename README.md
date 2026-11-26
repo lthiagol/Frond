@@ -15,7 +15,7 @@ main engine of this project (vendored into `crates/engine`).
 - Click-to-open everywhere — sidebar rows, backlink rows, in-note links — with opened notes revealing in the tree and focus following the reader
 - Wikilink navigation: resolution per Obsidian rules, heading anchors, disambiguation popup, back/forward history with scroll restore
 - Backlinks panel; global vault search with jump-to-line, and a regular-expression mode (`re:` prefix)
-- Quick switcher (`Ctrl+P`): fuzzy jump to a note by name
+- Quick jumper (`Ctrl+K`): fuzzy jump to a note by name
 - The last search stays active: `n`/`N` walk its occurrences in the open note
 - Outline (`o`): the sidebar shows the open note's headings, indented by level; `Enter` jumps to one
 - Scrollbars that are position controls: a press jumps, a drag follows, and the thumb highlights under the mouse
@@ -70,7 +70,7 @@ select, `Enter` to open, `Esc` to quit. The last vault you opened (else the
 `vault` key) is preselected. With exactly one `[vaults]` entry and no
 `vault` key, that vault opens directly.
 
-`V` opens the same picker inside the app to switch vaults: the open vault
+`v` opens the same picker inside the app to switch vaults: the open vault
 is saved as on quit and the chosen one opens as a fresh start (its own
 session restored), keeping your theme, mouse, watch, sidebar, metadata,
 line-number and margin settings. `Esc` closes the picker.
@@ -88,7 +88,7 @@ Options (all optional; flags override the config file):
 | `--vault <dir\|name>` | Vault directory (wikilinks, tags, backlinks, search, sidebar), or a `[vaults]` name |
 | `--theme <name>` | Theme name (see Themes below) |
 | `--watch[=true\|false]` | Start with watch mode on or off (reload on file changes) |
-| `--mouse[=true\|false]` | Mouse capture on/off (off = native text selection; `m` toggles at runtime) |
+| `--mouse[=true\|false]` | Mouse capture on/off (off = native text selection; `M` toggles at runtime) |
 | `--config-show` | Print a commented default `config.toml` and exit |
 | `--help` / `--version` | Full usage / version |
 
@@ -100,21 +100,24 @@ Press `?` inside the app for the full key list. The most used keys:
 | Key | Action |
 |---|---|
 | `j` / `k`, ↑ / ↓ | Scroll / move selection |
-| `h` / `l`, ← / → | Focus sidebar / content (`l` expands a folder, `h` collapses) |
+| `f` | Move the focus to the next pane: sidebar → note → backlinks |
+| `h` / `l`, ← / → | Collapse / expand a folder or tag (sidebar tree and tags only) |
+| `Space` | Fold / unfold the selected folder or tag |
 | `Tab` | Show or hide the sidebar |
 | `<` / `>` | Narrow / widen the sidebar |
 | `t` | Sidebar mode: tree ⇄ tags |
 | `o` | Sidebar mode: the open note's headings (the outline) |
-| `f` | Show / hide the note's metadata block |
+| `m` | Show / hide the note's metadata block |
 | `Enter` | Open the focused link |
 | `Backspace` | Go back |
 | `s` | Search the vault |
-| `Ctrl+P` | Quick switcher: jump to a note by name |
+| `Ctrl+K` | Quick jumper: jump to a note by name |
 | `b` | Toggle backlinks |
-| `m` | Toggle mouse capture |
+| `M` | Toggle mouse capture |
 | `Shift+T` | Cycle themes (within the group set by `Ctrl+T`) |
 | `Ctrl+T` | Theme group for `Shift+T`: all → light → dark (session only) |
-| `V` | Switch to another `[vaults]` entry |
+| `v` | Switch to another `[vaults]` entry |
+| `]` / `[`, `1`–`9` | Next / previous / nth table view (`.base` files) |
 | `q` | Quit |
 
 Clicking a rendered checkbox (or pressing `Enter` on it) cycles its state.
@@ -151,7 +154,7 @@ vault = "~/notes"               # default vault when --vault is not given (~ is 
 watch = true                    # reload on file changes
 mouse = true                    # mouse capture (off = native text selection)
 sidebar_width = 40              # sidebar columns, clamped 24-120
-metadata = true                 # render the note's frontmatter block (f toggles)
+metadata = true                 # render the note's frontmatter block (m toggles)
 theme_rotation = "all"          # Shift+T group at startup: all, light or dark
 margin = 2                      # blank columns on each side of the note (0-10)
 margin_y = 1                    # blank rows above and below the note (0-5)

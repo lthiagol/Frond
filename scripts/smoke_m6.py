@@ -6,7 +6,7 @@
 - **status-bar icons** (config `icons = "unicode"` → `¶` for a note,
   `▦` for a `.base` table),
 - **`.base` tables in the sidebar tree** (the row opens the table view,
-  `v` / `1` switch views).
+  `]` / `1` switch views).
 
 Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
@@ -204,7 +204,7 @@ def sidebar_row(needle):
 
 
 def popup_result_rows():
-    """The result rows of the open quick-switcher popup (between the query
+    """The result rows of the open quick-jumper popup (between the query
     prompt and the footer). The sidebar still lists every note, so the
     checks must look at the popup only."""
     prompt = footer = None
@@ -253,7 +253,7 @@ check(
 )
 
 # --- the outline (o) -------------------------------------------------------
-send("h")  # focus the sidebar (tree view)
+send("f")  # focus the sidebar (tree view)
 pump(0.3)
 send("o")
 pump(0.4)
@@ -378,11 +378,11 @@ check(
     f"the dark theme really applied (heading fg {DARK_HEADING})",
 )
 
-# --- the quick switcher (Ctrl+P) -------------------------------------------
-send("\x10")  # Ctrl+P
+# --- the quick jumper (Ctrl+K) -------------------------------------------
+send("\x0b")  # Ctrl+K
 pump(0.5)
-check("jump:" in body_text(), "Ctrl+P opened the quick switcher")
-check(">▏" in body_text(), "the switcher shows an empty query prompt")
+check("jump:" in body_text(), "Ctrl+K opened the quick jumper")
+check(">▏" in body_text(), "the jumper shows an empty query prompt")
 check("alpha.md" in body_text(), "every note is listed before typing")
 
 send("b")
@@ -406,7 +406,7 @@ check(
     "the .base row is inside the sidebar column",
 )
 
-send("h")  # focus the sidebar
+send("f")  # focus the sidebar
 pump(0.3)
 selected = False
 for _ in range(6):
@@ -437,11 +437,11 @@ check(
 )
 check("Name" in body_text() and "alpha" in body_text(), "the table shows its rows")
 
-send("v")  # cycle the views
+send("]")  # next view
 pump(0.5)
 check(
     "view 2/2: All" in status_line(),
-    "v cycled to the second view",
+    "] moved to the second view",
 )
 check("3 rows · view 2/2: All" in status_line(), "the second view lists every note")
 

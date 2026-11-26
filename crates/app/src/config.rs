@@ -169,11 +169,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# frond configuration — ~/.config
 # sidebar_width = 40
 
 # Capture the mouse for in-app clicks and wheel scrolling. Off = the
-# terminal keeps the mouse (native text selection/copy); `m` toggles at
+# terminal keeps the mouse (native text selection/copy); `M` toggles at
 # runtime. Default: true.
 # mouse = true
 
-# Render the note's frontmatter as a metadata block at the top (`f`
+# Render the note's frontmatter as a metadata block at the top (`m`
 # toggles at runtime; tags/status in the status bar always show).
 # Default: true.
 # metadata = true

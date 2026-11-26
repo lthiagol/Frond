@@ -3,10 +3,10 @@
 //! error) is SPEC.md's **Vault picker** bullet.
 //!
 //! Terminal-independent state, like [`crate::quick`]: filtering reuses the
-//! quick switcher's subsequence matcher ([`crate::quick::fuzzy_match`]) and
+//! quick jumper's subsequence matcher ([`crate::quick::fuzzy_match`]) and
 //! the drawing lives in `ui.rs` ([`crate::ui::draw_vault_picker`]). At
 //! startup `main.rs` drives it in a small event loop of its own, before any
-//! vault is indexed; in the app (`V`, SPEC's **Vault picker in the app**)
+//! vault is indexed; in the app (`v`, SPEC's **Vault picker in the app**)
 //! the [`crate::app::App`] holds it as a popup and `main.rs` does the
 //! switch.
 
@@ -115,7 +115,7 @@ impl PickerState {
     }
 
     /// Re-filters for the current query; the selection goes to the best
-    /// match, as in the quick switcher.
+    /// match, as in the quick jumper.
     fn refresh(&mut self) {
         let query = self.query.as_str();
         let mut items: Vec<PickerItem> = self

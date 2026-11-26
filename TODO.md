@@ -48,8 +48,14 @@ and the tree is clean. What the cycle carries:
   restored (SPEC "Data flow" step 1 says so). Obsidian vaults often have
   no `index.md`; the start should restore first and fall back to an empty
   note pane. Found in u3, pre-existing.
-- **The key map** — the human asked to organize it (capitals, pickers,
-  theme keys); the human is clarifying the proposal.
+- **A typed path in the vault picker** (next, the human's choices
+  2026-11-26): a filter starting with `/`, `~` or `.` shows one row,
+  `open <path>` (Tab completes directories), and Enter opens it; a name
+  still filters. Vaults opened from a typed path are remembered in the
+  app's state dir (a short recent list, never `config.toml`) and listed
+  under the config entries. The stdin path prompt goes: with no
+  `[vaults]` and no `--vault`, the picker opens with only the path entry
+  and the recent paths.
 
 ## Next
 

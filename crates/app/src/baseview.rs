@@ -46,7 +46,7 @@ pub struct BaseLinkRegion {
 pub struct BaseState {
     pub path: PathBuf,
     pub base: BaseFile,
-    /// Selected view index (`v` cycles, `1`–`9` jumps; clamped).
+    /// Selected view index (`]`/`[` step, `1`–`9` jumps; clamped).
     pub view: usize,
     /// The current view's table (rebuilt on open, base-file change, and
     /// every index change — filters re-evaluate live).
@@ -170,9 +170,11 @@ impl BaseState {
         self.rebuild(vault_index, today);
     }
 
-    /// `v`: next view (wrapping).
-    pub fn cycle_view(&mut self, vault_index: Option<&VaultIndex>, today: &str) {
-        let next = (self.view + 1) % self.view_count();
+    /// `]` / `[`: the next (`delta` 1) or previous (`delta` -1) view,
+    /// wrapping at both ends.
+    pub fn step_view(&mut self, delta: isize, vault_index: Option<&VaultIndex>, today: &str) {
+        let count = self.view_count() as isize;
+        let next = (self.view as isize + delta).rem_euclid(count) as usize;
         self.set_view(next, vault_index, today);
     }
 
@@ -548,7 +550,7 @@ views:
         assert_eq!(state.view_name(), "Done");
         assert_eq!(state.table.note_rows(), 1);
         // v cycles (wrapping back to Open).
-        state.cycle_view(Some(&index), "2026-01-01");
+        state.step_view(1, Some(&index), "2026-01-01");
         assert_eq!(state.view_name(), "Open");
         // Out-of-range jumps clamp.
         state.set_view(99, Some(&index), "2026-01-01");

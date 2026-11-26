@@ -145,7 +145,7 @@ check("Index" in body_text(), "run 1: index.md rendered")
 
 # Sidebar tree (dirs first): 0 archive, 1 projects, 2 alpha.md, ...
 # Focus it and expand `archive` (the selected first row).
-send("h")
+send("f")
 pump(0.3)
 send("\r")
 pump(0.3)

@@ -5,7 +5,7 @@
   filter and pressing Enter opens the chosen vault (its note on screen);
 - `Esc` in the picker quits with exit status 0;
 - the clean quit records `last-vault`, which preselects on the next start;
-- `V` in the app (SPEC "Vault picker in the app") switches to another
+- `v` in the app (SPEC "Vault picker in the app") switches to another
   vault and back, the left vault's session restored, `last-vault` the one
   open at the quit;
 - a config `vault` that names a missing directory exits 2 with the one
@@ -154,16 +154,16 @@ check(run.until(lambda: run.selected_row() == "beta"), "the last vault is presel
 run.send("\x1b")
 check(run.wait_exit(), "Esc quits with exit status 0")
 
-# --- 3: `V` switches vaults in the running app -----------------------------
+# --- 3: `v` switches vaults in the running app -----------------------------
 run = Run("--vault", "alpha")
 check(run.until(lambda: "Alpha Vault Home" in run.text()), "alpha opened by name", run.screen)
-run.send("\x10")
+run.send("\x0b")
 run.send("other")
 run.pump(0.3)
 run.send("\r")
 check(run.until(lambda: "Alpha Other Note" in run.text()), "moved to alpha's other note", run.screen)
-run.send("V")
-check(run.until(lambda: "vaults: 2" in run.text()), "V opens the picker", run.screen)
+run.send("v")
+check(run.until(lambda: "vaults: 2" in run.text()), "v opens the picker", run.screen)
 check(run.until(lambda: run.selected_row() == "alpha"), "the open vault is preselected", run.screen)
 check("Alpha Other Note" in run.text(), "the main view stays behind the popup", run.screen)
 run.send("\x1b[B")
@@ -171,7 +171,7 @@ run.send("\r")
 check(run.until(lambda: "Beta Vault Home" in run.text()), "switched to beta", run.screen)
 check("Alpha Other Note" not in run.text(), "nothing of alpha is left", run.screen)
 check("vaults: 2" not in run.text(), "the popup closed", run.screen)
-run.send("V")
+run.send("v")
 check(run.until(lambda: run.selected_row() == "beta"), "beta is now preselected", run.screen)
 run.send("\x1b[A")
 run.send("\r")

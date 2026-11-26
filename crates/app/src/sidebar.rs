@@ -148,7 +148,8 @@ impl Sidebar {
         self.selected.as_deref()
     }
 
-    /// Kind of the selected node, if any (drives `l`'s behavior).
+    /// Kind of the selected node, if any.
+    #[cfg(test)]
     pub fn selected_kind(&self) -> Option<NodeKind> {
         let sel = self.selected.as_ref()?;
         self.find(sel).map(|n| n.kind)
@@ -215,15 +216,17 @@ impl Sidebar {
         }
     }
 
-    /// `l`/Right on a folder: expand it. (Only called for directories; on
-    /// a note the app moves focus to the content pane instead.)
-    pub fn expand_or_activate(&mut self) -> Option<PathBuf> {
-        let sel = self.selected.clone()?;
-        if self.is_dir(&sel) {
+    /// `l`/Right: expand the selected folder; nothing on a note.
+    pub fn expand(&mut self) {
+        if let Some(sel) = self.selected.clone().filter(|sel| self.is_dir(sel)) {
             self.expanded.insert(sel);
-            None
-        } else {
-            Some(sel)
+        }
+    }
+
+    /// `Space`: expand/collapse the selected folder; nothing on a note.
+    pub fn toggle_folder(&mut self) {
+        if self.selected.as_deref().is_some_and(|sel| self.is_dir(sel)) {
+            self.activate();
         }
     }
 
@@ -465,14 +468,23 @@ mod tests {
     }
 
     #[test]
-    fn expand_or_activate() {
+    fn expand_and_toggle_folder_leave_notes_alone() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        sb.selected = Some(vault.path().join("Archive"));
-        assert!(sb.expand_or_activate().is_none());
-        assert!(sb.expanded.contains(&vault.path().join("Archive")));
+        let archive = vault.path().join("Archive");
+        sb.selected = Some(archive.clone());
+        sb.expand();
+        assert!(sb.expanded.contains(&archive));
+        sb.toggle_folder();
+        assert!(!sb.expanded.contains(&archive));
+        sb.toggle_folder();
+        assert!(sb.expanded.contains(&archive));
+        let before = sb.expanded.clone();
         sb.selected = Some(vault.path().join("beta.md"));
-        assert_eq!(sb.expand_or_activate(), Some(vault.path().join("beta.md")));
+        sb.expand();
+        sb.toggle_folder();
+        assert_eq!(sb.expanded, before);
+        assert_eq!(sb.selected, Some(vault.path().join("beta.md")));
     }
 
     #[test]
@@ -634,12 +646,11 @@ mod tests {
             Some(vault.path().join("tasks.base")),
             "click on a base row opens it too"
         );
-        // `l` on a base row is a note-like activate, not a folder toggle.
+        // `l` on a base row expands nothing.
         assert_eq!(sb.selected_kind(), Some(NodeKind::Base));
-        assert_eq!(
-            sb.expand_or_activate(),
-            Some(vault.path().join("tasks.base"))
-        );
+        let before = sb.expanded.clone();
+        sb.expand();
+        assert_eq!(sb.expanded, before);
     }
 
     #[test]

@@ -1241,7 +1241,7 @@ impl PopupChrome {
 }
 
 /// The list window inside a popup: the popup's border and its chrome rows
-/// (the quick switcher's prompt above the list, the footer below it) are
+/// (the quick jumper's prompt above the list, the footer below it) are
 /// never item rows. Both the renderers and the click mappers take the
 /// window from here, so the drawn rows and the clickable rows cannot
 /// drift apart.
@@ -1358,7 +1358,7 @@ fn draw_disambiguation(
     );
 }
 
-/// Quick note switcher (`Ctrl+P`): the query prompt on top, the fuzzy
+/// Quick jumper (`Ctrl+K`): the query prompt on top, the fuzzy
 /// matches below (the matched characters highlighted), a footer. A
 /// stateless scroll window keeps the selection visible when there are more
 /// matches than rows. The popup rectangle was recorded into
@@ -1415,7 +1415,7 @@ fn draw_quick(f: &mut Frame, area: Rect, app: &App, ui: UiTheme) {
     );
 }
 
-/// One quick-switcher row: the note's vault-relative path with the
+/// One quick-jumper row: the note's vault-relative path with the
 /// matched characters highlighted.
 fn quick_item_line(
     item: &crate::quick::QuickItem,
@@ -1466,7 +1466,7 @@ fn match_spans(text: &str, positions: &[usize], base: Style, ui: UiTheme) -> Vec
 /// The spans that fit in `width` columns: whole spans while they fit, then
 /// the first that does not is cut at its last character that fits and ends
 /// in `…`, so a long path stays visible up to the cut. Shared by the quick
-/// switcher and the vault picker rows.
+/// jumper and the vault picker rows.
 fn truncate_spans(spans: Vec<Span<'static>>, width: usize) -> Vec<Span<'static>> {
     let mut used = 0usize;
     let mut truncated: Vec<Span<'static>> = Vec::new();
@@ -1531,7 +1531,7 @@ pub fn draw_vault_picker(f: &mut Frame, picker: &crate::vault_picker::PickerStat
     draw_vault_picker_popup(f, area, picker, ui, "Esc quit");
 }
 
-/// The vault picker's popup: the quick switcher's chrome — filter prompt,
+/// The vault picker's popup: the quick jumper's chrome — filter prompt,
 /// the entries (name, then the path dimmed, matches highlighted), and a
 /// footer that carries the picker's error when there is one. `esc` names
 /// what `Esc` does there (quit at startup, close in the app).
@@ -2031,16 +2031,17 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
     (
         "Navigation",
         &[
-            ("j / k, arrows", "scroll (content pane)"),
+            ("j / k, ↑ ↓", "scroll · move the selection (lists)"),
             ("PgDn/PgUp", "half page · g/G, Home/End top/bottom"),
             ("mouse wheel", "scroll pane under cursor / focused"),
             ("Tab", "show / hide sidebar"),
+            ("f", "focus next pane: sidebar → note → backlinks"),
             (
-                "h / l, ← →",
-                "focus sidebar / content (l expands, h collapses)",
+                "h / l, ← →, Space",
+                "collapse / expand / fold (tree and tags)",
             ),
             ("b", "toggle backlinks panel"),
-            ("s / Ctrl+P", "global search · quick note switcher"),
+            ("s / Ctrl+K", "global search · quick jumper"),
             ("n / N", "next/previous search match (note pane)"),
             ("Backspace / Ctrl+O", "back / forward (scroll restored)"),
         ],
@@ -2049,23 +2050,22 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
         "Links & tasks",
         &[
             ("x / X", "focus next / previous link or task"),
-            ("Enter / click", "open link / toggle checkbox"),
+            ("Enter / click", "open link or row / toggle checkbox"),
             ("dimmed links", "unresolved (struck out, not activatable)"),
         ],
     ),
     (
         "Content",
         &[
-            ("f", "show / hide the note's metadata block"),
+            ("m", "show / hide the note's metadata block"),
             ("w (content)", "toggle watch mode"),
-            ("v / 1-9", "switch table view (.base files)"),
+            ("] / [, 1-9", "switch table view: next / previous / nth"),
         ],
     ),
     (
         "Sidebar",
         &[
             ("t / o", "sidebar mode: tree ⇄ tags / outline"),
-            ("j/k Enter", "move / open (l expands, h collapses)"),
             ("< / >", "narrow / widen the sidebar"),
             ("sidebar *", "changed since last sync (git status)"),
         ],
@@ -2076,8 +2076,8 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
             ("u", "refresh git status (watch events too)"),
             ("Shift+T", "cycle theme (session only)"),
             ("Ctrl+T", "theme group: all → light → dark"),
-            ("m", "toggle mouse capture; off: wheel = arrows"),
-            ("V", "switch vault ([vaults] in config.toml)"),
+            ("M", "toggle mouse capture; off: wheel = arrows"),
+            ("v", "switch vault ([vaults] in config.toml)"),
             ("", "? help · q / Ctrl+C quit"),
         ],
     ),

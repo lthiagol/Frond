@@ -58,20 +58,24 @@ fn tab_toggles_and_snaps_focus() {
 }
 
 #[test]
-fn m_toggles_mouse_capture_intent() {
+fn shift_m_toggles_mouse_capture_intent() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
     assert!(app.mouse_capture, "capture on by default");
-    app.handle_key(key(KeyCode::Char('m')));
-    assert!(!app.mouse_capture, "m turns capture off");
-    app.handle_key(key(KeyCode::Char('m')));
-    assert!(app.mouse_capture, "m turns capture back on");
+    app.handle_key(KeyEvent::new(KeyCode::Char('M'), KeyModifiers::SHIFT));
+    assert!(!app.mouse_capture, "M turns capture off");
+    assert!(
+        app.viewer.show_metadata,
+        "M leaves the metadata block alone"
+    );
+    app.handle_key(key(KeyCode::Char('M')));
+    assert!(app.mouse_capture, "M turns capture back on");
 }
 
-/// `f`: the frontmatter metadata block hides and comes back; the
+/// `m`: the frontmatter metadata block hides and comes back; the
 /// toggle survives into later reparses (scroll/width changes).
 #[test]
-fn f_toggles_the_metadata_block() {
+fn m_toggles_the_metadata_block() {
     let file = TempFile::new(
         "meta-toggle.md",
         "---\ntitle: Demo\nstatus: active\n---\n# Head\n\nbody\n",
@@ -98,8 +102,9 @@ fn f_toggles_the_metadata_block() {
     assert!(has_text(&app, "Demo"), "the metadata block renders");
     assert!(has_text(&app, "Head"), "the body renders too");
 
-    app.handle_key(key(KeyCode::Char('f')));
+    app.handle_key(key(KeyCode::Char('m')));
     assert!(!app.viewer.show_metadata);
+    assert!(app.mouse_capture, "m leaves mouse capture alone");
     assert!(!has_text(&app, "Demo"), "the metadata block is gone");
     assert_eq!(
         first_line_text(&app).trim_start(),
@@ -108,10 +113,10 @@ fn f_toggles_the_metadata_block() {
     );
 
     // Back on, and the toggle holds across an unrelated reparse.
-    app.handle_key(key(KeyCode::Char('f')));
+    app.handle_key(key(KeyCode::Char('m')));
     assert!(app.viewer.show_metadata);
     assert!(has_text(&app, "Demo"));
-    app.handle_key(key(KeyCode::Char('f')));
+    app.handle_key(key(KeyCode::Char('m')));
     app.viewer.on_content_width(60);
     assert!(
         !has_text(&app, "Demo"),
@@ -332,47 +337,162 @@ fn no_vault_tab_is_a_noop() {
     assert!(app.sidebar.is_none());
 }
 
+/// `f` walks sidebar → note → backlinks → sidebar.
 #[test]
-fn h_l_switch_focus() {
+fn f_cycles_the_focus_through_every_visible_pane() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
-    assert_eq!(app.focus, Focus::Content);
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('b'))); // backlinks open, focus inside
+    assert_eq!(app.focus, Focus::Backlinks);
+    app.handle_key(key(KeyCode::Char('f')));
     assert_eq!(app.focus, Focus::Sidebar);
-    // Selection starts on the `sub` folder, where `l` expands instead of
-    // switching focus — move onto a note first.
-    app.handle_key(key(KeyCode::Char('j')));
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Content);
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Backlinks);
+}
+
+/// `f` skips a hidden sidebar and a closed backlinks panel; with only the
+/// note shown it does nothing.
+#[test]
+fn f_skips_hidden_panes_and_is_inert_with_only_the_note() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    // Backlinks closed: note ⇄ sidebar.
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Sidebar);
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Content);
+    // Sidebar hidden, backlinks open: note ⇄ backlinks.
+    app.handle_key(key(KeyCode::Tab));
+    app.handle_key(key(KeyCode::Char('b')));
+    assert_eq!(app.focus, Focus::Backlinks);
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Content);
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Backlinks);
+    // Only the note: nothing moves.
+    app.handle_key(key(KeyCode::Char('b')));
+    assert_eq!(app.focus, Focus::Content);
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Content);
+
+    // No vault at all: the same.
+    let file = TempFile::new("solo-f.md", "x\n");
+    let viewer = Viewer::open(file.path(), 80).unwrap();
+    let mut solo = App::new(viewer, None, None).unwrap();
+    solo.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(solo.focus, Focus::Content);
+}
+
+/// `h`/`l` and the arrows fold in the tree, and never move the focus.
+#[test]
+fn h_l_fold_in_the_tree_and_never_move_the_focus() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    let sub = vault_dir.path().join("sub");
+    for code in [
+        KeyCode::Char('h'),
+        KeyCode::Char('l'),
+        KeyCode::Left,
+        KeyCode::Right,
+    ] {
+        app.handle_key(key(code));
+        assert_eq!(app.focus, Focus::Content, "{code:?} from the note");
+    }
+    app.handle_key(key(KeyCode::Char('b')));
+    for code in [
+        KeyCode::Char('h'),
+        KeyCode::Char('l'),
+        KeyCode::Left,
+        KeyCode::Right,
+    ] {
+        app.handle_key(key(code));
+        assert_eq!(app.focus, Focus::Backlinks, "{code:?} from backlinks");
+    }
+    app.handle_key(key(KeyCode::Char('b')));
+
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Sidebar);
+    // Selection starts on the `sub` folder.
+    assert_eq!(app.sidebar.as_ref().unwrap().selected, Some(sub.clone()));
     app.handle_key(key(KeyCode::Char('l')));
-    assert_eq!(app.focus, Focus::Content);
-
-    // The arrows map 1:1 onto h/l (focus and sidebar fold semantics).
+    assert!(app.sidebar.as_ref().unwrap().expanded.contains(&sub));
     app.handle_key(key(KeyCode::Left));
-    assert_eq!(app.focus, Focus::Sidebar);
+    assert!(!app.sidebar.as_ref().unwrap().expanded.contains(&sub));
     app.handle_key(key(KeyCode::Right));
+    assert!(app.sidebar.as_ref().unwrap().expanded.contains(&sub));
+    app.handle_key(key(KeyCode::Char('h')));
+    assert!(!app.sidebar.as_ref().unwrap().expanded.contains(&sub));
+    assert_eq!(app.focus, Focus::Sidebar);
+
+    // On a top-level note: `l` neither opens nor moves; `h` has no parent
+    // folder to collapse into.
+    app.handle_key(key(KeyCode::Char('j')));
+    let note = vault_dir.path().join("a.md");
+    assert_eq!(app.sidebar.as_ref().unwrap().selected, Some(note.clone()));
+    let path = app.viewer.path.clone();
+    app.handle_key(key(KeyCode::Char('l')));
+    app.handle_key(key(KeyCode::Right));
+    assert_eq!(app.focus, Focus::Sidebar);
+    assert_eq!(app.viewer.path, path, "l opens nothing");
+    app.handle_key(key(KeyCode::Char('h')));
+    assert_eq!(app.sidebar.as_ref().unwrap().selected, Some(note));
+    assert_eq!(app.focus, Focus::Sidebar);
+}
+
+/// `Space` folds the selected folder in the tree and the selected tag in
+/// the tag view; on a note row and outside the sidebar it does nothing.
+#[test]
+fn space_toggles_the_selected_folder_or_tag() {
+    let vault_dir = vault();
+    std::fs::write(
+        vault_dir.path().join("a.md"),
+        "---\ntags: [mocktag]\n---\nA\n",
+    )
+    .unwrap();
+    let (_f, mut app) = app(&vault_dir);
+    let sub = vault_dir.path().join("sub");
+    let space = || key(KeyCode::Char(' '));
+    app.handle_key(space());
+    assert!(
+        !app.sidebar.as_ref().unwrap().expanded.contains(&sub),
+        "from the note: nothing"
+    );
     assert_eq!(app.focus, Focus::Content);
 
-    // Left on a top-level note: only the focus moved back (the first
-    // press); a second Left is a no-op — the note's parent IS the
-    // vault root, so there is nothing to collapse into.
-    app.handle_key(key(KeyCode::Left));
+    app.handle_key(key(KeyCode::Char('f')));
+    app.handle_key(space());
+    assert!(app.sidebar.as_ref().unwrap().expanded.contains(&sub));
+    app.handle_key(space());
+    assert!(!app.sidebar.as_ref().unwrap().expanded.contains(&sub));
+    app.handle_key(key(KeyCode::Char('j'))); // onto a.md
+    let before = app.sidebar.as_ref().unwrap().expanded.clone();
+    let path = app.viewer.path.clone();
+    app.handle_key(space());
+    assert_eq!(app.sidebar.as_ref().unwrap().expanded, before);
+    assert_eq!(app.viewer.path, path, "Space opens nothing");
     assert_eq!(app.focus, Focus::Sidebar);
-    assert_eq!(
-        app.sidebar.as_ref().unwrap().selected,
-        Some(vault_dir.path().join("a.md"))
-    );
-    app.handle_key(key(KeyCode::Left));
-    assert_eq!(
-        app.sidebar.as_ref().unwrap().selected,
-        Some(vault_dir.path().join("a.md")),
-        "top-level note: nothing to collapse"
-    );
+
+    // Tag view: the first row is a tag.
+    app.handle_key(key(KeyCode::Char('t')));
+    assert!(app.tags.expanded.is_empty());
+    app.handle_key(space());
+    assert_eq!(app.tags.expanded.len(), 1);
+    app.handle_key(key(KeyCode::Char('j'))); // onto its note
+    app.handle_key(space());
+    assert_eq!(app.tags.expanded.len(), 1, "a note row folds nothing");
+    app.handle_key(key(KeyCode::Char('k')));
+    app.handle_key(space());
+    assert!(app.tags.expanded.is_empty());
+    assert_eq!(app.focus, Focus::Sidebar);
 }
 
 #[test]
 fn sidebar_navigation_and_open_pushes_history() {
     let vault_dir = vault();
     let (file, mut app) = app(&vault_dir);
-    app.handle_key(key(KeyCode::Char('h'))); // focus sidebar
+    app.handle_key(key(KeyCode::Char('f'))); // focus sidebar
     assert_eq!(app.focus, Focus::Sidebar);
 
     // Selection starts on the `sub` folder: move to a.md, Enter opens it
@@ -494,7 +614,7 @@ fn open_missing_note_surfaces_error_keeps_current() {
     assert!(!app.nav.can_go_back());
     // Via the sidebar (Enter): the error is surfaced in the status bar.
     app.sidebar.as_mut().unwrap().selected = Some(vault_dir.path().join("nope.md"));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     app.handle_key(key(KeyCode::Enter));
     assert!(app.viewer.last_error.is_some(), "error surfaced");
     assert_eq!(app.viewer.path, file.path());
@@ -541,7 +661,7 @@ fn help_j_scrolls_and_other_keys_close_it() {
 fn scroll_keys_are_focus_gated() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     let sel = app.sidebar.as_ref().unwrap().selected.clone();
     // j in sidebar mode moves the selection, not the scroll.
     app.handle_key(key(KeyCode::Char('j')));
@@ -978,7 +1098,7 @@ fn click_sidebar_note_opens_and_moves_focus_to_content() {
 fn enter_on_sidebar_note_moves_focus_to_content() {
     let vault_dir = vault();
     let (_file, mut app) = app(&vault_dir);
-    app.handle_key(key(KeyCode::Char('h'))); // focus the sidebar
+    app.handle_key(key(KeyCode::Char('f'))); // focus the sidebar
     assert_eq!(app.focus, Focus::Sidebar);
 
     // Enter on the selected folder: expands in place, sidebar keeps
@@ -1733,7 +1853,7 @@ fn tag_view_toggles_and_opens_note() {
     // In tag mode: focus the sidebar, expand the tag, move to its
     // note, open it.
     app.handle_key(key(KeyCode::Char('t')));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     app.handle_key(key(KeyCode::Enter)); // expand mocktag
     app.handle_key(key(KeyCode::Char('j'))); // onto a.md
     app.handle_key(key(KeyCode::Enter)); // open
@@ -1825,8 +1945,8 @@ fn outline_enter_jumps_to_the_heading_and_focuses_content() {
     app.viewer.on_viewport_height(10);
 
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h')));
-    assert_eq!(app.focus, Focus::Sidebar, "h focuses the sidebar");
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Sidebar, "f focuses the sidebar");
     app.handle_key(key(KeyCode::Char('j')));
     assert_eq!(app.outline.selected, 1, "j moved to the second heading");
     let line = app.viewer.toc[1].line as u32;
@@ -1858,18 +1978,19 @@ fn outline_click_jumps_to_the_clicked_heading() {
 }
 
 #[test]
-fn outline_l_moves_to_content_and_h_does_nothing() {
+fn outline_h_and_l_do_nothing() {
     let vault_dir = outline_vault();
     let (_f, mut app) = app(&vault_dir);
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     assert_eq!(app.focus, Focus::Sidebar);
     app.handle_key(key(KeyCode::Char('h')));
     assert_eq!(app.focus, Focus::Sidebar, "h has no hierarchy to collapse");
     assert_eq!(app.sidebar_mode, SidebarMode::Outline);
     app.handle_key(key(KeyCode::Char('l')));
-    assert_eq!(app.focus, Focus::Content, "l moves to the content pane");
+    assert_eq!(app.focus, Focus::Sidebar, "l never moves the focus");
+    assert_eq!(app.outline.selected, 0);
 }
 
 #[test]
@@ -1918,13 +2039,13 @@ fn outline_with_no_headings_has_an_empty_selection() {
     assert!(app.viewer.toc.is_empty(), "precondition: no headings");
     app.handle_key(key(KeyCode::Char('o')));
     assert_eq!(app.sidebar_mode, SidebarMode::Outline);
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     assert_eq!(app.focus, Focus::Sidebar);
     app.handle_key(key(KeyCode::Char('j'))); // must not panic
     app.handle_key(key(KeyCode::Enter)); // nothing to jump to
     assert_eq!(app.focus, Focus::Sidebar, "Enter stays on an empty list");
-    app.handle_key(key(KeyCode::Char('l')));
-    assert_eq!(app.focus, Focus::Content, "l still hands over the content");
+    app.handle_key(key(KeyCode::Char('f')));
+    assert_eq!(app.focus, Focus::Content, "f still hands over the content");
 }
 
 #[test]
@@ -4048,7 +4169,7 @@ fn viewer_actions_are_inert_while_a_base_table_is_shown() {
         app.viewer.last_error
     );
     // The table interactions still work while the note is hidden.
-    app.handle_key(key(KeyCode::Char('v')));
+    app.handle_key(key(KeyCode::Char(']')));
     assert_eq!(app.base.as_ref().unwrap().view_name(), "Done");
 }
 
@@ -4077,23 +4198,38 @@ fn a_failed_open_keeps_the_base_table() {
 }
 
 #[test]
-fn v_and_digit_keys_switch_base_views() {
+fn bracket_and_digit_keys_switch_base_views() {
     let dir = base_vault();
     let mut app = base_app(&dir);
-    app.handle_key(key(KeyCode::Char('v')));
-    assert_eq!(app.base.as_ref().unwrap().view_name(), "Done");
+    let view = |app: &App| app.base.as_ref().unwrap().view_name().to_string();
+    app.handle_key(key(KeyCode::Char(']')));
+    assert_eq!(view(&app), "Done");
     assert_eq!(app.base.as_ref().unwrap().table.note_rows(), 1);
     // Digit 1 jumps back to the first view; 9 clamps to the last.
     app.handle_key(key(KeyCode::Char('1')));
-    assert_eq!(app.base.as_ref().unwrap().view_name(), "Open");
+    assert_eq!(view(&app), "Open");
     app.handle_key(key(KeyCode::Char('9')));
-    assert_eq!(app.base.as_ref().unwrap().view_name(), "Done");
-    // v wraps from the last view back to the first.
+    assert_eq!(view(&app), "Done");
+    // `]` wraps from the last view back to the first, `[` the other way.
+    app.handle_key(key(KeyCode::Char(']')));
+    assert_eq!(view(&app), "Open");
+    app.handle_key(key(KeyCode::Char('[')));
+    assert_eq!(view(&app), "Done");
+    app.handle_key(key(KeyCode::Char('[')));
+    assert_eq!(view(&app), "Open");
+    // `v` is the vault picker, not a view switch, in a table too.
+    with_vaults(&mut app, &dir, &dir);
     app.handle_key(key(KeyCode::Char('v')));
-    assert_eq!(app.base.as_ref().unwrap().view_name(), "Open");
-    // Without an open base the keys are inert (v does nothing).
+    assert!(
+        app.vault_picker.is_some(),
+        "v opens the picker over a table"
+    );
+    assert_eq!(view(&app), "Open");
+    app.handle_key(key(KeyCode::Esc));
+    // Without an open base the keys are inert.
     app.base = None;
-    app.handle_key(key(KeyCode::Char('v')));
+    app.handle_key(key(KeyCode::Char(']')));
+    app.handle_key(key(KeyCode::Char('[')));
 }
 
 #[test]
@@ -4249,14 +4385,40 @@ fn help_documents_base_view_switching() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
     app.handle_key(key(KeyCode::Char('?')));
-    let backend = ratatui::backend::TestBackend::new(100, 24);
+    let backend = ratatui::backend::TestBackend::new(100, 60);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
     terminal.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
     let screen = terminal.backend().to_string();
     assert!(
         screen.contains("switch table view"),
-        "the v/1-9 help line is documented: {screen}"
+        "the ]/[/1-9 help line is documented: {screen}"
     );
+    for (key, label) in [
+        ("f ", "focus next pane"),
+        ("h / l, ← →, Space", "collapse / expand / fold"),
+        ("j / k, ↑ ↓", "scroll"),
+        ("m ", "metadata block"),
+        ("M ", "mouse capture"),
+        ("v ", "switch vault"),
+        ("Ctrl+K", "quick jumper"),
+    ] {
+        assert!(
+            screen.lines().any(|l| l.contains(key) && l.contains(label)),
+            "{key} / {label} in the help: {screen}"
+        );
+    }
+    assert!(!screen.contains("Ctrl+P"), "the old key is gone");
+}
+
+/// `Ctrl+P` is unbound: no jumper, no other effect.
+#[test]
+fn ctrl_p_opens_nothing() {
+    let vault_dir = vault();
+    let (_f, mut app) = app(&vault_dir);
+    assert_eq!(app.handle_key(ctrl(KeyCode::Char('p'))), Flow::Continue);
+    assert!(!app.quick.open);
+    assert!(app.vault_picker.is_none());
+    assert_eq!(app.focus, Focus::Content);
 }
 
 #[test]
@@ -4743,16 +4905,16 @@ fn failed_clipboard_write_becomes_an_error() {
     assert!(err.starts_with("copy failed"), "{err}");
 }
 
-// --- the quick note switcher (Ctrl+P) --------------------------------------
+// --- the quick jumper (Ctrl+K) --------------------------------------
 
-/// `Ctrl+P` opens the switcher over every note in the vault; typing
+/// `Ctrl+K` opens the jumper over every note in the vault; typing
 /// filters the list live.
 #[test]
-fn ctrl_p_opens_the_switcher_and_filters_live() {
+fn ctrl_k_opens_the_jumper_and_filters_live() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
-    assert_eq!(app.handle_key(ctrl(KeyCode::Char('p'))), Flow::Continue);
-    assert!(app.quick.open, "the switcher is open");
+    assert_eq!(app.handle_key(ctrl(KeyCode::Char('k'))), Flow::Continue);
+    assert!(app.quick.open, "the jumper is open");
     assert_eq!(
         app.quick.items.len(),
         3,
@@ -4770,11 +4932,11 @@ fn ctrl_p_opens_the_switcher_and_filters_live() {
 /// Enter opens the selected note through the normal nav stack, so
 /// Backspace returns to the previous one.
 #[test]
-fn enter_in_the_switcher_opens_the_note_and_pushes_history() {
+fn enter_in_the_jumper_opens_the_note_and_pushes_history() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
-    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(ctrl(KeyCode::Char('k')));
     app.handle_key(key(KeyCode::Char('b')));
     assert_eq!(app.quick.items[0].label, "sub/b.md");
     app.handle_key(key(KeyCode::Enter));
@@ -4795,12 +4957,12 @@ fn enter_in_the_switcher_opens_the_note_and_pushes_history() {
     );
 }
 
-/// The switcher is modal: a typed `q` goes into the query, it never quits.
+/// The jumper is modal: a typed `q` goes into the query, it never quits.
 #[test]
-fn the_switcher_is_modal() {
+fn the_jumper_is_modal() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
-    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(ctrl(KeyCode::Char('k')));
     assert_eq!(app.handle_key(key(KeyCode::Char('q'))), Flow::Continue);
     assert!(app.quick.open, "still open");
     assert_eq!(app.quick.query, "q");
@@ -4808,13 +4970,13 @@ fn the_switcher_is_modal() {
     assert_eq!(app.handle_key(ctrl(KeyCode::Char('c'))), Flow::Quit);
 }
 
-/// Esc closes the switcher without opening anything.
+/// Esc closes the jumper without opening anything.
 #[test]
-fn escape_closes_the_switcher() {
+fn escape_closes_the_jumper() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
     let before = app.current_path();
-    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(ctrl(KeyCode::Char('k')));
     app.handle_key(key(KeyCode::Esc));
     assert!(!app.quick.open);
     assert_eq!(app.current_path(), before, "nothing was opened");
@@ -4822,10 +4984,10 @@ fn escape_closes_the_switcher() {
 
 /// `↑`/`↓` move the selection; the selection is clamped to the list.
 #[test]
-fn the_switcher_selection_moves_with_the_arrows() {
+fn the_jumper_selection_moves_with_the_arrows() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
-    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(ctrl(KeyCode::Char('k')));
     assert_eq!(app.quick.selected, 0);
     app.handle_key(key(KeyCode::Down));
     assert_eq!(app.quick.selected, 1);
@@ -4837,17 +4999,17 @@ fn the_switcher_selection_moves_with_the_arrows() {
     assert_eq!(app.quick.selected, 2, "a page down jumps to the last item");
 }
 
-/// Without a vault index there is nothing to jump to: `Ctrl+P` is inert.
+/// Without a vault index there is nothing to jump to: `Ctrl+K` is inert.
 #[test]
-fn ctrl_p_without_a_vault_does_nothing() {
+fn ctrl_k_without_a_vault_does_nothing() {
     let file = TempFile::new("app-noquick.md", "MAIN\n");
     let viewer = Viewer::open(file.path(), 80).unwrap();
     let mut app = App::new(viewer, None, None).unwrap();
-    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(ctrl(KeyCode::Char('k')));
     assert!(!app.quick.open);
 }
 
-/// A quick-switcher popup of height 4 (a terminal six rows or fewer) has
+/// A quick-jumper popup of height 4 (a terminal six rows or fewer) has
 /// no room for a list row: the footer row is chrome, so clicking it must
 /// not select (and then open) the first note.
 #[test]
@@ -4855,7 +5017,7 @@ fn a_degenerate_quick_popup_ignores_clicks_on_its_footer() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
     app.open_note(&vault_dir.path().join("a.md")).unwrap();
-    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(ctrl(KeyCode::Char('k')));
     let area = Rect::new(0, 0, 100, 4);
     let popup = crate::quick::popup_geometry(area, app.quick.items.len());
     assert_eq!(popup.height, 4, "precondition: borders + prompt + footer");
@@ -4874,13 +5036,13 @@ fn a_degenerate_quick_popup_ignores_clicks_on_its_footer() {
     );
 }
 
-/// A click on a switcher row selects it; a second click on the selected
+/// A click on a jumper row selects it; a second click on the selected
 /// row opens it.
 #[test]
-fn clicking_a_switcher_row_selects_then_opens_it() {
+fn clicking_a_jumper_row_selects_then_opens_it() {
     let vault_dir = vault();
     let (_f, mut app) = app(&vault_dir);
-    app.handle_key(ctrl(KeyCode::Char('p')));
+    app.handle_key(ctrl(KeyCode::Char('k')));
     // The popup geometry the renderer records: 70 wide, centered.
     let area = Rect::new(0, 0, 100, 24);
     app.layout.quick_area = Some(crate::quick::popup_geometry(area, app.quick.items.len()));
@@ -4912,15 +5074,12 @@ fn with_vaults(app: &mut App, alpha: &TempDir, beta: &TempDir) {
 }
 
 #[test]
-fn shift_v_opens_the_vault_picker_on_the_open_vault() {
+fn v_opens_the_vault_picker_on_the_open_vault() {
     let alpha = vault();
     let beta = vault();
     let (_f, mut app) = app(&alpha);
     with_vaults(&mut app, &alpha, &beta);
-    assert_eq!(
-        app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT)),
-        Flow::Continue
-    );
+    assert_eq!(app.handle_key(key(KeyCode::Char('v'))), Flow::Continue);
     let picker = app.vault_picker.as_ref().expect("the picker is open");
     assert_eq!(picker.selected_entry().unwrap().name, "alpha");
     // The popup owns the keys: `q` filters instead of quitting.
@@ -4928,15 +5087,15 @@ fn shift_v_opens_the_vault_picker_on_the_open_vault() {
     assert_eq!(app.vault_picker.as_ref().unwrap().query, "q");
     assert_eq!(app.handle_key(key(KeyCode::Esc)), Flow::Continue);
     assert!(app.vault_picker.is_none(), "Esc closes the popup");
-    app.handle_key(key(KeyCode::Char('V')));
+    app.handle_key(key(KeyCode::Char('v')));
     assert_eq!(app.handle_key(ctrl(KeyCode::Char('c'))), Flow::Quit);
 }
 
 #[test]
-fn shift_v_with_no_vaults_only_says_so() {
+fn v_with_no_vaults_only_says_so() {
     let alpha = vault();
     let (_f, mut app) = app(&alpha);
-    app.handle_key(key(KeyCode::Char('V')));
+    app.handle_key(key(KeyCode::Char('v')));
     assert!(app.vault_picker.is_none());
     assert_eq!(
         app.last_status.as_ref().map(|status| status.text.as_str()),
@@ -4952,7 +5111,7 @@ fn choosing_the_open_vault_changes_nothing() {
     with_vaults(&mut app, &alpha, &beta);
     app.scroll_content_down(5);
     let (note, scroll) = (app.viewer.path.clone(), app.viewer.scroll);
-    app.handle_key(key(KeyCode::Char('V')));
+    app.handle_key(key(KeyCode::Char('v')));
     assert_eq!(app.handle_key(key(KeyCode::Enter)), Flow::Continue);
     assert!(app.vault_picker.is_none(), "the popup closed");
     assert_eq!((app.viewer.path.clone(), app.viewer.scroll), (note, scroll));
@@ -4965,7 +5124,7 @@ fn choosing_another_vault_asks_for_the_switch_and_a_failure_stays_in_the_picker(
     let (_f, mut app) = app(&alpha);
     with_vaults(&mut app, &alpha, &beta);
     let note = app.viewer.path.clone();
-    app.handle_key(key(KeyCode::Char('V')));
+    app.handle_key(key(KeyCode::Char('v')));
     app.handle_key(key(KeyCode::Down));
     assert_eq!(
         app.handle_key(key(KeyCode::Enter)),
@@ -4988,7 +5147,7 @@ fn the_vault_picker_takes_no_mouse_input() {
     let beta = vault();
     let (_f, mut app) = app(&alpha);
     with_vaults(&mut app, &alpha, &beta);
-    app.handle_key(key(KeyCode::Char('V')));
+    app.handle_key(key(KeyCode::Char('v')));
     let scroll = app.viewer.scroll;
     app.handle_wheel(true);
     app.handle_click(0, 0);

@@ -201,7 +201,7 @@ pub(crate) fn ends_with_ignore_case(name: &str, suffix: &str) -> bool {
 
 /// ASCII-case-insensitive counterpart of [`str::strip_suffix`]: the
 /// suffix-stripping rule shared by the walker, the wikilink parser, the
-/// resolver and the app's quick switcher, so a suffix that is *matched*
+/// resolver and the app's quick jumper, so a suffix that is *matched*
 /// case-insensitively is also *stripped* case-insensitively.
 pub fn strip_suffix_ignore_case<'a>(value: &'a str, suffix: &str) -> Option<&'a str> {
     let (value_len, suffix_len) = (value.len(), suffix.len());

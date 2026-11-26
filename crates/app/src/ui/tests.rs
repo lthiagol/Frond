@@ -536,7 +536,7 @@ fn status_bar_shows_only_the_name_when_the_name_is_shared() {
 fn status_bar_shows_only_the_name_when_sidebar_focused() {
     let dir = name_vault();
     let mut app = status_app(&dir, "solo.md");
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     assert_eq!(app.focus, crate::app::Focus::Sidebar);
     let screen = render_at(&mut app, 100);
     let row = status_row(&screen);
@@ -577,7 +577,7 @@ fn status_bar_name_segment_records_rect_only_in_content_focus() {
     assert_eq!(area.x, 0);
     let label = format!("{} solo.md", app.icons.note());
     assert_eq!(area.width as usize, UnicodeWidthStr::width(label.as_str()));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     render_at(&mut app, 100);
     assert!(
         app.layout.status_name_area.is_none(),
@@ -836,7 +836,7 @@ fn status_bar_shows_the_content_percentage_with_sidebar_focus() {
     let max = app.viewer.max_scroll();
     assert!(max > 0, "fixture must overflow");
     app.viewer.scroll = max.div_ceil(2);
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     assert_eq!(app.focus, crate::app::Focus::Sidebar);
     let screen = render_at(&mut app, 100);
     assert!(
@@ -1011,7 +1011,7 @@ fn sidebar_visible_by_default_with_vault() {
 
     // Focus the sidebar: the status bar shows the selected entry's path
     // (the first row is the `sub` folder — dirs sort first).
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     let screen = render(&mut app);
     assert!(
         status_row(&screen)
@@ -1480,7 +1480,7 @@ fn outline_rows_carry_the_index_and_the_bullet() {
     let file = ui_viewer("ui-outline-index.md", &body);
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     app.handle_key(key(KeyCode::Char('j')));
 
     let backend = TestBackend::new(100, 24);
@@ -1846,7 +1846,7 @@ fn outline_status_bar_shows_the_selected_heading() {
     let file = ui_viewer("ui-outline-status.md", "# Top\n\nbody\n\n## Deep\n\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     let screen = render(&mut app);
     assert!(
         status_row(&screen).contains("Top"),
@@ -1876,7 +1876,7 @@ fn outline_status_label_follows_a_note_scroll() {
     app.handle_key(key(KeyCode::Char('o')));
     app.handle_key(key(KeyCode::PageDown));
     assert!(app.viewer.scroll > 0, "precondition: the note scrolled");
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     assert_eq!(app.focus, Focus::Sidebar);
     let screen = render(&mut app);
     let expected = crate::outline::active_row(&app.viewer.toc, app.viewer.scroll, false)
@@ -1925,7 +1925,7 @@ fn outline_wheel_scrolls_the_view_and_a_note_scroll_releases_it() {
     let file = ui_viewer("ui-outline-wheel.md", &headings);
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h'))); // the status bar labels the sidebar
+    app.handle_key(key(KeyCode::Char('f'))); // the status bar labels the sidebar
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -1959,7 +1959,7 @@ fn outline_wheel_scrolls_the_view_and_a_note_scroll_releases_it() {
 
     // The reader's own scroll of the note: `Outline::note_scrolled` owns the
     // panel's response (the follow, and the selection with it).
-    app.handle_key(key(KeyCode::Char('l'))); // back to the note pane
+    app.handle_key(key(KeyCode::Char('f'))); // back to the note pane
     app.handle_key(key(KeyCode::PageDown));
     assert!(app.viewer.scroll > 0, "precondition: the note scrolled");
     terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -1989,7 +1989,7 @@ fn enter_after_a_wheeled_outline_brings_the_jump_back_into_view() {
     let file = ui_viewer("ui-outline-wheel-jump.md", &headings);
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -2114,7 +2114,7 @@ fn outline_over_a_base_table_shows_no_headings() {
     app.open_note(&vault_dir.path().join("tbl.base")).unwrap();
     assert!(app.base.is_some(), "precondition: the table is open");
     // Focus the sidebar so the status bar carries the outline's label.
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     let sidebar = rendered_sidebar(&mut app);
     assert!(
         sidebar.contains("no headings"),
@@ -2182,7 +2182,7 @@ fn outline_scroll_takes_the_selection_and_the_active_heading_keeps_its_mark() {
         "the bar marks the heading being read"
     );
 
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     app.handle_key(key(KeyCode::Char('k')));
     let moved = app.outline.selected;
     assert_ne!(moved, expected, "precondition: the reader moved the cursor");
@@ -2267,7 +2267,7 @@ fn outline_jump_pins_the_heading_until_the_reader_scrolls_the_note() {
     let file = ui_viewer("ui-outline-pin.md", &headings);
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     let len = app.viewer.toc.len();
     app.outline.select(len - 1, len);
     app.handle_key(key(KeyCode::Enter));
@@ -2334,7 +2334,7 @@ fn outline_jump_to_a_duplicate_title_pins_the_selected_occurrence() {
     let file = ui_viewer("ui-outline-dup-pin.md", "# Dup\n\nbody\n\n# Dup\n\nbody\n");
     let mut app = app_with_index(&file, &vault_dir);
     app.handle_key(key(KeyCode::Char('o')));
-    app.handle_key(key(KeyCode::Char('h')));
+    app.handle_key(key(KeyCode::Char('f')));
     let len = app.viewer.toc.len();
     assert_eq!(len, 2, "precondition: two identically-titled headings");
     app.outline.select(1, len);
@@ -2514,7 +2514,7 @@ fn popup_list_geometry_maps_list_rows_and_rejects_chrome() {
     assert_eq!(list.index_at(5), Some(7));
     assert_eq!(list.index_at(7), Some(9));
 
-    // Quick switcher shape: one prompt row above the list, a footer below.
+    // Quick jumper shape: one prompt row above the list, a footer below.
     let popup = Rect::new(10, 4, 70, 8); // 4 list rows (6..9), footer at 10
     let list = PopupList::new(popup, PopupChrome::PROMPT_AND_FOOTER, 0, 2);
     assert_eq!((list.first_row, list.rows), (6, 4));
@@ -2527,7 +2527,7 @@ fn popup_list_geometry_maps_list_rows_and_rejects_chrome() {
 
 #[test]
 fn popup_list_has_no_rows_when_the_popup_is_borders_and_chrome_only() {
-    // A quick-switcher popup clamped to 4 rows (a terminal six rows or
+    // A quick-jumper popup clamped to 4 rows (a terminal six rows or
     // fewer) has room for the borders, the prompt and the footer — no
     // list row at all. The list must not invent one on the footer row.
     let popup = Rect::new(10, 4, 70, 4);
@@ -2679,7 +2679,7 @@ fn link_hover_is_cleared_by_state_changes() {
     let (col, row) = link_cell(&app, "goal");
     draw_with_pointer(&mut terminal, &mut app, Some((col, row)));
     assert_eq!(app.viewer.hover_link, Some(0));
-    app.handle_key(key(KeyCode::Char('m')));
+    app.handle_key(key(KeyCode::Char('M')));
     assert!(!app.mouse_capture);
     assert_eq!(app.viewer.hover_link, None, "capture off means no hover");
 }
@@ -3296,7 +3296,7 @@ fn base_view_switch_is_visible_in_the_title() {
     app.open_base_at(&vault_dir.path().join("v.base"), 0)
         .unwrap();
     app.sidebar_visible = false;
-    app.handle_key(key(KeyCode::Char('v')));
+    app.handle_key(key(KeyCode::Char(']')));
     let screen = render(&mut app);
     assert!(screen.contains("view 2/2: Two"), "{screen}");
 }
@@ -3563,7 +3563,7 @@ fn base_scrollbar_press_jumps_to_the_mapped_track_row() {
         "a middle row names that fraction of the range"
     );
 
-    // Mouse capture off (`m`) disables the bar, like every other mouse action.
+    // Mouse capture off (`M`) disables the bar, like every other mouse action.
     app.handle_press(bar.x, bar.y);
     assert_eq!(app.base.as_ref().unwrap().scroll, 0);
     app.mouse_capture = false;
@@ -4882,7 +4882,7 @@ fn backlinks_bar_press_positions_the_selection_without_opening() {
     assert_eq!(app.viewer.path, opened, "the bar's release opens nothing");
 }
 
-/// Mouse capture off (`m`) disables every bar: the app ignores the mouse
+/// Mouse capture off (`M`) disables every bar: the app ignores the mouse
 /// even when the terminal forwards the events.
 #[test]
 fn mouse_capture_off_disables_the_bar_position_controls() {
@@ -4908,7 +4908,7 @@ fn mouse_capture_off_disables_the_bar_position_controls() {
     app.handle_press(note_bar.x, note_bar.y);
     assert_eq!(app.viewer.scroll, 0);
 
-    app.handle_key(key(KeyCode::Char('m')));
+    app.handle_key(key(KeyCode::Char('M')));
     assert!(!app.mouse_capture, "m turns capture off");
     app.handle_press(note_bar.x, note_bar.y + note_bar.height / 2);
     assert_eq!(
@@ -5446,7 +5446,7 @@ fn help_scrollbar_thumb_highlights_under_the_pointer() {
     assert_hover_paints_the_thumb(&mut terminal, &mut app, bar);
 }
 
-/// Mouse capture off (`m`) forgets the pointer, and no new position is
+/// Mouse capture off (`M`) forgets the pointer, and no new position is
 /// tracked: the hover needs a live pointer, like every other mouse action.
 #[test]
 fn mouse_capture_off_clears_the_scrollbar_hover() {
@@ -5471,7 +5471,7 @@ fn mouse_capture_off_clears_the_scrollbar_hover() {
         "the control tick: the pointer lights the thumb"
     );
 
-    app.handle_key(key(KeyCode::Char('m')));
+    app.handle_key(key(KeyCode::Char('M')));
     assert!(!app.mouse_capture, "m turns capture off");
     assert!(app.pointer.is_none(), "capture off forgets the pointer");
     app.on_mouse_position(bar.x, bar.y);
@@ -5746,10 +5746,10 @@ fn help_dims_background_and_keeps_popup_crisp() {
     }
 }
 
-// --- the quick note switcher (Ctrl+P) --------------------------------------
+// --- the quick jumper (Ctrl+K) --------------------------------------
 
 #[test]
-fn quick_switcher_renders_the_prompt_the_matches_and_the_footer() {
+fn quick_jumper_renders_the_prompt_the_matches_and_the_footer() {
     let vault_dir = TempDir::new("ui-quick");
     std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
     std::fs::create_dir_all(vault_dir.path().join("sub")).unwrap();
@@ -5773,7 +5773,7 @@ fn quick_switcher_renders_the_prompt_the_matches_and_the_footer() {
 }
 
 #[test]
-fn quick_switcher_reports_no_matches() {
+fn quick_jumper_reports_no_matches() {
     let vault_dir = TempDir::new("ui-quick-none");
     std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
     let file = ui_viewer("ui-quick-none.md", "x\n");
@@ -5832,12 +5832,12 @@ fn quick_selected_row_is_a_full_width_bar_and_keeps_the_match_highlight() {
     assert_eq!(
         buffer[(popup.right() - 2, y)].bg,
         Color::Rgb(5, 5, 5),
-        "quick-switcher bar reaches the popup's inner right edge"
+        "quick-jumper bar reaches the popup's inner right edge"
     );
 }
 
 #[test]
-fn quick_switcher_highlights_the_matched_characters() {
+fn quick_jumper_highlights_the_matched_characters() {
     let vault_dir = TempDir::new("ui-quick-hl");
     std::fs::write(vault_dir.path().join("alpha.md"), "alpha\n").unwrap();
     let file = ui_viewer("ui-quick-hl.md", "x\n");
@@ -5903,7 +5903,7 @@ fn vault_picker_cuts_an_overlong_path_with_an_ellipsis() {
     );
 }
 
-// --- truncate_spans (quick switcher and picker rows) ------------------------
+// --- truncate_spans (quick jumper and picker rows) ------------------------
 
 /// The text of `spans` joined: what the row shows.
 fn spans_text(spans: &[Span<'static>]) -> String {
@@ -6024,7 +6024,7 @@ fn vault_picker_row_overflowing_at_a_span_boundary_ends_in_an_ellipsis() {
     );
 }
 
-/// `V`: the vault picker draws as a popup over the main view, with the
+/// `v`: the vault picker draws as a popup over the main view, with the
 /// in-app `Esc` hint.
 #[test]
 fn vault_picker_popup_draws_over_the_main_view() {
@@ -6040,7 +6040,7 @@ fn vault_picker_popup_draws_over_the_main_view() {
             .collect(),
         startup_preselect: 0,
     };
-    app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+    app.handle_key(key(KeyCode::Char('v')));
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();

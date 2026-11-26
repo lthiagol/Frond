@@ -7,18 +7,18 @@
 //! Which vault opens is SPEC.md "Data flow" step 1 ([`choose_vault`]): with
 //! two or more config `[vaults]` and neither `--vault` nor a file argument,
 //! the vault picker ([`vault_picker`]) runs first; with nothing to go on,
-//! the app prompts for the vault directory. `V` switches vaults while the
+//! the app prompts for the vault directory. `v` switches vaults while the
 //! app runs: [`run_app`] leaves the open vault as a clean quit does and
 //! [`start_app`] opens the chosen one, the path the first start takes. A file argument without a vault is
 //! opened on its own, without a sidebar; the vault index is then the
-//! current directory. With a vault, `Tab` shows/hides the sidebar tree; `h`/`l` move focus between
-//! sidebar and content; `Backspace`/`Ctrl+O` walk the navigation history.
+//! current directory. With a vault, `Tab` shows/hides the sidebar tree; `f` moves the focus
+//! between the panes; `Backspace`/`Ctrl+O` walk the navigation history.
 //!
 //! Keys: j/k, arrows, PgUp/PgDn, g/G, Home/End, mouse wheel to scroll;
-//! `w` toggles watch; `s` is the global vault search; `Ctrl+P` is the
-//! quick note switcher; `u` refreshes the
+//! `w` toggles watch; `s` is the global vault search; `Ctrl+K` is the
+//! quick jumper; `u` refreshes the
 //! git sync status; `Shift+T` cycles the theme; `?` toggles the help
-//! popup; `V` switches vaults; `v`/`1`–`9` switch table views while a `.base` file is open;
+//! popup; `v` switches vaults; `]`/`[`/`1`–`9` switch table views while a `.base` file is open;
 //! `q`/Ctrl+C quits.
 //!
 //! Vault index: booted at startup from `--vault` when given, otherwise
@@ -109,7 +109,7 @@ Options:
   --theme <name>        Theme by name (config: theme)
   --watch[=true|false]  Live re-render on vault changes (config: watch)
   --mouse[=true|false]  Mouse capture on/off; off = native text selection
-                        (config: mouse, `m` toggles at runtime)
+                        (config: mouse, `M` toggles at runtime)
   --config-show         Print a commented default config.toml and exit
   --version             Print the version and exit
   --help                Print this help and exit
@@ -554,7 +554,7 @@ fn main() {
     let watch = args.watch.unwrap_or_else(|| config.watch_default());
     // Mouse capture: CLI flag > config `mouse` key > on (the historical
     // default). Off = the terminal keeps the mouse for native text
-    // selection; `m` toggles at runtime either way.
+    // selection; `M` toggles at runtime either way.
 
     // Default the note to the vault's index, matching Obsidian's entry note.
     // Whether the note came from an explicit argument matters later (an
@@ -673,7 +673,7 @@ fn startup_display(
         theme,
         theme_rotation,
         // Mouse capture default (config/flag): the App field drives the
-        // runtime toggle (`m`); setup_terminal already applied the startup
+        // runtime toggle (`M`); setup_terminal already applied the startup
         // state.
         mouse_capture: mouse,
         watch,
@@ -683,7 +683,7 @@ fn startup_display(
             .sidebar_width
             .map(|w| w.clamp(app::SIDEBAR_MIN_WIDTH, app::SIDEBAR_MAX_WIDTH)),
         sidebar_visible: true,
-        // Metadata block default (config `metadata` key; `f` toggles).
+        // Metadata block default (config `metadata` key; `m` toggles).
         show_metadata: config.metadata.unwrap_or(true),
         // Line-number gutter (config `line_numbers`, default off).
         line_numbers: config.line_numbers.unwrap_or(false),
@@ -891,7 +891,7 @@ fn run_app(
     // would starve the poll while events (e.g. mouse motion) keep arriving.
     let mut last_poll = Instant::now();
     // Live mouse-capture state, kept in sync with `app.mouse_capture` (the
-    // `m` toggle): when they diverge, the switch is executed here — the
+    // `M` toggle): when they diverge, the switch is executed here — the
     // App cannot write to the terminal itself.
     let mut capture_on = app.mouse_capture;
 

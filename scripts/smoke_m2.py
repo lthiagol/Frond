@@ -154,7 +154,7 @@ pump(0.4)
 check("index.md" in screen_no_status(), "Tab shows sidebar again")
 
 # --- folder expand + open a note -----------------------------------------
-send("h")  # focus sidebar
+send("f")  # focus sidebar
 pump(0.3)
 check(
     "projects ·" in status_line() and f"{VAULT}/projects" not in status_line(),
@@ -219,7 +219,7 @@ with open(f"{VAULT}/beta.md", "w") as f:
     f.write("# Beta\n")
 send("\t")  # show sidebar
 pump(0.3)
-send("h")  # focus sidebar
+send("f")  # focus sidebar
 pump(0.2)
 with open(f"{VAULT}/projects/{LONG}", "a") as f:
     f.write("\nrescan tick\n")
