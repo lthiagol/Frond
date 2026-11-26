@@ -38,7 +38,7 @@ impl VaultEntry {
 }
 
 /// `path` with a leading `home` written as `~`.
-fn home_relative(path: &Path, home: Option<&Path>) -> String {
+pub fn home_relative(path: &Path, home: Option<&Path>) -> String {
     match home.and_then(|home| path.strip_prefix(home).ok()) {
         Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
         Some(rest) => format!("~/{}", rest.display()),
@@ -163,7 +163,7 @@ impl PickerState {
             }
             KeyCode::Enter => {
                 if let Some(entry) = self.selected_entry() {
-                    if entry.path.is_dir() {
+                    if crate::is_vault_dir(&entry.path) {
                         return PickerFlow::Open(entry.path.clone());
                     }
                     self.error = Some(format!("not a directory: {}", entry.path.display()));

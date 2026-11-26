@@ -248,10 +248,17 @@ fn validate_vault_dir(input: &str) -> Result<PathBuf, String> {
         },
         None => PathBuf::from(trimmed),
     };
-    if !expanded.is_dir() {
+    if !is_vault_dir(&expanded) {
         return Err(format!("not a directory: {}", expanded.display()));
     }
     Ok(absolutize(&expanded))
+}
+
+/// The one check for "is this a vault directory": the prompt
+/// ([`validate_vault_dir`]), a chosen startup path (`main`) and the picker's
+/// Enter (`vault_picker`) all ask it.
+fn is_vault_dir(path: &Path) -> bool {
+    path.is_dir()
 }
 
 /// Interactively asks for the vault directory on stdin/stdout.
@@ -307,8 +314,9 @@ fn expand_tilde(path: &Path) -> PathBuf {
 /// Where the vault comes from (SPEC.md "Data flow" step 1).
 #[derive(Debug, PartialEq, Eq)]
 enum VaultChoice {
-    /// This path (a `[vaults]` name already resolved; not yet absolutized).
-    Path(PathBuf),
+    /// This path (a `[vaults]` name already resolved; not yet absolutized),
+    /// and the setting it was read from.
+    Path { path: PathBuf, source: VaultSource },
     /// Two or more `[vaults]` entries: ask in the vault picker.
     Picker,
     /// Nothing to go on and no file argument: prompt on stdin.
@@ -317,20 +325,39 @@ enum VaultChoice {
     None,
 }
 
+/// The setting a [`VaultChoice::Path`] came from, named in the not-found
+/// error. A `--vault`/`vault` value that is a `[vaults]` name reports the
+/// setting the user typed, not the entry.
+#[derive(Debug, PartialEq, Eq)]
+enum VaultSource {
+    /// `--vault`.
+    Flag,
+    /// The config `vault` key.
+    Key,
+    /// The only `[vaults]` entry, by its name.
+    Entry(String),
+}
+
 fn choose_vault(flag: Option<&Path>, has_file: bool, config: &config::Config) -> VaultChoice {
-    let resolve = |value: &Path| VaultChoice::Path(resolve_vault_name(value, &config.vaults));
+    let resolve = |value: &Path, source: VaultSource| VaultChoice::Path {
+        path: resolve_vault_name(value, &config.vaults),
+        source,
+    };
     if let Some(flag) = flag {
-        return resolve(flag);
+        return resolve(flag, VaultSource::Flag);
     }
     if !has_file && config.vaults.len() >= 2 {
         return VaultChoice::Picker;
     }
     if let Some(key) = &config.vault {
-        return resolve(key);
+        return resolve(key, VaultSource::Key);
     }
     if config.vaults.len() == 1 {
-        if let Some(path) = config.vaults.values().next() {
-            return VaultChoice::Path(path.clone());
+        if let Some((name, path)) = config.vaults.iter().next() {
+            return VaultChoice::Path {
+                path: path.clone(),
+                source: VaultSource::Entry(name.clone()),
+            };
         }
     }
     if has_file {
@@ -338,6 +365,18 @@ fn choose_vault(flag: Option<&Path>, has_file: bool, config: &config::Config) ->
     } else {
         VaultChoice::Prompt
     }
+}
+
+/// The startup error for a chosen vault path that is not a directory.
+/// `path` is shown as the setting wrote it (`~` kept). `main` prints it as
+/// `error: …` with status 2 (SPEC.md "Data flow" step 1).
+fn vault_not_found(path: &Path, source: &VaultSource) -> String {
+    let source = match source {
+        VaultSource::Flag => "--vault".to_string(),
+        VaultSource::Key => "config vault".to_string(),
+        VaultSource::Entry(name) => format!("config [vaults] {name}"),
+    };
+    format!("vault not found: {} ({source})", path.display())
 }
 
 /// A `--vault`/`vault` value: a `[vaults]` name resolves to its entry's
@@ -354,11 +393,21 @@ fn resolve_vault_name(
         .clone()
 }
 
+/// `$HOME`, when it is set and not empty.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+}
+
+/// `path` as the picker lists paths: `$HOME` shown as `~`.
+fn display_path(path: &Path) -> String {
+    vault_picker::home_relative(path, home_dir().as_deref())
+}
+
 /// The picker's entries, in name order, `~` expanded.
 fn picker_entries(config: &config::Config) -> Vec<vault_picker::VaultEntry> {
-    let home = std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from);
+    let home = home_dir();
     config
         .vaults
         .iter()
@@ -460,7 +509,16 @@ fn main() {
     // vault is known; the App then reuses it.
     let mut early_terminal: Option<Tui> = None;
     let vault = match choose_vault(args.vault.as_deref(), args.file.is_some(), &config) {
-        VaultChoice::Path(v) => Some(absolutize(&v)),
+        VaultChoice::Path { path, source } => {
+            // Checked before the terminal and the index: a missing vault is
+            // one line and status 2, not an index warning after the TUI.
+            let root = absolutize(&path);
+            if !is_vault_dir(&root) {
+                eprintln!("error: {}", vault_not_found(&path, &source));
+                std::process::exit(2);
+            }
+            Some(root)
+        }
         VaultChoice::Picker => {
             let entries = picker_entries(&config);
             let pre = picker_preselection(&entries, &config);
@@ -653,7 +711,14 @@ fn start_app(
     let width = crossterm::terminal::size()
         .map(|(w, _)| w.saturating_sub(2).max(20))
         .unwrap_or(FALLBACK_SIZE.0);
-    let viewer = Viewer::open(&start.file, width as usize)?;
+    // The note is the start's first read: a failure names it (the message
+    // `main` prints after the terminal is restored, SPEC "Data flow" step 1).
+    let viewer = Viewer::open(&start.file, width as usize).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("cannot open {}: {err}", display_path(&start.file)),
+        )
+    })?;
     let mut app = App::new(viewer, start.vault.clone(), start.index)?;
     app.vaults = vaults.clone();
     // Theme: presets + discovered custom themes; the resolved name
@@ -1066,8 +1131,11 @@ mod tests {
         }
     }
 
-    fn chosen(path: &str) -> VaultChoice {
-        VaultChoice::Path(PathBuf::from(path))
+    fn chosen(path: &str, source: VaultSource) -> VaultChoice {
+        VaultChoice::Path {
+            path: PathBuf::from(path),
+            source,
+        }
     }
 
     #[test]
@@ -1076,32 +1144,96 @@ mod tests {
         // --vault wins, a name resolving through [vaults].
         assert_eq!(
             choose_vault(Some(Path::new("home")), false, &two),
-            chosen("~/h")
+            chosen("~/h", VaultSource::Flag)
         );
         assert_eq!(
             choose_vault(Some(Path::new("/x")), false, &two),
-            chosen("/x")
+            chosen("/x", VaultSource::Flag)
         );
         // Two or more entries, no file: the picker, even with a vault key.
         assert_eq!(choose_vault(None, false, &two), VaultChoice::Picker);
         // A file argument skips the picker: the vault key, by name.
-        assert_eq!(choose_vault(None, true, &two), chosen("/w"));
+        assert_eq!(
+            choose_vault(None, true, &two),
+            chosen("/w", VaultSource::Key)
+        );
         let two_no_key = config_with(None, &[("home", "~/h"), ("work", "/w")]);
         assert_eq!(choose_vault(None, true, &two_no_key), VaultChoice::None);
         // Exactly one entry and no key: that entry, file or not.
         let one = config_with(None, &[("home", "~/h")]);
-        assert_eq!(choose_vault(None, false, &one), chosen("~/h"));
-        assert_eq!(choose_vault(None, true, &one), chosen("~/h"));
+        let home_entry = || chosen("~/h", VaultSource::Entry("home".to_string()));
+        assert_eq!(choose_vault(None, false, &one), home_entry());
+        assert_eq!(choose_vault(None, true, &one), home_entry());
         // One entry and a key: the key.
         let one_key = config_with(Some("/k"), &[("home", "~/h")]);
-        assert_eq!(choose_vault(None, false, &one_key), chosen("/k"));
+        assert_eq!(
+            choose_vault(None, false, &one_key),
+            chosen("/k", VaultSource::Key)
+        );
         // Zero entries: today's behaviour.
         let none = config_with(None, &[]);
         assert_eq!(choose_vault(None, false, &none), VaultChoice::Prompt);
         assert_eq!(choose_vault(None, true, &none), VaultChoice::None);
         assert_eq!(
             choose_vault(None, false, &config_with(Some("/k"), &[])),
-            chosen("/k")
+            chosen("/k", VaultSource::Key)
+        );
+    }
+
+    #[test]
+    fn a_missing_vault_names_the_setting_it_came_from() {
+        // Each source's line, with `~` kept as written.
+        assert_eq!(
+            vault_not_found(Path::new("~/gone"), &VaultSource::Flag),
+            "vault not found: ~/gone (--vault)"
+        );
+        assert_eq!(
+            vault_not_found(Path::new("/srv/gone"), &VaultSource::Key),
+            "vault not found: /srv/gone (config vault)"
+        );
+        assert_eq!(
+            vault_not_found(Path::new("~/gone"), &VaultSource::Entry("work".to_string())),
+            "vault not found: ~/gone (config [vaults] work)"
+        );
+        // A `--vault` name is reported as the typed setting, with the path
+        // it resolved to.
+        let two = config_with(None, &[("work", "~/w"), ("home", "~/h")]);
+        let VaultChoice::Path { path, source } = choose_vault(Some(Path::new("work")), false, &two)
+        else {
+            panic!("--vault names a path")
+        };
+        assert_eq!(
+            vault_not_found(&path, &source),
+            "vault not found: ~/w (--vault)"
+        );
+    }
+
+    #[test]
+    fn a_start_note_that_cannot_be_opened_names_the_file() {
+        let (_env, _state) = isolated_env("start-note-missing");
+        let dir = vault_dir("start-note-missing");
+        let note = dir.path().join("gone.md");
+        let start = Start {
+            vault: Some(dir.path().to_path_buf()),
+            file: note.clone(),
+            explicit_note: true,
+            index: None,
+        };
+        let config = config::Config::default();
+        let display = startup_display(&config, "all".to_string(), true, true, &mut Vec::new());
+        let err = start_app(
+            start,
+            &display,
+            &config,
+            &vault_picker::VaultList::default(),
+            &mut Vec::new(),
+        )
+        .err()
+        .expect("a missing note does not start");
+        let prefix = format!("cannot open {}: ", display_path(&note));
+        assert!(
+            err.to_string().starts_with(&prefix),
+            "got: {err}, expected prefix: {prefix}"
         );
     }
 

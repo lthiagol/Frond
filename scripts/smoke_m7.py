@@ -7,7 +7,9 @@
 - the clean quit records `last-vault`, which preselects on the next start;
 - `V` in the app (SPEC "Vault picker in the app") switches to another
   vault and back, the left vault's session restored, `last-vault` the one
-  open at the quit.
+  open at the quit;
+- a config `vault` that names a missing directory exits 2 with the one
+  `error: vault not found: …` line on stderr (SPEC "Data flow" step 1).
 
 Prerequisites: python3 with `pyte` (`uv run --with pyte`) and a debug build
 (`cargo build -p frond`; binary path overridable with $FROND_APP_BIN).
@@ -22,6 +24,7 @@ import pty
 import select
 import shutil
 import struct
+import subprocess
 import sys
 import termios
 import time
@@ -35,6 +38,7 @@ _APP_DEFAULT = os.path.join(
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
 ROOT = smoke_tmp.path("frond-m7")
 CONFIG_FILE = os.path.join(ROOT, "config.toml")
+MISSING_CONFIG = os.path.join(ROOT, "missing-config.toml")
 SESSION_DIR = os.path.join(ROOT, "session")
 THEME_DIR = os.path.join(ROOT, "themes")
 COLS, ROWS = 100, 30
@@ -184,6 +188,26 @@ check(
     recorded == os.path.realpath(os.path.join(ROOT, "alpha")),
     f"last-vault records the vault open at the quit ({recorded})",
 )
+
+# --- 4: a config `vault` that is not a directory stops the start ------------
+# The check runs before the terminal is set up, so a pipe is enough: status
+# 2, exactly the one error line on stderr, nothing on stdout.
+MISSING = os.path.join(ROOT, "missing")
+with open(MISSING_CONFIG, "w") as f:
+    f.write(f'vault = "{MISSING}"\n')
+probe = subprocess.run(
+    [APP],
+    env={**os.environ, "FROND_CONFIG": MISSING_CONFIG, "FROND_SESSION": SESSION_DIR},
+    stdin=subprocess.DEVNULL,
+    capture_output=True,
+    timeout=10,
+)
+check(probe.returncode == 2, f"a missing config vault exits 2 ({probe.returncode})")
+check(
+    probe.stderr.decode() == f"error: vault not found: {MISSING} (config vault)\n",
+    f"a missing config vault prints exactly its error line ({probe.stderr!r})",
+)
+check(probe.stdout == b"", "a missing config vault prints nothing on stdout")
 
 print("SMOKE M7:", "OK" if ok else "FAILED")
 sys.exit(0 if ok else 1)

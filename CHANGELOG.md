@@ -18,6 +18,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   error.
 
 ### Fixed
+- A vault path that does not exist (from `--vault`, the `vault` key or a
+  lone `[vaults]` entry) stops the start with one line naming the path
+  and the setting it came from, instead of a bare `No such file or
+  directory`. A start note that cannot be opened names its file.
 - `metadata = false` hides the frontmatter block on a first start with no
   saved session too.
 

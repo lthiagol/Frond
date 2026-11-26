@@ -43,7 +43,13 @@ and the tree is clean. What the cycle carries:
 
 ## Open
 
-Nothing. Multiple vaults (both units) is committed.
+- **A vault with no `index.md` cannot open**, even with a saved session
+  for another note: the start reads `index.md` before the session is
+  restored (SPEC "Data flow" step 1 says so). Obsidian vaults often have
+  no `index.md`; the start should restore first and fall back to an empty
+  note pane. Found in u3, pre-existing.
+- **The key map** — the human asked to organize it (capitals, pickers,
+  theme keys); the human is clarifying the proposal.
 
 ## Next
 
