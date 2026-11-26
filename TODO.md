@@ -28,18 +28,10 @@ covering every user-visible change.
 
 ## In flight
 
-Nothing. The cycle's last unit is committed and pushed; 0.6.6 is released
-and the tree is clean. What the cycle carries:
-
-- **0.6.6** is released (2026-11-21) and pushed. `v0.6.6` is
-  deliberately **not** tagged — the version lives in the tree, and the tag
-  can follow whenever.
-- It carries the sidebar's header (the vault's name in the tree and tag
-  views, centred, sitting square in the panel), the outline's label, its
-  numbering, its scroll-following and its wheel scrolling its view, and the
-  two vault warnings that no longer go quiet — a failed walk, and a file
-  that turns unreadable without changing.
-- `## [Unreleased]` is empty and `Cargo.toml` says 0.6.6.
+Nothing. 0.7.0 is cut (2026-11-26), tagged `v0.7.0` and pushed. It
+carries several vaults and the vault picker (startup and `v`, typed and
+recent paths), the reorganized key map, a clear error for a missing vault
+path, and vaults with no `index.md` opening. `## [Unreleased]` is empty.
 
 ## Open
 

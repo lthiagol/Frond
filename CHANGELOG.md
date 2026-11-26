@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
 ## [Unreleased]
 
 ### Added
+
+### Fixed
+
+### Changed
+
+## [0.7.0] — 2026-11-26
+
+### Added
 - Several vaults: a `[vaults]` table in `config.toml` names them
   (`work = "~/work/notes"`), and `--vault` and the `vault` key take a
   name as well as a path. With two or more vaults and no `--vault` or
