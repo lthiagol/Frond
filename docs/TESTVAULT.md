@@ -4,15 +4,16 @@ One lorem-ipsum vault that covers every feature frond renders or indexes.
 Tests read it or copy it; nothing writes into it.
 
 - **Read in place:** `crates/vault/tests/testvault.rs` indexes it and pins
-  the index and `.base` facts below. The rendering and screen facts are
-  not pinned by a test yet; the smoke suites that run on this vault assert
-  them, on a copy (see "Smoke suites").
+  the index and `.base` facts below. The unit tests read it through
+  `testvault_root()` (`crates/testkit/src/lib.rs`). The rendering and
+  screen facts are not pinned by a test yet; the smoke suites that run on
+  this vault assert them, on a copy (see "Smoke suites").
 - **Copy before mutating:** a test that writes (a checkbox toggle, a file
   edit for the watcher, `git init`) takes a copy:
-  - Rust: `copy_testvault(name)` in `crates/app/src/testutil.rs`
+  - Rust: `copy_testvault(name)` in `crates/testkit/src/lib.rs`
   - Python: `copy_testvault(name)` in `scripts/smoke_tmp.py`
-  - Both keep `links/alpha-link.md` as a symlink to `../alpha.md`, so a
-    copy edits the same way the checkout does.
+  - The Rust and Python copies keep `links/alpha-link.md` as a symlink to
+    `../alpha.md`, so a copy edits the same way the checkout does.
 - **A vault with no `index.md`:** a copy with `index.md` removed.
 - **Several vaults:** one copy per vault. The sidebar header shows a copy's
   folder name, so the test names each copy for its marker
@@ -24,6 +25,11 @@ Tests read it or copy it; nothing writes into it.
   date windows, and those are pinned with sentinels: `2999-…` is inside
   any window, `2000-…` is outside any window. The base test passes a
   fixed `today`.
+
+Whole-vault behaviour (the index, the tree, links, search, `.base` views,
+repository state, the smoke suites) reads or copies `testvault/`. Unit
+tests of app state and rendering, and single-file edge cases, keep minimal
+inline fixtures.
 
 ## Layout
 

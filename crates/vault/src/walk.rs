@@ -217,39 +217,44 @@ pub fn strip_suffix_ignore_case<'a>(value: &'a str, suffix: &str) -> Option<&'a 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::TempDir;
+    use crate::testutil::{testvault_root, TempDir};
 
     #[test]
     fn walk_finds_md_and_base_skips_hidden_and_other_files() {
-        let dir = TempDir::new("vk-walk");
-        fs::write(dir.path().join("alpha.md"), "a").unwrap();
-        fs::write(dir.path().join("tasks.base"), "b").unwrap();
-        fs::write(dir.path().join("notes.txt"), "x").unwrap();
-        fs::create_dir_all(dir.path().join("Archive")).unwrap();
-        fs::write(dir.path().join("Archive").join("old.md"), "o").unwrap();
-        fs::write(dir.path().join("Archive").join("board.base"), "b").unwrap();
-        fs::create_dir_all(dir.path().join(".obsidian")).unwrap();
-
-        let paths = walk_vault(dir.path()).unwrap();
-        let names: Vec<String> = paths
+        let root = testvault_root();
+        let names: Vec<String> = walk_vault(&root)
+            .unwrap()
             .iter()
             .map(|e| {
                 e.path
-                    .strip_prefix(dir.path())
+                    .strip_prefix(&root)
                     .unwrap()
                     .to_string_lossy()
                     .into_owned()
             })
             .collect();
+        // 30 notes and 3 bases; the hidden folders and notes.txt are skipped.
+        assert_eq!(names.len(), 33, "{names:?}");
+        // Depth-first, folders before files, sorted within each group: the
+        // first folder's notes lead, and the root's files close the list.
         assert_eq!(
-            names,
-            vec![
-                "Archive/board.base",
-                "Archive/old.md",
-                "alpha.md",
-                "tasks.base"
+            names[..3],
+            [
+                "archive/old-note.md",
+                "archive/retired-tool.md",
+                "archive/superseded-plan.md",
             ]
         );
+        assert_eq!(names[30..], ["alpha.md", "gamma.md", "index.md"]);
+        assert!(names.contains(&"index.md".to_string()));
+        assert!(names.contains(&"archive/old-note.md".to_string()));
+        assert!(names.contains(&"tasks/tasks.base".to_string()));
+        // A file symlink is an entry, like the note it points at.
+        assert!(names.contains(&"links/alpha-link.md".to_string()));
+        assert!(!names
+            .iter()
+            .any(|n| n.starts_with(".obsidian/") || n.starts_with(".trash/")));
+        assert!(!names.contains(&"notes.txt".to_string()));
     }
 
     #[test]

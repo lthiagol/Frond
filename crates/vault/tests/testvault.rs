@@ -10,17 +10,14 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use testkit::testvault_root;
 use vault::base::{build_table, parse_base, TableRow};
 use vault::{Resolution, VaultIndex, WarningKind};
 
 const TODAY: &str = "2026-11-26";
 
-fn vault_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testvault")
-}
-
 fn index() -> VaultIndex {
-    VaultIndex::build(&vault_root()).expect("testvault indexes")
+    VaultIndex::build(&testvault_root()).expect("testvault indexes")
 }
 
 /// `path` relative to the vault root, with `/` separators.

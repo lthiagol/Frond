@@ -3,7 +3,8 @@
 frond is a read-only Obsidian-style terminal markdown viewer (Rust; ratatui
 0.30 + crossterm 0.29). Workspace crates: `engine` (vendored markdown
 renderer), `vault` (index, frontmatter, wikilinks, `.base` tables, the
-watcher, git status, and the one guarded write), `app` (the TUI).
+watcher, git status, and the one guarded write), `app` (the TUI), and
+`testkit` (dev-only test helpers: the sample vault's copy).
 
 ## The loop you run in
 

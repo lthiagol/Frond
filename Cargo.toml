@@ -4,6 +4,7 @@ members = [
     "crates/engine",
     "crates/vault",
     "crates/app",
+    "crates/testkit",
 ]
 
 [workspace.package]
@@ -16,3 +17,4 @@ ratatui = "0.30"
 crossterm = "0.29"
 regex = "1.13"
 unicode-width = "0.2"
+testkit = { path = "crates/testkit" }

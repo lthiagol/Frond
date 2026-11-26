@@ -954,7 +954,7 @@ fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::TempDir;
+    use crate::testutil::{copy_testvault, testvault_root, TempDir};
 
     fn write(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
@@ -974,23 +974,35 @@ mod tests {
 
     #[test]
     fn search_finds_substrings_case_insensitively_in_path_order() {
-        let vault = TempDir::new("vk-search");
-        write(&vault.path().join("b.md"), "first\nhas Needle here\n");
-        write(&vault.path().join("a.md"), "needle at top\nplain\n");
-        write(&vault.path().join("sub/c.md"), "nothing here\n");
-        let index = VaultIndex::build(vault.path()).unwrap();
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
 
+        // Three notes hold "needle": alpha.md (line 27), index.md (line 11),
+        // and links/alpha-link.md, a symlink that indexes alpha's content.
         let hits = index.search("needle").hits;
-        assert_eq!(hits.len(), 2, "one hit per matching line: {hits:?}");
-        // Path order: a.md before b.md.
-        assert_eq!(hits[0].path, vault.path().join("a.md"));
-        assert_eq!(hits[0].line, 0);
-        assert_eq!(hits[0].text, "needle at top");
-        assert_eq!(hits[1].path, vault.path().join("b.md"));
-        assert_eq!(hits[1].line, 1);
-        assert_eq!(hits[1].text, "has Needle here");
-        // Byte range covers the match inside the raw line.
-        assert_eq!(&hits[1].text[hits[1].start..hits[1].end], "Needle");
+        let paths: Vec<PathBuf> = hits.iter().map(|h| h.path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                root.join("alpha.md"),
+                root.join("index.md"),
+                root.join("links/alpha-link.md"),
+            ],
+            "one hit per matching line, path order: {hits:?}"
+        );
+        assert_eq!(
+            hits.iter().map(|h| h.line).collect::<Vec<_>>(),
+            vec![26, 10, 26],
+            "zero-based lines 27, 11 and 27"
+        );
+        assert_eq!(
+            hits[0].text,
+            "The needle lives here: deep-section-anchor-line sits under a level-three heading."
+        );
+        // Byte range covers the match inside index.md's raw line.
+        assert_eq!(&hits[1].text[hits[1].start..hits[1].end], "needle");
+        // Case-insensitive: the uppercase query finds the same three lines.
+        assert_eq!(index.search("NEEDLE").hits.len(), 3);
     }
 
     /// The one-note scan behind the app's `n`/`N` finds exactly the lines
@@ -1104,30 +1116,34 @@ mod tests {
 
     #[test]
     fn regex_search_matches_a_shape_case_insensitively_in_path_order() {
-        let vault = TempDir::new("vk-regex-shape");
-        write(
-            &vault.path().join("b.md"),
-            "Invoice INV-2024 here\nnothing\n",
-        );
-        write(
-            &vault.path().join("a.md"),
-            "alpha 123\nBeta 456\na 7 only\n",
-        );
-        let index = VaultIndex::build(vault.path()).unwrap();
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
 
-        // A shape, not a literal: three digits, case-insensitive letters.
-        let hits = index.search_regex(r"inv-\d+").unwrap().hits;
+        // A shape, not a literal: "tkt-" then four digits, case-insensitive.
+        // Both tickets sit on one line of projects/roadmap.md (line 20), and
+        // a search reports one hit per line: the first match.
+        let hits = index.search_regex(r"tkt-\d{4}").unwrap().hits;
         assert_eq!(hits.len(), 1, "{hits:?}");
-        assert_eq!(hits[0].path, vault.path().join("b.md"));
-        assert_eq!(hits[0].line, 0);
-        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "INV-2024");
+        assert_eq!(hits[0].path, root.join("projects/roadmap.md"));
+        assert_eq!(hits[0].line, 19);
+        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "TKT-1042");
 
-        let hits = index.search_regex(r"[a-z]+ \d{3}").unwrap().hits;
-        assert_eq!(hits.len(), 2, "a.md's first two lines match: {hits:?}");
-        assert_eq!(hits[0].path, vault.path().join("a.md"), "path order");
-        assert_eq!(hits[0].line, 0);
-        assert_eq!(hits[1].line, 1);
-        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "alpha 123");
+        // Path order across three notes: alpha.md, index.md, then the
+        // alpha-link.md symlink (alpha's content). "needle lives", "needle in"
+        // and "needle lives" again.
+        let hits = index.search_regex(r"NEEDLE \w+").unwrap().hits;
+        let paths: Vec<PathBuf> = hits.iter().map(|h| h.path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                root.join("alpha.md"),
+                root.join("index.md"),
+                root.join("links/alpha-link.md"),
+            ],
+            "{hits:?}"
+        );
+        assert_eq!(&hits[0].text[hits[0].start..hits[0].end], "needle lives");
+        assert_eq!(&hits[1].text[hits[1].start..hits[1].end], "needle in");
     }
 
     #[test]
@@ -1198,57 +1214,67 @@ mod tests {
 
     #[test]
     fn indexes_nested_dirs_with_frontmatter_and_links() {
-        let vault = TempDir::new("vk-index");
-        write(
-            &vault.path().join("projects/analysis.md"),
-            "---\nstatus: complete\ntype: analysis\ntags: [mocktag, disk]\ncreated: 2026-06-03\nupdated: 2026-10-23\n---\nBody [[todo]] and [[archive/index|Archive]].\n",
-        );
-        write(
-            &vault.path().join("projects/todo.md"),
-            "no frontmatter here\n",
-        );
-        write(
-            &vault.path().join("archive/index.md"),
-            "---\nstatus: archived\n---\n",
-        );
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
+        assert_eq!(index.len(), 30);
 
-        let index = VaultIndex::build(vault.path()).unwrap();
-        assert_eq!(index.len(), 3);
-
-        let analysis = note_at(&index, "projects/analysis.md");
-        assert_eq!(analysis.status.as_deref(), Some("complete"));
-        assert_eq!(analysis.note_type.as_deref(), Some("analysis"));
-        assert_eq!(analysis.tags, vec!["mocktag", "disk"]);
-        assert_eq!(analysis.created.as_deref(), Some("2026-06-03"));
-        assert_eq!(analysis.links.len(), 2);
-        assert_eq!(analysis.links[0].target, "todo");
-        assert_eq!(analysis.links[1].target, "archive/index");
-        assert_eq!(analysis.links[1].alias.as_deref(), Some("Archive"));
+        // A note two folders down: frontmatter fields, then its body links
+        // (frontmatter `related:` first, then `[[alpha#Details]]` and `[[gamma]]`).
+        let beta = note_at(&index, "projects/beta.md");
+        assert_eq!(beta.status.as_deref(), Some("active"));
+        assert_eq!(beta.note_type.as_deref(), Some("project"));
+        assert_eq!(beta.tags, vec!["lorem", "dolor"]);
+        assert_eq!(beta.updated.as_deref(), Some("2000-01-01"));
+        assert_eq!(beta.links.len(), 3);
+        assert_eq!(beta.links[0].target, "alpha");
+        assert!(beta.links[0].from_frontmatter);
+        assert_eq!(beta.links[1].target, "alpha");
+        assert_eq!(beta.links[1].heading.as_deref(), Some("Details"));
+        assert_eq!(beta.links[2].target, "gamma");
 
         // The frontmatter-less note is indexed with empty metadata + a warning.
-        let todo = note_at(&index, "projects/todo.md");
-        assert!(todo.status.is_none() && todo.tags.is_empty());
+        let plain = note_at(&index, "edge/plain.md");
+        assert!(plain.status.is_none() && plain.tags.is_empty());
         assert!(index
             .warnings()
             .iter()
-            .any(|w| w.path.ends_with("projects/todo.md") && w.message == "no frontmatter"));
+            .any(|w| w.path.ends_with("edge/plain.md") && w.message == "no frontmatter"));
 
-        // Backlinks: todo ← analysis; archive/index ← analysis (path link).
-        let todo_path = vault.path().join("projects/todo.md");
+        // Backlinks: alpha ← docs/guide.md (embed), index.md, projects/beta.md;
+        // beta ← docs/guide.md (frontmatter), index.md, projects/gamma.md.
         assert_eq!(
-            index.backlinks_to(&todo_path),
-            vec![vault.path().join("projects/analysis.md")]
+            index.backlinks_to(&root.join("alpha.md")),
+            vec![
+                root.join("docs/guide.md"),
+                root.join("index.md"),
+                root.join("projects/beta.md"),
+            ]
         );
-        let archive_path = vault.path().join("archive/index.md");
         assert_eq!(
-            index.backlinks_to(&archive_path),
-            vec![vault.path().join("projects/analysis.md")]
+            index.backlinks_to(&root.join("projects/beta.md")),
+            vec![
+                root.join("docs/guide.md"),
+                root.join("index.md"),
+                root.join("projects/gamma.md"),
+            ]
         );
 
-        // Tag index: frontmatter tags only.
-        let mocktag: Vec<&NoteMeta> = index.notes_with_tag("mocktag");
-        assert_eq!(mocktag.len(), 1);
-        assert_eq!(mocktag[0].rel_path, "projects/analysis.md");
+        // Tag index: frontmatter tags only. The three diagram notes carry
+        // `diagram`; the comma tag in docs/guide.md is one tag, not two.
+        let diagram: Vec<&str> = index
+            .notes_with_tag("diagram")
+            .iter()
+            .map(|n| n.rel_path.as_str())
+            .collect();
+        assert_eq!(
+            diagram,
+            vec![
+                "diagrams/flow.md",
+                "diagrams/pie.md",
+                "diagrams/sequence.md"
+            ]
+        );
+        assert!(index.notes_with_tag("mocktag").is_empty());
         assert!(index.notes_with_tag("missing").is_empty());
     }
 
@@ -1341,21 +1367,20 @@ mod tests {
 
     #[test]
     fn resolve_bare_ambiguous_and_path_forms() {
-        let vault = TempDir::new("vk-resolve");
-        write(&vault.path().join("a/dup.md"), "x");
-        write(&vault.path().join("b/dup.md"), "x");
-        write(&vault.path().join("unique.md"), "x");
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
 
-        let index = VaultIndex::build(vault.path()).unwrap();
         assert_eq!(
-            index.resolve("unique"),
-            Resolution::Found(vault.path().join("unique.md"))
+            index.resolve("alpha"),
+            Resolution::Found(root.join("alpha.md")),
+            "the alpha-link.md symlink does not share alpha's name"
         );
         assert_eq!(
-            index.resolve("unique.md"),
-            index.resolve("unique"),
+            index.resolve("alpha.md"),
+            index.resolve("alpha"),
             ".md suffix tolerated"
         );
+        // docs/dup.md and refs/dup.md share the name `dup`.
         let mut candidates = match index.resolve("dup") {
             Resolution::Ambiguous(c) => c,
             other => panic!("expected ambiguity, got {other:?}"),
@@ -1363,69 +1388,69 @@ mod tests {
         candidates.sort();
         assert_eq!(
             candidates,
-            vec![vault.path().join("a/dup.md"), vault.path().join("b/dup.md")]
+            vec![root.join("docs/dup.md"), root.join("refs/dup.md")]
         );
         assert_eq!(
-            index.resolve("b/dup"),
-            Resolution::Found(vault.path().join("b/dup.md")),
+            index.resolve("refs/dup"),
+            Resolution::Found(root.join("refs/dup.md")),
             "path-style link disambiguates"
         );
         assert_eq!(index.resolve("nonexistent"), Resolution::NotFound);
         assert_eq!(index.resolve(""), Resolution::NotFound);
 
-        let ambiguous = index.ambiguous_basenames();
-        assert_eq!(ambiguous.len(), 1);
-        assert_eq!(ambiguous[0].0, "dup");
-        assert_eq!(ambiguous[0].1.len(), 2);
+        // The two shared names in the vault: `dup` and `gamma` (root + projects/).
+        let ambiguous: Vec<(&str, usize)> = index
+            .ambiguous_basenames()
+            .iter()
+            .map(|(name, paths)| (*name, paths.len()))
+            .collect();
+        assert_eq!(ambiguous, vec![("dup", 2), ("gamma", 2)]);
     }
 
     #[test]
     fn resolve_base_targets_explicit_suffix_only() {
-        let vault = TempDir::new("vk-resolve-base");
-        write(&vault.path().join("inventories.base"), "filters: []\n");
-        write(&vault.path().join("a/board.base"), "filters: []\n");
-        // A note whose stem collides with a base's stem: bare `[[board]]`
-        // must still resolve to the note, never the base.
-        write(&vault.path().join("board.md"), "x\n");
-
-        let index = VaultIndex::build(vault.path()).unwrap();
+        let vault = copy_testvault("vk-resolve-base");
+        let root = vault.path();
+        let index = VaultIndex::build(root).unwrap();
         // Bases are path-only: not counted as notes, never parsed.
-        assert_eq!(index.len(), 1);
+        assert_eq!(index.len(), 30);
         assert_eq!(
             index.bases().collect::<Vec<_>>(),
             vec![
-                vault.path().join("a/board.base"),
-                vault.path().join("inventories.base")
+                root.join("dashboards/fail-open.base"),
+                root.join("dashboards/projects.base"),
+                root.join("tasks/tasks.base"),
             ]
         );
 
         // Bare stem with the explicit `.base` suffix (case-insensitive).
         assert_eq!(
-            index.resolve("inventories.base"),
-            Resolution::Found(vault.path().join("inventories.base"))
+            index.resolve("projects.base"),
+            Resolution::Found(root.join("dashboards/projects.base"))
         );
         assert_eq!(
-            index.resolve("Inventories.BASE"),
-            Resolution::Found(vault.path().join("inventories.base"))
+            index.resolve("Projects.BASE"),
+            Resolution::Found(root.join("dashboards/projects.base"))
         );
         // Path-style base target.
         assert_eq!(
-            index.resolve("a/board.base"),
-            Resolution::Found(vault.path().join("a/board.base"))
+            index.resolve("dashboards/projects.base"),
+            Resolution::Found(root.join("dashboards/projects.base"))
         );
-        // Bare stem without the suffix never lands on a base.
+        // Bare stem without the suffix never lands on a base: `tasks` is
+        // tasks/tasks.md, and `projects` is no note at all.
         assert_eq!(
-            index.resolve("board"),
-            Resolution::Found(vault.path().join("board.md"))
+            index.resolve("tasks"),
+            Resolution::Found(root.join("tasks/tasks.md"))
         );
-        assert_eq!(index.resolve("inventories"), Resolution::NotFound);
+        assert_eq!(index.resolve("projects"), Resolution::NotFound);
         assert_eq!(index.resolve("no/such.base"), Resolution::NotFound);
 
-        // Ambiguous bare base stems surface as ambiguous, not guessed.
-        write(&vault.path().join("b/dup.base"), "");
-        write(&vault.path().join("c/dup.base"), "");
-        let index = VaultIndex::build(vault.path()).unwrap();
-        let mut candidates = match index.resolve("dup.base") {
+        // Ambiguous bare base stems surface as ambiguous, not guessed: a
+        // second tasks.base in archive/ joins tasks/tasks.base.
+        write(&root.join("archive/tasks.base"), "");
+        let index = VaultIndex::build(root).unwrap();
+        let mut candidates = match index.resolve("tasks.base") {
             Resolution::Ambiguous(c) => c,
             other => panic!("expected ambiguity, got {other:?}"),
         };
@@ -1433,57 +1458,54 @@ mod tests {
         assert_eq!(
             candidates,
             vec![
-                vault.path().join("b/dup.base"),
-                vault.path().join("c/dup.base")
+                root.join("archive/tasks.base"),
+                root.join("tasks/tasks.base")
             ]
         );
     }
 
     #[test]
     fn reindex_one_tracks_base_add_and_remove() {
-        let vault = TempDir::new("vk-reindex-base");
-        write(&vault.path().join("a.md"), "---\nstatus: active\n---\na\n");
-        let mut index = VaultIndex::build(vault.path()).unwrap();
-        assert!(index.bases().next().is_none());
-
-        // ADD: a new base file appears (watch path calls reindex_one).
-        let base = vault.path().join("tasks.base");
-        write(&base, "filters: []\n");
-        index.reindex_one(&base);
-        assert_eq!(index.bases().collect::<Vec<_>>(), vec![base.clone()]);
-        assert_eq!(index.len(), 1, "a base is not a note");
-
-        // MODIFY: content change keeps the listing, adds no warnings.
-        write(&base, "filters:\n  and: []\n");
-        index.reindex_one(&base);
-        assert_eq!(index.bases().count(), 1);
-        assert!(index.warnings().is_empty());
+        let vault = copy_testvault("vk-reindex-base");
+        let root = vault.path();
+        let mut index = VaultIndex::build(root).unwrap();
+        assert_eq!(index.bases().count(), 3);
+        let base = root.join("tasks/tasks.base");
+        let warnings = index.warnings().len();
 
         // REMOVE: the base drops out of the resolver.
         std::fs::remove_file(&base).unwrap();
         index.reindex_one(&base);
-        assert!(index.bases().next().is_none());
+        assert_eq!(index.bases().count(), 2);
+        assert!(!index.bases().any(|b| b == base));
 
-        // A renamed-away base (path now `.md`) leaves the base set.
+        // ADD: the base comes back (watch path calls reindex_one).
         write(&base, "filters: []\n");
         index.reindex_one(&base);
-        assert_eq!(index.bases().count(), 1);
-        index.reindex_one(&vault.path().join("tasks.md")); // not present on disk
-        assert_eq!(index.bases().count(), 1, "md path never touches bases");
+        assert_eq!(index.bases().count(), 3);
+        assert!(index.bases().any(|b| b == base));
+        assert_eq!(index.len(), 30, "a base is not a note");
+
+        // MODIFY: content change keeps the listing, adds no warnings.
+        write(&base, "filters:\n  and: []\n");
+        index.reindex_one(&base);
+        assert_eq!(index.bases().count(), 3);
+        assert_eq!(index.warnings().len(), warnings);
+
+        // A `.md` path never touches the base set, even one that is a note.
+        index.reindex_one(&root.join("tasks/tasks.md"));
+        assert_eq!(index.bases().count(), 3, "md path never touches bases");
+        assert_eq!(index.len(), 30);
     }
 
     #[test]
     fn base_wikilinks_register_backlinks() {
-        let vault = TempDir::new("vk-base-backlinks");
-        write(&vault.path().join("tasks.base"), "filters: []\n");
-        write(
-            &vault.path().join("dash.md"),
-            "Open [[tasks.base]] for the table.\n",
-        );
-        let index = VaultIndex::build(vault.path()).unwrap();
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
+        // index.md's `[[projects.base]]` is the only link to the dashboard.
         assert_eq!(
-            index.backlinks_to(&vault.path().join("tasks.base")),
-            vec![vault.path().join("dash.md")]
+            index.backlinks_to(&root.join("dashboards/projects.base")),
+            vec![root.join("index.md")]
         );
     }
 
@@ -1503,59 +1525,69 @@ mod tests {
 
     #[test]
     fn reindex_add_modify_remove() {
-        let vault = TempDir::new("vk-reindex");
-        write(
-            &vault.path().join("a.md"),
-            "---\nstatus: active\n---\n[[b]]\n",
-        );
-        write(&vault.path().join("b.md"), "target\n");
-        let mut index = VaultIndex::build(vault.path()).unwrap();
-        assert_eq!(index.len(), 2);
+        let vault = copy_testvault("vk-reindex");
+        let root = vault.path();
+        let mut index = VaultIndex::build(root).unwrap();
+        assert_eq!(index.len(), 30);
+        let alpha_backlinks = vec![
+            root.join("docs/guide.md"),
+            root.join("index.md"),
+            root.join("projects/beta.md"),
+        ];
+        assert_eq!(index.backlinks_to(&root.join("alpha.md")), alpha_backlinks);
 
-        // ADD: a new note linking to a.md creates a backlink on a.md.
-        let c = vault.path().join("c.md");
-        write(&c, "---\nstatus: draft\n---\n[[a]]\n");
+        // ADD: a new note linking to alpha.md creates a backlink on it.
+        let c = root.join("c.md");
+        write(&c, "---\nstatus: draft\n---\n[[alpha]]\n");
         index.reindex_one(&c);
-        assert_eq!(index.len(), 3);
+        assert_eq!(index.len(), 31);
         assert_eq!(
-            index.backlinks_to(&vault.path().join("a.md")),
-            vec![c.clone()]
+            index.backlinks_to(&root.join("alpha.md")),
+            vec![
+                c.clone(),
+                root.join("docs/guide.md"),
+                root.join("index.md"),
+                root.join("projects/beta.md"),
+            ],
+            "the new note is listed first in path order"
         );
 
-        // MODIFY: rewriting b.md changes its links (and backlinks).
-        let b = vault.path().join("b.md");
-        write(&b, "[[a]] now\n");
-        index.reindex_one(&b);
+        // MODIFY: rewriting tasks/tasks.md changes its links (and backlinks).
+        let tasks = root.join("tasks/tasks.md");
+        write(&tasks, "[[alpha]] now\n");
+        index.reindex_one(&tasks);
+        let mut expected = alpha_backlinks.clone();
+        expected.push(tasks.clone());
+        expected.push(c.clone());
+        expected.sort();
         assert_eq!(
-            index.backlinks_to(&vault.path().join("a.md")),
-            vec![b.clone(), c.clone()],
+            index.backlinks_to(&root.join("alpha.md")),
+            expected,
             "backlinks updated after modify, path order"
         );
         assert_eq!(
-            index.note(&b).unwrap().links[0].target,
-            "a",
+            index.note(&tasks).unwrap().links[0].target,
+            "alpha",
             "note metadata refreshed"
         );
 
         // REMOVE: deleting c.md drops it and its backlinks.
         fs::remove_file(&c).unwrap();
         index.reindex_one(&c);
-        assert_eq!(index.len(), 2);
+        assert_eq!(index.len(), 30);
         assert!(index.note(&c).is_none());
-        assert_eq!(
-            index.backlinks_to(&vault.path().join("a.md")),
-            vec![b.clone()]
-        );
+        expected.retain(|p| p != &c);
+        assert_eq!(index.backlinks_to(&root.join("alpha.md")), expected);
 
         // Remove of an already-absent path is a harmless no-op.
         index.reindex_one(&c);
-        assert_eq!(index.len(), 2);
+        assert_eq!(index.len(), 30);
 
         // Non-md and outside-vault paths are ignored.
-        let txt = vault.path().join("notes.txt");
+        let txt = root.join("scratch.txt");
         write(&txt, "x");
         index.reindex_one(&txt);
-        assert_eq!(index.len(), 2);
+        assert_eq!(index.len(), 30);
     }
 
     #[test]
@@ -1696,35 +1728,22 @@ mod tests {
 
     #[test]
     fn path_targets_fall_back_to_unique_suffix_match() {
-        let vault = TempDir::new("vk-suffix");
-        write(
-            &vault
-                .path()
-                .join("archive/projects/x/execution-log/index.md"),
-            "x\n",
-        );
-        write(
-            &vault.path().join("linker.md"),
-            "See [[execution-log/index]].\n",
-        );
-        let index = VaultIndex::build(vault.path()).unwrap();
-
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
+        // index.md links `[[clients/acme/kickoff]]`, a suffix of
+        // projects/clients/acme/kickoff.md.
         assert_eq!(
-            index.resolve("execution-log/index"),
-            Resolution::Found(
-                vault
-                    .path()
-                    .join("archive/projects/x/execution-log/index.md")
-            ),
+            index.resolve("clients/acme/kickoff"),
+            Resolution::Found(root.join("projects/clients/acme/kickoff.md")),
             "stale path link resolves via unique suffix"
         );
+        // contract.md links back to the kickoff as well.
         assert_eq!(
-            index.backlinks_to(
-                &vault
-                    .path()
-                    .join("archive/projects/x/execution-log/index.md")
-            ),
-            vec![vault.path().join("linker.md")]
+            index.backlinks_to(&root.join("projects/clients/acme/kickoff.md")),
+            vec![
+                root.join("index.md"),
+                root.join("projects/clients/acme/contract.md"),
+            ]
         );
         assert_eq!(index.resolve("no/such/path"), Resolution::NotFound);
     }
@@ -1751,13 +1770,13 @@ mod tests {
 
     #[test]
     fn full_path_match_beats_suffix_fallback() {
-        let vault = TempDir::new("vk-full-beats-suffix");
-        write(&vault.path().join("log.md"), "x\n");
-        write(&vault.path().join("deep/log.md"), "x\n");
-        let index = VaultIndex::build(vault.path()).unwrap();
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
+        // `gamma` alone is ambiguous (root and projects/); the full path names
+        // one note, found exactly.
         assert_eq!(
-            index.resolve("deep/log"),
-            Resolution::Found(vault.path().join("deep/log.md")),
+            index.resolve("projects/gamma"),
+            Resolution::Found(root.join("projects/gamma.md")),
             "exact path match preferred over suffix candidates"
         );
     }
@@ -1867,40 +1886,37 @@ mod tests {
 
     #[test]
     fn hint_prefers_same_folder_then_nearest_ancestor() {
-        let vault = TempDir::new("vk-hint");
-        write(&vault.path().join("dup.md"), "x\n");
-        write(&vault.path().join("a/dup.md"), "x\n");
-        write(&vault.path().join("a/sub/dup.md"), "x\n");
-        write(&vault.path().join("b/dup.md"), "x\n");
-        let index = VaultIndex::build(vault.path()).unwrap();
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
 
-        let source = vault.path().join("a/sub/source.md");
-        // Same folder as the source wins outright.
+        // dup: docs/dup.md and refs/dup.md. Same folder as the source wins.
+        let source = root.join("docs/guide.md");
         assert_eq!(
             index.resolve_with_hint(&source, "dup"),
-            Resolution::Found(vault.path().join("a/sub/dup.md"))
+            Resolution::Found(root.join("docs/dup.md"))
         );
-        // No same-folder candidate: nearest ancestor (a/) beats the root.
-        let source = vault.path().join("a/source.md");
+        // gamma: the root gamma.md and projects/gamma.md. From projects/,
+        // the same-folder note wins; from docs/, no candidate is in the
+        // same folder, so the nearest ancestor (the root) wins.
+        let source = root.join("projects/beta.md");
         assert_eq!(
-            index.resolve_with_hint(&source, "dup"),
-            Resolution::Found(vault.path().join("a/dup.md"))
+            index.resolve_with_hint(&source, "gamma"),
+            Resolution::Found(root.join("projects/gamma.md"))
         );
-        // Path-style ambiguity gets the same hint treatment.
+        let source = root.join("docs/guide.md");
         assert_eq!(
-            index.resolve_with_hint(&source, "sub/dup"),
-            Resolution::Found(vault.path().join("a/sub/dup.md"))
+            index.resolve_with_hint(&source, "gamma"),
+            Resolution::Found(root.join("gamma.md"))
+        );
+        // Path-style suffix with one candidate passes through the hint.
+        assert_eq!(
+            index.resolve_with_hint(&source, "clients/acme/kickoff"),
+            Resolution::Found(root.join("projects/clients/acme/kickoff.md"))
         );
         // Unambiguous and missing targets pass through untouched.
-        write(&vault.path().join("only.md"), "x\n");
-        let index = {
-            let mut idx = index;
-            idx.reindex_one(&vault.path().join("only.md"));
-            idx
-        };
         assert_eq!(
-            index.resolve_with_hint(&source, "only"),
-            Resolution::Found(vault.path().join("only.md"))
+            index.resolve_with_hint(&source, "alpha"),
+            Resolution::Found(root.join("alpha.md"))
         );
         assert_eq!(
             index.resolve_with_hint(&source, "nope"),
@@ -1910,24 +1926,22 @@ mod tests {
 
     #[test]
     fn hint_without_related_candidates_returns_ambiguity() {
-        let vault = TempDir::new("vk-hint-none");
-        write(&vault.path().join("a/dup.md"), "x\n");
-        write(&vault.path().join("b/dup.md"), "x\n");
-        let index = VaultIndex::build(vault.path()).unwrap();
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
         let candidates = amb(&index, "dup");
 
-        // Source elsewhere: no candidate is in its folder chain.
-        let source = vault.path().join("c/source.md");
+        // Source in edge/: no candidate (docs/, refs/) is in its folder chain.
+        let source = root.join("edge/source.md");
         assert_eq!(
             index.resolve_with_hint(&source, "dup"),
             Resolution::Ambiguous(candidates.clone())
         );
-        // Source at the vault root: no candidate folder is an ancestor of
-        // the root itself.
-        let root_source = vault.path().join("source.md");
+        // Source at the vault root (index.md's `[[dup]]`): no candidate
+        // folder is an ancestor of the root itself.
+        let root_source = root.join("index.md");
         assert_eq!(
             index.resolve_with_hint(&root_source, "dup"),
-            Resolution::Ambiguous(candidates)
+            Resolution::Ambiguous(candidates.clone())
         );
         // A source outside the vault gets no hint at all.
         let outside = Path::new("/elsewhere/source.md");
@@ -1941,16 +1955,15 @@ mod tests {
     fn hint_deeper_ancestor_beats_shallow_shared_root() {
         // All candidates share the vault root as an ancestor: the deepest
         // (nearest) ancestor wins, a tie refuses to guess.
-        let vault = TempDir::new("vk-hint-depth");
-        write(&vault.path().join("log.md"), "x\n");
-        write(&vault.path().join("a/log.md"), "x\n");
-        let index = VaultIndex::build(vault.path()).unwrap();
-
-        let source = vault.path().join("a/other.md");
+        let index = VaultIndex::build(&testvault_root()).unwrap();
+        let root = index.root().to_path_buf();
+        // gamma: the root gamma.md and projects/gamma.md. From projects/
+        // the folder note is nearer than the root.
+        let source = root.join("projects/other.md");
         assert_eq!(
-            index.resolve_with_hint(&source, "log"),
-            Resolution::Found(vault.path().join("a/log.md")),
-            "a/ is a nearer ancestor than the vault root"
+            index.resolve_with_hint(&source, "gamma"),
+            Resolution::Found(root.join("projects/gamma.md")),
+            "projects/ is a nearer ancestor than the vault root"
         );
         // Equal distance (both candidates in the same folder — the root):
         // refuse to guess. Constructed via suffix ambiguity instead, where

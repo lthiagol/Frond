@@ -1,0 +1,9 @@
+[package]
+name = "testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# Dev-only: `vault` and `app` take it as a `[dev-dependencies]` entry.
+publish = false
+
+[dependencies]

@@ -410,54 +410,75 @@ pub fn truncate_ellipsis(text: &str, max_width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::TempDir;
+    use crate::testutil::{copy_testvault, TempDir};
     use std::fs;
 
-    /// vault/
-    ///   alpha.md
-    ///   Archive/  (nested: old.md)
-    ///   beta.md
-    ///   .obsidian/ (skipped)
-    ///   notes.txt  (skipped)
+    /// A copy of the sample vault (`testvault/`): ten folders, then three
+    /// root notes (alpha.md, gamma.md, index.md). `archive/` holds three notes.
     fn fixture() -> TempDir {
-        let dir = TempDir::new("sb-vault");
-        fs::write(dir.path().join("alpha.md"), "a").unwrap();
-        fs::write(dir.path().join("beta.md"), "b").unwrap();
-        fs::write(dir.path().join("notes.txt"), "x").unwrap();
-        fs::create_dir_all(dir.path().join("Archive")).unwrap();
-        fs::write(dir.path().join("Archive").join("old.md"), "o").unwrap();
-        fs::create_dir_all(dir.path().join(".obsidian")).unwrap();
-        dir
+        copy_testvault("sb-vault")
     }
+
+    /// The root listing of the sample vault: folders first, then notes.
+    const ROOT_ROWS: [&str; 13] = [
+        "archive",
+        "dashboards",
+        "diagrams",
+        "docs",
+        "edge",
+        "links",
+        "projects",
+        "reading",
+        "refs",
+        "tasks",
+        "alpha.md",
+        "gamma.md",
+        "index.md",
+    ];
 
     #[test]
     fn build_lists_dirs_first_md_only_no_hidden() {
         let vault = fixture();
         let sb = Sidebar::new(vault.path()).unwrap();
         let names: Vec<&str> = sb.rows().iter().map(|r| r.node.name.as_str()).collect();
-        assert_eq!(names, vec!["Archive", "alpha.md", "beta.md"]);
+        assert_eq!(
+            names, ROOT_ROWS,
+            "notes.txt and .obsidian/ and .trash/ are skipped"
+        );
     }
 
     #[test]
     fn collapsed_dirs_hide_children() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        assert_eq!(sb.rows().len(), 3); // Archive collapsed
-        sb.expanded.insert(vault.path().join("Archive"));
-        let names: Vec<&str> = sb.rows().iter().map(|r| r.node.name.as_str()).collect();
-        assert_eq!(names, vec!["Archive", "old.md", "alpha.md", "beta.md"]);
-        assert_eq!(sb.rows()[1].depth, 1);
+        assert_eq!(sb.rows().len(), 13); // archive collapsed
+        sb.expanded.insert(vault.path().join("archive"));
+        let rows = sb.rows();
+        let names: Vec<&str> = rows.iter().map(|r| r.node.name.as_str()).collect();
+        assert_eq!(
+            &names[..5],
+            [
+                "archive",
+                "old-note.md",
+                "retired-tool.md",
+                "superseded-plan.md",
+                "dashboards"
+            ]
+        );
+        assert_eq!(names.len(), 16);
+        assert_eq!(rows[1].depth, 1, "old-note.md sits under archive");
+        assert_eq!(rows[0].depth, 0);
     }
 
     #[test]
     fn activate_toggles_dir_opens_note() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        sb.selected = Some(vault.path().join("Archive"));
+        sb.selected = Some(vault.path().join("archive"));
         assert!(sb.activate().is_none(), "dir: no note to open");
-        assert!(sb.expanded.contains(&vault.path().join("Archive")));
+        assert!(sb.expanded.contains(&vault.path().join("archive")));
         sb.activate();
-        assert!(!sb.expanded.contains(&vault.path().join("Archive")));
+        assert!(!sb.expanded.contains(&vault.path().join("archive")));
 
         sb.selected = Some(vault.path().join("alpha.md"));
         assert_eq!(
@@ -471,7 +492,7 @@ mod tests {
     fn expand_and_toggle_folder_leave_notes_alone() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        let archive = vault.path().join("Archive");
+        let archive = vault.path().join("archive");
         sb.selected = Some(archive.clone());
         sb.expand();
         assert!(sb.expanded.contains(&archive));
@@ -480,61 +501,74 @@ mod tests {
         sb.toggle_folder();
         assert!(sb.expanded.contains(&archive));
         let before = sb.expanded.clone();
-        sb.selected = Some(vault.path().join("beta.md"));
+        sb.selected = Some(vault.path().join("gamma.md"));
         sb.expand();
         sb.toggle_folder();
         assert_eq!(sb.expanded, before);
-        assert_eq!(sb.selected, Some(vault.path().join("beta.md")));
+        assert_eq!(sb.selected, Some(vault.path().join("gamma.md")));
     }
 
     #[test]
     fn collapse_or_parent_walks_up() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        sb.expanded.insert(vault.path().join("Archive"));
-        sb.selected = Some(vault.path().join("Archive").join("old.md"));
+        sb.expanded.insert(vault.path().join("archive"));
+        sb.selected = Some(vault.path().join("archive").join("old-note.md"));
         sb.collapse_or_parent();
-        // Parent Archive collapsed and now selected.
-        assert_eq!(sb.selected, Some(vault.path().join("Archive")));
-        assert!(!sb.expanded.contains(&vault.path().join("Archive")));
-        assert_eq!(sb.rows().len(), 3);
+        // Parent archive collapsed and now selected.
+        assert_eq!(sb.selected, Some(vault.path().join("archive")));
+        assert!(!sb.expanded.contains(&vault.path().join("archive")));
+        assert_eq!(sb.rows().len(), 13);
 
         // On an expanded dir: collapses in place, selection stays.
-        sb.selected = Some(vault.path().join("Archive"));
-        sb.expanded.insert(vault.path().join("Archive"));
+        sb.selected = Some(vault.path().join("archive"));
+        sb.expanded.insert(vault.path().join("archive"));
         sb.collapse_or_parent();
-        assert_eq!(sb.selected, Some(vault.path().join("Archive")));
-        assert!(!sb.expanded.contains(&vault.path().join("Archive")));
+        assert_eq!(sb.selected, Some(vault.path().join("archive")));
+        assert!(!sb.expanded.contains(&vault.path().join("archive")));
     }
 
     #[test]
     fn rescan_preserves_expansion_and_selection() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        let archive = vault.path().join("Archive");
+        let archive = vault.path().join("archive");
         sb.expanded.insert(archive.clone());
-        sb.selected = Some(archive.join("old.md"));
+        sb.selected = Some(archive.join("old-note.md"));
 
         // Filesystem changes: new file, selected file deleted.
         fs::write(vault.path().join("new.md"), "n").unwrap();
-        fs::remove_file(archive.join("old.md")).unwrap();
+        fs::remove_file(archive.join("old-note.md")).unwrap();
         sb.rescan();
 
         assert!(sb.expanded.contains(&archive), "expansion survives rescan");
         let names: Vec<&str> = sb.rows().iter().map(|r| r.node.name.as_str()).collect();
-        assert_eq!(names, vec!["Archive", "alpha.md", "beta.md", "new.md"]);
+        assert_eq!(
+            &names[..4],
+            [
+                "archive",
+                "retired-tool.md",
+                "superseded-plan.md",
+                "dashboards"
+            ],
+            "old-note.md is gone from archive's children"
+        );
+        assert!(
+            names.contains(&"new.md"),
+            "the new note is listed: {names:?}"
+        );
         // Selected file is gone: falls back to the first row.
-        assert_eq!(sb.selected, Some(vault.path().join("Archive")));
+        assert_eq!(sb.selected, Some(vault.path().join("archive")));
     }
 
     #[test]
     fn rescan_keeps_selection_when_file_still_exists() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        sb.selected = Some(vault.path().join("beta.md"));
-        fs::write(vault.path().join("gamma.md"), "g").unwrap();
+        sb.selected = Some(vault.path().join("index.md"));
+        fs::write(vault.path().join("zeta.md"), "z").unwrap();
         sb.rescan();
-        assert_eq!(sb.selected, Some(vault.path().join("beta.md")));
+        assert_eq!(sb.selected, Some(vault.path().join("index.md")));
     }
 
     #[test]
@@ -545,12 +579,12 @@ mod tests {
         sb.move_down(100);
         assert_eq!(
             sb.selected,
-            Some(vault.path().join("beta.md")),
-            "clamped at last row"
+            Some(vault.path().join("index.md")),
+            "clamped at last row (13 rows)"
         );
-        assert_eq!(sb.scroll, 1, "selection scrolled into view");
+        assert_eq!(sb.scroll, 11, "selection scrolled into view");
         sb.move_up(100);
-        assert_eq!(sb.selected, Some(vault.path().join("Archive")));
+        assert_eq!(sb.selected, Some(vault.path().join("archive")));
         assert_eq!(sb.scroll, 0);
     }
 
@@ -574,10 +608,10 @@ mod tests {
 
         // Deep note under a collapsed folder: ancestors expand, the note
         // is selected and scrolled into view.
-        sb.reveal(&vault.path().join("Archive").join("old.md"));
-        assert!(sb.expanded.contains(&vault.path().join("Archive")));
-        assert_eq!(sb.selected, Some(vault.path().join("Archive/old.md")));
-        // Rows: [Archive, old.md, alpha.md, beta.md]; viewport 1 → the
+        sb.reveal(&vault.path().join("archive").join("old-note.md"));
+        assert!(sb.expanded.contains(&vault.path().join("archive")));
+        assert_eq!(sb.selected, Some(vault.path().join("archive/old-note.md")));
+        // Rows: [archive, old-note.md, retired-tool.md, ...]; viewport 1 → the
         // selection (index 1) must be the visible row.
         assert_eq!(sb.scroll, 1);
         // The root itself is never expanded or selected.
@@ -588,50 +622,56 @@ mod tests {
     fn reveal_base_and_outside_paths() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        fs::write(vault.path().join("Archive").join("notes.base"), "").unwrap();
+        fs::write(vault.path().join("archive").join("notes.base"), "").unwrap();
         sb.rescan();
         sb.selected = Some(vault.path().join("alpha.md"));
 
         // A `.base` table now has a tree row: ancestors expand and the
         // base row is selected like a note.
-        sb.reveal(&vault.path().join("Archive").join("notes.base"));
-        assert!(sb.expanded.contains(&vault.path().join("Archive")));
-        assert_eq!(sb.selected, Some(vault.path().join("Archive/notes.base")));
+        sb.reveal(&vault.path().join("archive").join("notes.base"));
+        assert!(sb.expanded.contains(&vault.path().join("archive")));
+        assert_eq!(sb.selected, Some(vault.path().join("archive/notes.base")));
 
         // Something outside the vault (a `..` escape) touches nothing.
         sb.selected = Some(vault.path().join("alpha.md"));
         let outside = vault.path().join("..").join("elsewhere.md");
         sb.reveal(&outside);
         assert_eq!(sb.selected, Some(vault.path().join("alpha.md")));
-        assert_eq!(sb.expanded.len(), 1, "no stray expansion (Archive only)");
+        assert_eq!(sb.expanded.len(), 1, "no stray expansion (archive only)");
     }
 
     #[test]
     fn base_files_are_tree_rows_that_open_the_table() {
         let vault = fixture();
         fs::write(vault.path().join("tasks.base"), "").unwrap();
-        fs::write(vault.path().join("Archive").join("board.base"), "").unwrap();
+        fs::write(vault.path().join("archive").join("board.base"), "").unwrap();
         let mut sb = Sidebar::new(vault.path()).unwrap();
 
-        // Files sort together case-insensitively: Archive, then its two
-        // children, then alpha.md, beta.md, tasks.base (expanded below).
-        sb.expanded.insert(vault.path().join("Archive"));
+        // Folders first, then the notes and bases sorted together
+        // case-insensitively: archive, its children, then the other folders,
+        // then alpha.md, gamma.md, index.md, tasks.base.
+        sb.expanded.insert(vault.path().join("archive"));
         let rows: Vec<(&str, NodeKind)> = sb
             .rows()
             .iter()
             .map(|r| (r.node.name.as_str(), r.node.kind))
             .collect();
         assert_eq!(
-            rows,
-            vec![
-                ("Archive", NodeKind::Dir),
+            &rows[..5],
+            [
+                ("archive", NodeKind::Dir),
                 ("board.base", NodeKind::Base),
-                ("old.md", NodeKind::Note),
-                ("alpha.md", NodeKind::Note),
-                ("beta.md", NodeKind::Note),
-                ("tasks.base", NodeKind::Base),
+                ("old-note.md", NodeKind::Note),
+                ("retired-tool.md", NodeKind::Note),
+                ("superseded-plan.md", NodeKind::Note),
             ]
         );
+        assert_eq!(
+            rows.last(),
+            Some(&("tasks.base", NodeKind::Base)),
+            "tasks.base is the last root row: {rows:?}"
+        );
+        assert_eq!(rows[rows.len() - 2], ("index.md", NodeKind::Note));
 
         // Enter on a base row reports the path (routed to the table view
         // by `App::open_note`).
@@ -753,23 +793,28 @@ mod tests {
 
     #[test]
     fn click_selects_toggles_folders_and_reports_notes() {
-        let vault = fixture(); // rows collapsed: [Archive, alpha.md, beta.md]
+        let vault = fixture(); // rows collapsed: 13, [archive, ..., alpha.md, gamma.md, index.md]
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        let archive = vault.path().join("Archive");
+        let archive = vault.path().join("archive");
 
         // Click on the folder row: selects it and expands it.
         assert!(sb.click(0).is_none(), "folder click opens nothing");
         assert_eq!(sb.selected, Some(archive.clone()));
         assert!(sb.expanded.contains(&archive));
-        assert_eq!(sb.rows().len(), 4, "child visible after expanding");
+        assert_eq!(
+            sb.rows().len(),
+            16,
+            "three children visible after expanding"
+        );
 
         // Clicking the folder again collapses it (Enter semantics).
         assert!(sb.click(0).is_none());
         assert!(!sb.expanded.contains(&archive));
         assert_eq!(sb.selected, Some(archive.clone()), "selection stays");
 
-        // Click on a note: selects it and reports the path to open.
-        assert_eq!(sb.click(1), Some(vault.path().join("alpha.md")));
+        // Click on a note: selects it and reports the path to open. Rows 1..=9
+        // are the other folders, so alpha.md is row 10.
+        assert_eq!(sb.click(10), Some(vault.path().join("alpha.md")));
         assert_eq!(sb.selected, Some(vault.path().join("alpha.md")));
 
         // Index past the last row: no-op.
@@ -781,33 +826,49 @@ mod tests {
     fn click_respects_scroll_and_collapse_state() {
         let vault = fixture();
         let mut sb = Sidebar::new(vault.path()).unwrap();
-        let archive = vault.path().join("Archive");
+        let archive = vault.path().join("archive");
         sb.expanded.insert(archive.clone());
-        // Expanded rows: [Archive, old.md, alpha.md, beta.md]; scroll 1
-        // hides the Archive header, so inner row 0 is old.md.
+        // Expanded rows: [archive, old-note.md, retired-tool.md, superseded-plan.md, ...];
+        // scroll 1 hides the archive header, so inner row 0 is old-note.md.
         sb.viewport = 3;
         sb.scroll = 1;
-        assert_eq!(sb.rows().len(), 4);
+        assert_eq!(sb.rows().len(), 16);
 
-        // Screen row 1 (first inner row) → index 1 = old.md → opens.
+        // Screen row 1 (first inner row) → index 1 = old-note.md → opens.
         let area = Rect::new(0, 0, 30, 10);
         assert_eq!(sb.row_index_at_screen_row(area, 1), Some(1));
         assert_eq!(
             sb.row_index_at_screen_row(area, 1)
                 .and_then(|i| sb.click(i)),
-            Some(archive.join("old.md")),
+            Some(archive.join("old-note.md")),
             "collapsed/scroll state shifts which row the click lands on"
         );
 
         // Collapsing changes the row list: the same screen row now maps
-        // to alpha.md (and rows below the shortened list map to nothing).
+        // to dashboards (a folder), and a window at the end of the list
+        // maps to the root notes, then to nothing past the last row.
         sb.expanded.remove(&archive);
         assert_eq!(sb.row_index_at_screen_row(area, 1), Some(1));
         assert_eq!(
             sb.row_index_at_screen_row(area, 1)
                 .map(|i| sb.rows()[i].node.name.clone()),
+            Some("dashboards".to_string())
+        );
+        sb.scroll = 10;
+        assert_eq!(
+            sb.row_index_at_screen_row(area, 1)
+                .map(|i| sb.rows()[i].node.name.clone()),
             Some("alpha.md".to_string())
         );
-        assert_eq!(sb.row_index_at_screen_row(area, 4), None, "rows len 3");
+        assert_eq!(
+            sb.row_index_at_screen_row(area, 3)
+                .map(|i| sb.rows()[i].node.name.clone()),
+            Some("index.md".to_string())
+        );
+        assert_eq!(
+            sb.row_index_at_screen_row(area, 4),
+            None,
+            "rows end at index 12"
+        );
     }
 }

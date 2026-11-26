@@ -417,108 +417,23 @@ fn pad(text: String, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::TempDir;
+    use crate::testutil::{copy_testvault, TempDir};
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    const TASKS_LIKE: &str = "\
-filters:
-  and:
-    - file.inFolder(\"tasks\")
-    - 'type == \"task\"'
-
-views:
-  - type: table
-    name: \"Open\"
-    filters:
-      or:
-        - 'status == \"pending\"'
-        - 'status == \"active\"'
-    order:
-      - file.name
-      - status
-      - priority
-    sort:
-      - property: priority
-        direction: DESC
-
-  - type: table
-    name: \"Done\"
-    filters:
-      and:
-        - 'status == \"complete\"'
-    order:
-      - file.name
-      - status
-";
-
-    fn note(_name: &str, frontmatter: &str) -> String {
-        format!("---\n{frontmatter}---\nbody\n")
-    }
-
-    /// tasks-like vault: three open tasks (priorities 1/2/3), one done
-    /// task, one project (wrong type).
+    /// A copy of the sample vault (`testvault/`). Its `dashboards/projects.base`
+    /// has four views over the projects folder, with the blocked project
+    /// dropped (8 rows): `By status` (grouped), `Hubs`, `Recent`, `Tagged`.
     fn fixture() -> TempDir {
-        let dir = TempDir::new("bv-vault");
-        fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        fs::write(
-            dir.path().join("tasks/a.md"),
-            note(
-                "a",
-                "type: task\nstatus: active\npriority: 1\ntitle: Task A\n",
-            ),
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("tasks/b.md"),
-            note(
-                "b",
-                "type: task\nstatus: pending\npriority: 3\ntitle: Task B\n",
-            ),
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("tasks/c.md"),
-            note(
-                "c",
-                "type: task\nstatus: active\npriority: 2\ntitle: Task C\n",
-            ),
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("tasks/done.md"),
-            note("done", "type: task\nstatus: complete\npriority: 9\n"),
-        )
-        .unwrap();
-        fs::create_dir_all(dir.path().join("projects")).unwrap();
-        fs::write(
-            dir.path().join("projects/p.md"),
-            note("p", "type: project\nstatus: active\n"),
-        )
-        .unwrap();
-        dir
+        copy_testvault("bv-vault")
     }
 
-    fn state_for(dir: &TempDir) -> BaseState {
-        let index = VaultIndex::build(dir.path()).unwrap();
-        BaseState::open(&dir.path().join("tasks.base"), Some(&index), "2026-01-01").unwrap()
-    }
+    const DASHBOARD: &str = "dashboards/projects.base";
+    const TODAY: &str = "2026-01-01";
 
-    fn write_base(dir: &TempDir, content: &str) {
-        fs::write(dir.path().join("tasks.base"), content).unwrap();
-    }
-
-    #[test]
-    fn open_builds_the_first_view_with_expected_counts() {
-        let dir = fixture();
-        write_base(&dir, TASKS_LIKE);
-        let state = state_for(&dir);
-        // Open view: the three tasks with pending/active status; the
-        // done task and the project are filtered out.
-        assert_eq!(state.table.note_rows(), 3);
-        assert_eq!(state.view_name(), "Open");
-        // Sorted by priority DESC: b (3), c (2), a (1).
-        let names: Vec<String> = state
+    /// The note rows' file names, in table order.
+    fn note_names(state: &BaseState) -> Vec<String> {
+        state
             .table
             .rows
             .iter()
@@ -528,84 +443,147 @@ views:
                 }
                 _ => None,
             })
-            .collect();
-        assert_eq!(names, vec!["b.md", "c.md", "a.md"]);
-        // Link cells: the file.name column is clickable and opens the note.
-        let TableRow::Note(first) = &state.table.rows[0] else {
+            .collect()
+    }
+
+    #[test]
+    fn open_builds_the_first_view_with_expected_counts() {
+        let dir = fixture();
+        let index = VaultIndex::build(dir.path()).unwrap();
+        let state = BaseState::open(&dir.path().join(DASHBOARD), Some(&index), TODAY).unwrap();
+        // Open view: the first view, grouped by status, holds the eight
+        // project notes (the blocked one is filtered out by the base).
+        assert_eq!(state.table.note_rows(), 8);
+        assert_eq!(state.view_name(), "By status");
+        let mut names = note_names(&state);
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "a-note-with-a-really-long-name-that-must-truncate-in-the-sidebar.md",
+                "beta.md",
+                "contract.md",
+                "gamma.md",
+                "kickoff.md",
+                "launch.md",
+                "pilot.md",
+                "roadmap.md",
+            ]
+        );
+        // Groups sort by status: `active` comes first, and holds beta.md.
+        let TableRow::Note(first) = state
+            .table
+            .rows
+            .iter()
+            .find(|r| matches!(r, TableRow::Note(_)))
+            .unwrap()
+        else {
             panic!("note row");
         };
+        assert_eq!(first.path, dir.path().join("projects/beta.md"));
+        // Link cells: the file.name column is clickable and opens the note.
         assert!(first.cells[0].link);
-        assert_eq!(first.cells[0].text, "b");
+        assert_eq!(first.cells[0].text, "beta");
     }
 
     #[test]
     fn view_switch_changes_the_row_set() {
         let dir = fixture();
-        write_base(&dir, TASKS_LIKE);
         let index = VaultIndex::build(dir.path()).unwrap();
-        let mut state =
-            BaseState::open(&dir.path().join("tasks.base"), Some(&index), "2026-01-01").unwrap();
-        assert_eq!(state.table.note_rows(), 3);
-        state.set_view(1, Some(&index), "2026-01-01");
-        assert_eq!(state.view_name(), "Done");
-        assert_eq!(state.table.note_rows(), 1);
-        // v cycles (wrapping back to Open).
-        state.step_view(1, Some(&index), "2026-01-01");
-        assert_eq!(state.view_name(), "Open");
-        // Out-of-range jumps clamp.
-        state.set_view(99, Some(&index), "2026-01-01");
-        assert_eq!(state.view_name(), "Done");
+        let mut state = BaseState::open(&dir.path().join(DASHBOARD), Some(&index), TODAY).unwrap();
+        assert_eq!(state.view_count(), 4);
+        state.set_view(1, Some(&index), TODAY);
+        assert_eq!(state.view_name(), "Hubs");
+        assert_eq!(note_names(&state), vec!["gamma.md"]);
+        // Recent: gamma and roadmap, newest first; beta's 2000 date is outside.
+        state.step_view(1, Some(&index), TODAY);
+        assert_eq!(state.view_name(), "Recent");
+        assert_eq!(note_names(&state), vec!["gamma.md", "roadmap.md"]);
+        // v cycles (wrapping back to By status).
+        state.step_view(2, Some(&index), TODAY);
+        assert_eq!(state.view_name(), "By status");
+        assert_eq!(state.table.note_rows(), 8);
+        // Out-of-range jumps clamp to the last view, Tagged.
+        state.set_view(99, Some(&index), TODAY);
+        assert_eq!(state.view_name(), "Tagged");
+        let mut tagged = note_names(&state);
+        tagged.sort();
+        assert_eq!(
+            tagged,
+            vec![
+                "a-note-with-a-really-long-name-that-must-truncate-in-the-sidebar.md",
+                "contract.md",
+            ]
+        );
     }
 
     #[test]
     fn editing_a_note_status_moves_rows_between_views_on_rebuild() {
         let dir = fixture();
-        write_base(&dir, TASKS_LIKE);
         let index = Rc::new(RefCell::new(VaultIndex::build(dir.path()).unwrap()));
-        let mut state = BaseState::open(
-            &dir.path().join("tasks.base"),
-            Some(&index.borrow()),
-            "2026-01-01",
-        )
-        .unwrap();
-        assert_eq!(state.table.note_rows(), 3);
-        state.set_view(1, Some(&index.borrow()), "2026-01-01");
-        assert_eq!(state.table.note_rows(), 1);
+        let mut state =
+            BaseState::open(&dir.path().join(DASHBOARD), Some(&index.borrow()), TODAY).unwrap();
+        state.set_view(3, Some(&index.borrow()), TODAY);
+        assert_eq!(state.view_name(), "Tagged");
+        assert_eq!(state.table.note_rows(), 2);
 
-        // The watched edit: done.md flips to active (as the guarded
-        // toggle would write it, then the poll reindexes).
-        fs::write(
-            dir.path().join("tasks/done.md"),
-            note("done", "type: task\nstatus: active\npriority: 9\n"),
-        )
-        .unwrap();
-        index
-            .borrow_mut()
-            .reindex_one(&dir.path().join("tasks/done.md"));
-        state.rebuild(Some(&index.borrow()), "2026-01-01");
+        // The watched edit: blocked-deploy.md (tagged `ops`) goes active, as
+        // the guarded toggle would write it, then the poll reindexes it.
+        let blocked = dir.path().join("projects/blocked-deploy.md");
+        let text = fs::read_to_string(&blocked)
+            .unwrap()
+            .replace("status: blocked", "status: active");
+        fs::write(&blocked, text).unwrap();
+        index.borrow_mut().reindex_one(&blocked);
+        state.rebuild(Some(&index.borrow()), TODAY);
         assert_eq!(
             state.table.note_rows(),
-            0,
-            "the re-statused task left the Done view"
+            3,
+            "the unblocked project joined the Tagged view"
         );
-        // And joined the Open view.
-        state.set_view(0, Some(&index.borrow()), "2026-01-01");
-        assert_eq!(state.table.note_rows(), 4);
+        assert!(note_names(&state).contains(&"blocked-deploy.md".to_string()));
+        // And the By status view gained it too: nine rows is eight plus one.
+        state.set_view(0, Some(&index.borrow()), TODAY);
+        assert_eq!(state.table.note_rows(), 9);
+
+        // The removal direction: contract.md (tagged `legal`) turns blocked,
+        // which the base's `status != "blocked"` filter drops from every view.
+        // A rebuild that only adds rows would keep it in both checks below.
+        let contract = dir.path().join("projects/clients/acme/contract.md");
+        let text = fs::read_to_string(&contract)
+            .unwrap()
+            .replace("status: waiting-legal", "status: blocked");
+        fs::write(&contract, text).unwrap();
+        index.borrow_mut().reindex_one(&contract);
+        state.rebuild(Some(&index.borrow()), TODAY);
+        assert_eq!(state.table.note_rows(), 8, "the blocked contract left");
+        assert!(!note_names(&state).contains(&"contract.md".to_string()));
+        state.set_view(3, Some(&index.borrow()), TODAY);
+        assert_eq!(state.view_name(), "Tagged");
+        let mut tagged = note_names(&state);
+        tagged.sort();
+        assert_eq!(
+            tagged,
+            vec![
+                "a-note-with-a-really-long-name-that-must-truncate-in-the-sidebar.md",
+                "blocked-deploy.md",
+            ]
+        );
     }
 
     #[test]
     fn editing_the_base_file_reparses_on_poll() {
         let dir = fixture();
-        write_base(&dir, TASKS_LIKE);
+        let base = dir.path().join(DASHBOARD);
         let index = VaultIndex::build(dir.path()).unwrap();
-        let mut state =
-            BaseState::open(&dir.path().join("tasks.base"), Some(&index), "2026-01-01").unwrap();
-        assert_eq!(state.view_count(), 2);
+        let mut state = BaseState::open(&base, Some(&index), TODAY).unwrap();
+        assert_eq!(state.view_count(), 4);
         std::thread::sleep(std::time::Duration::from_millis(20));
-        write_base(
-            &dir,
+        fs::write(
+            &base,
             "views:\n  - type: table\n    name: Only\n    order:\n      - file.name\n",
-        );
+        )
+        .unwrap();
         assert!(state.poll_file(), "the stamp changed");
         assert_eq!(state.view_count(), 1);
         assert_eq!(state.view_name(), "Only");
@@ -616,48 +594,53 @@ views:
     #[test]
     fn unparsable_base_fails_open_with_a_warning_and_all_notes() {
         let dir = fixture();
-        write_base(&dir, "not a base file at all\n");
+        fs::write(dir.path().join(DASHBOARD), "not a base file at all\n").unwrap();
         let index = VaultIndex::build(dir.path()).unwrap();
-        let state =
-            BaseState::open(&dir.path().join("tasks.base"), Some(&index), "2026-01-01").unwrap();
+        let state = BaseState::open(&dir.path().join(DASHBOARD), Some(&index), TODAY).unwrap();
         assert!(!state.warnings.is_empty(), "warning surfaced");
-        assert_eq!(state.table.note_rows(), 5, "fail-open: every note shows");
+        assert_eq!(state.table.note_rows(), 30, "fail-open: every note shows");
     }
 
     #[test]
     fn rendering_produces_clickable_regions_at_computed_columns() {
         let dir = fixture();
-        write_base(&dir, TASKS_LIKE);
         let index = VaultIndex::build(dir.path()).unwrap();
-        let mut state =
-            BaseState::open(&dir.path().join("tasks.base"), Some(&index), "2026-01-01").unwrap();
+        let mut state = BaseState::open(&dir.path().join(DASHBOARD), Some(&index), TODAY).unwrap();
+        state.set_view(2, Some(&index), TODAY); // Recent: gamma.md, roadmap.md
         let lines = state.render(
             crate::theme::ui_by_preset(engine::MarkdownThemePreset::default()),
             80,
             24,
         );
-        // Header + rule + 3 rows.
-        assert_eq!(lines.len(), 5);
-        assert_eq!(state.regions.len(), 3, "one link region per row");
+        // Header + rule + 2 rows.
+        assert_eq!(lines.len(), 4);
+        assert_eq!(state.regions.len(), 2, "one link region per row");
         // The first data row is table line 2; its region starts at 0.
         let first = &state.regions[0];
         assert_eq!(first.line, 2);
         assert_eq!(first.start, 0);
         assert!(first.end > 0);
         // Click mapping round-trips through link_at.
-        assert_eq!(state.link_at(2, 0), Some(dir.path().join("tasks/b.md")));
+        assert_eq!(
+            state.link_at(2, 0),
+            Some(dir.path().join("projects/gamma.md"))
+        );
+        assert_eq!(
+            state.link_at(3, 0),
+            Some(dir.path().join("projects/roadmap.md"))
+        );
         assert_eq!(state.link_at(2, 999), None);
         // Scrolling shifts which rows render (and their absolute lines).
         state.scroll_down(1);
         let lines = state.render(
             crate::theme::ui_by_preset(engine::MarkdownThemePreset::default()),
             80,
-            4,
+            3,
         );
         assert_eq!(
             lines.len(),
-            4,
-            "window renders the 2 remaining rows + header + rule"
+            3,
+            "window renders the one remaining row + header + rule"
         );
         assert!(
             state.regions.iter().all(|r| r.line >= state.scroll + 2),
@@ -667,41 +650,21 @@ views:
 
     #[test]
     fn group_by_renders_header_rows() {
-        let dir = TempDir::new("bv-group");
-        fs::create_dir_all(dir.path().join("tasks")).unwrap();
-        fs::write(
-            dir.path().join("tasks/a.md"),
-            note("a", "type: task\nstatus: active\narea: ops\n"),
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("tasks/b.md"),
-            note("b", "type: task\nstatus: active\narea: ops\n"),
-        )
-        .unwrap();
-        fs::write(
-            dir.path().join("tasks/c.md"),
-            note("c", "type: task\nstatus: active\narea: infra\n"),
-        )
-        .unwrap();
-        write_base(
-            &dir,
-            "views:\n  - type: table\n    name: G\n    order:\n      - file.name\n    groupBy:\n      property: area\n      direction: ASC\n",
-        );
+        let dir = fixture();
         let index = VaultIndex::build(dir.path()).unwrap();
-        let mut state =
-            BaseState::open(&dir.path().join("tasks.base"), Some(&index), "2026-01-01").unwrap();
-        assert_eq!(state.table.rows.len(), 5, "2 group headers + 3 rows");
+        // The By status view groups by status: eight groups, eight notes.
+        let mut state = BaseState::open(&dir.path().join(DASHBOARD), Some(&index), TODAY).unwrap();
+        assert_eq!(state.table.rows.len(), 16, "8 group headers + 8 notes");
         let lines = state.render(
             crate::theme::ui_by_preset(engine::MarkdownThemePreset::default()),
             60,
-            12,
+            40,
         );
-        assert_eq!(lines.len(), 2 + 5);
-        let infra_header = lines
+        assert_eq!(lines.len(), 2 + 16);
+        let monitoring = lines
             .iter()
-            .position(|l| l.spans.iter().any(|s| s.content.contains("▸ infra")))
+            .position(|l| l.spans.iter().any(|s| s.content.contains("▸ monitoring")))
             .expect("group header rendered");
-        assert!(infra_header >= 2, "headers render among the rows");
+        assert!(monitoring >= 2, "headers render among the rows");
     }
 }

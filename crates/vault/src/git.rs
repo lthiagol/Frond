@@ -290,7 +290,7 @@ fn upstream_ref(toplevel: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::TempDir;
+    use crate::testutil::{copy_testvault, TempDir};
     use std::process::Command;
 
     /// Runs a git command in a fixture (fixture setup only — the allowlist
@@ -350,25 +350,22 @@ mod tests {
 
     #[test]
     fn modified_untracked_and_staged_are_dirty_with_paths() {
-        let dir = TempDir::new("git-dirty");
+        let dir = copy_testvault("git-dirty");
         init_repo(dir.path());
-        write(&dir.path().join("a.md"), "a\n");
-        write(&dir.path().join("sub").join("b.md"), "b\n");
         commit_all(dir.path(), "initial");
 
-        write(&dir.path().join("a.md"), "changed\n"); // modified
+        write(&dir.path().join("alpha.md"), "changed\n"); // modified
         write(&dir.path().join("new.md"), "n\n"); // untracked
-        write(&dir.path().join("sub").join("c.md"), "c\n"); // untracked, nested
-        fixture_git(dir.path(), &["add", "sub/c.md"]); // staged
+        let staged = dir.path().join("projects/clients/acme/staged.md");
+        write(&staged, "s\n");
+        fixture_git(dir.path(), &["add", "projects/clients/acme/staged.md"]); // staged
 
         let status = read_status(dir.path()).expect("repo readable");
         assert!(!status.clean);
-        assert_eq!(status.changed_files.len(), 3);
-        assert!(status.changed_files.contains(&dir.path().join("a.md")));
+        assert_eq!(status.changed_files.len(), 3, "{:?}", status.changed_files);
+        assert!(status.changed_files.contains(&dir.path().join("alpha.md")));
         assert!(status.changed_files.contains(&dir.path().join("new.md")));
-        assert!(status
-            .changed_files
-            .contains(&dir.path().join("sub").join("c.md")));
+        assert!(status.changed_files.contains(&staged));
     }
 
     #[test]
@@ -470,19 +467,18 @@ mod tests {
 
     #[test]
     fn vault_subdirectory_of_the_repo_still_works() {
-        let dir = TempDir::new("git-subvault");
-        let vault = dir.path().join("notes");
-        std::fs::create_dir_all(&vault).unwrap();
+        // The vault is the repository's `projects/` folder, one level down.
+        let dir = copy_testvault("git-subvault");
         init_repo(dir.path());
-        write(&vault.join("a.md"), "a\n");
         commit_all(dir.path(), "initial");
-        write(&vault.join("a.md"), "changed\n");
+        let vault = dir.path().join("projects");
+        write(&vault.join("beta.md"), "changed\n");
 
         let status = read_status(&vault).expect("repo readable");
         assert!(!status.clean);
         assert_eq!(
             status.changed_files,
-            BTreeSet::from([vault.join("a.md")]),
+            BTreeSet::from([vault.join("beta.md")]),
             "porcelain paths (repo-relative) resolved against the toplevel"
         );
     }
@@ -515,12 +511,11 @@ mod tests {
         // Without `-uall`, porcelain collapses a wholly untracked folder
         // into one `?? dir/` line — no note inside it would ever get a
         // `*` marker. `-uall` must list the individual files.
-        let dir = TempDir::new("git-uall");
+        let dir = copy_testvault("git-uall");
         init_repo(dir.path());
-        write(&dir.path().join("a.md"), "a\n");
         commit_all(dir.path(), "initial");
 
-        let newdir = dir.path().join("brand-new");
+        let newdir = dir.path().join("projects").join("brand-new");
         std::fs::create_dir_all(&newdir).unwrap();
         write(&newdir.join("n1.md"), "one\n");
         write(&newdir.join("n2.md"), "two\n");

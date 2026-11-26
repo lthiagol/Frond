@@ -1395,16 +1395,15 @@ mod tests {
     #[test]
     fn a_vault_starts_on_its_session_note_else_index_else_none() {
         let (_env, _state) = isolated_env("start-note");
-        let dir = vault_dir("start-note");
+        let dir = crate::testutil::copy_testvault("start-note");
         let root = dir.path();
-        std::fs::write(root.join("b.md"), "# b\n").unwrap();
         let session_at = |note: &str| session::SessionState {
             note: Some(note.to_string()),
             ..Default::default()
         };
         // The session's note wins.
-        let (viewer, message) = start_note(root, Some(&session_at("b.md")), 80);
-        assert_eq!(viewer.path, root.join("b.md"));
+        let (viewer, message) = start_note(root, Some(&session_at("alpha.md")), 80);
+        assert_eq!(viewer.path, root.join("alpha.md"));
         assert_eq!(message, None);
         // No session: index.md.
         let (viewer, message) = start_note(root, None, 80);
@@ -1417,7 +1416,7 @@ mod tests {
         let prefix = format!("could not reopen {}: ", display_path(&root.join("gone.md")));
         assert!(message.starts_with(&prefix), "got: {message}");
         // A session entry outside the vault is not a candidate.
-        let (viewer, message) = start_note(root, Some(&session_at("../b.md")), 80);
+        let (viewer, message) = start_note(root, Some(&session_at("../alpha.md")), 80);
         assert_eq!(viewer.path, root.join("index.md"));
         assert_eq!(message, None);
         // Neither: no note, and no error for the missing index.md.
@@ -1425,8 +1424,8 @@ mod tests {
         let (viewer, message) = start_note(root, None, 80);
         assert!(!viewer.has_note());
         assert_eq!(message, None);
-        let (viewer, message) = start_note(root, Some(&session_at("b.md")), 80);
-        assert_eq!(viewer.path, root.join("b.md"));
+        let (viewer, message) = start_note(root, Some(&session_at("alpha.md")), 80);
+        assert_eq!(viewer.path, root.join("alpha.md"));
         assert_eq!(message, None);
         // An index.md that exists but cannot be read (a directory, so the
         // test also holds as root): no note, and the reason.
@@ -1480,8 +1479,8 @@ mod tests {
     fn a_switch_to_a_vault_without_an_index_opens_with_no_note() {
         let (_env, _state) = isolated_env("switch-no-index");
         let alpha = vault_dir("switch-no-index-a");
-        let beta = crate::testutil::TempDir::new("switch-no-index-b");
-        std::fs::write(beta.path().join("note.md"), "# note\n").unwrap();
+        let beta = crate::testutil::copy_testvault("switch-no-index-b");
+        std::fs::remove_file(beta.path().join("index.md")).unwrap();
         let old = open_app(&alpha);
         let new = switch_vault(
             beta.path().to_path_buf(),
@@ -1499,8 +1498,8 @@ mod tests {
     fn a_switch_with_the_sidebar_hidden_to_a_vault_with_no_note_shows_it() {
         let (_env, _state) = isolated_env("switch-hidden-sidebar");
         let alpha = vault_dir("switch-hidden-a");
-        let beta = crate::testutil::TempDir::new("switch-hidden-b");
-        std::fs::write(beta.path().join("note.md"), "# note\n").unwrap();
+        let beta = crate::testutil::copy_testvault("switch-hidden-b");
+        std::fs::remove_file(beta.path().join("index.md")).unwrap();
         let mut old = open_app(&alpha);
         let mut display = old.display_state();
         display.sidebar_visible = false;
