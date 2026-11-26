@@ -38,7 +38,7 @@ suite's inline fixture for a copy of the vault, every assertion kept.
 2. ~~smoke_m3~~ (done)
 3. ~~smoke_m4~~ (done)
 4. ~~smoke_m5~~ (done)
-5. smoke_m6
+5. ~~smoke_m6~~ (done)
 6. smoke_m7 (several vaults = several copies)
 7. Rust tests that build whole-vault fixtures; single-edge-case fixtures
    stay inline.

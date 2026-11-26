@@ -246,6 +246,17 @@ these screen facts from the copy:
 - `reading/long-read.md`: the scroll note. Scrolled 16 lines,
   `Paragraph 2:` heads the first text row and the `Long read` heading is off
   the top (`scripts/smoke_m5.py`); the watch check appends to its copy.
+- `reading/long-read.md` (`scripts/smoke_m6.py`): the outline lists `Long
+  read`, `Part 1` to `Part 4`, `Tail`; its `Part 3` jump puts that heading
+  on the top row, and the theme checks read the `Long read` heading there.
+- `index.md`'s outline (`scripts/smoke_m6.py`): `Lorem Index`, `Projects`,
+  `Notes and references`, `Tasks`, in that order, and `Projects` is the
+  second row.
+- The quick jumper (`scripts/smoke_m6.py`): `jump: 30` before typing, with
+  `alpha.md` first; typing `long-read` leaves `jump: 1`, `reading/long-read.md`.
+- `dashboards/projects.base` (`scripts/smoke_m6.py`): the `dashboards` folder
+  expands in the tree. Its table's status line reads `8 rows · view 1/4: By
+  status`; `]` reads `1 row · view 2/4: Hubs`; `1` returns to view 1.
 - The session checks (`scripts/smoke_m5.py`): the tree's `archive` child
   `old-note.md` and `projects` child `beta.md` show once their folders open,
   and `index.md`'s `Lorem Index` heading shows on the explicit-argument and

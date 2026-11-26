@@ -5,6 +5,7 @@
   light → dark; `Shift+T` moves the theme *inside* the group),
 - **status-bar icons** (config `icons = "unicode"` → `¶` for a note,
   `▦` for a `.base` table),
+- **the outline** (`o` lists the open note's headings; `Enter` jumps to one),
 - **`.base` tables in the sidebar tree** (the row opens the table view,
   `]` / `1` switch views).
 
@@ -13,18 +14,18 @@ Prerequisites:
 - A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
-The script builds a fixture vault under the private smoke scratch dir
-(`scripts/smoke_tmp.py`) and drives the app with `--vault`. The config and
-the theme directory are redirected into the same scratch root
-(FROND_CONFIG / FROND_THEMES), so the real `~/.config` is never touched —
-which also keeps the theme counts deterministic (no custom themes).
+The script copies the sample vault (`testvault/`, see docs/TESTVAULT.md) into
+the private smoke scratch dir (`scripts/smoke_tmp.py`) and drives the app with
+`--vault` on that copy; it never writes `testvault/`. The config and the theme
+directory are redirected into the same scratch root (FROND_CONFIG /
+FROND_THEMES), so the real `~/.config` is never touched — which also keeps the
+theme counts deterministic (no custom themes).
 """
 import os
 import pty
 import select
 import struct
 import sys
-import shutil
 import time
 import fcntl
 import termios
@@ -37,13 +38,13 @@ _APP_DEFAULT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond"
 )
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = smoke_tmp.path("frond-m6-vault")
 CONFIG_FILE = smoke_tmp.path("frond-m6-config.toml")
 THEME_DIR = smoke_tmp.path("frond-m6-themes")
 SESSION_DIR = smoke_tmp.path("frond-m6-session")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 COLS, ROWS = 100, 30
+SIDEBAR_W = 30
 
 # --- theme inventory (kept in sync with the app's own tables) --------------
 # The 4 presets (crates/app/src/theme.rs): arctic is light, the other three
@@ -82,45 +83,12 @@ DARK_NAMES = {n for n, a in BUILTIN.items() if a == "dark"} | {
     "solarized",
 }
 
-# --- fixture vault ---------------------------------------------------------
-shutil.rmtree(VAULT, ignore_errors=True)
-os.makedirs(VAULT, exist_ok=True)
+# --- vault copy -------------------------------------------------------------
+VAULT = smoke_tmp.copy_testvault("frond-m6-vault")
 
-NOTES = {
-    "index.md": (
-        "---\nstatus: complete\n---\n\n"
-        "# Smoke Heading\n\nA body paragraph for the heading color check.\n\n"
-        + "Filler paragraph for the scroll target.\n\n" * 20
-        + "## Second Section\n\nJump target.\n\n"
-        "### Third Section\n\nDeeper heading for the indentation check.\n\n"
-        + "Tail paragraph after the jump target.\n\n" * 25
-    ),
-    "alpha.md": "---\ntype: task\nstatus: active\n---\n\n# Alpha\n\nalpha body\n",
-    "beta.md": "---\ntype: task\nstatus: draft\n---\n\n# Beta\n\nbeta body\n",
-}
-for name, body in NOTES.items():
-    with open(os.path.join(VAULT, name), "w") as f:
-        f.write(body)
-
-BASE = """views:
-  - type: table
-    name: Tasks
-    filters:
-      and:
-        - 'type == "task"'
-    order:
-      - file.name
-      - status
-  - type: table
-    name: All
-    order:
-      - file.name
-"""
-with open(os.path.join(VAULT, "tasks.base"), "w") as f:
-    f.write(BASE)
-
-# Config fixture: unicode status-bar icons and the "all" rotation group.
+# --- config and theme dir: not vault content, built by the suite -----------
 os.makedirs(THEME_DIR, exist_ok=True)
+# Config fixture: unicode status-bar icons and the "all" rotation group.
 with open(CONFIG_FILE, "w") as f:
     f.write('icons = "unicode"\ntheme_rotation = "all"\n')
 
@@ -184,23 +152,49 @@ def status_line():
     return row(ROWS - 1)
 
 
-def heading_fg():
-    """fg color of the note's H1, if it is on screen."""
-    for y in range(ROWS - 1):
-        text = row(y)
-        if "Smoke Heading" in text:
-            x = text.index("Smoke Heading")
-            return screen.buffer[y][x].fg
+def content_has(text):
+    """`text` on some row of the content pane (right of the sidebar, above
+    the status bar)."""
+    return any(text in row(y)[SIDEBAR_W:] for y in range(ROWS - 1))
+
+
+def content_row_has(*parts):
+    """Some content-pane row holds every one of `parts`."""
+    return any(
+        all(part in row(y)[SIDEBAR_W:] for part in parts) for y in range(ROWS - 1)
+    )
+
+
+def heading_row(text):
+    """Screen row of a content-pane line that begins with `text`, or None.
+    The top text row is row 1 (the viewer has a one-row margin)."""
+    words = text.split()
+    for y in range(1, ROWS - 1):
+        if row(y)[SIDEBAR_W:].split()[: len(words)] == words:
+            return y
     return None
+
+
+def heading_fg(text):
+    """fg color of the content heading `text`, if it is on screen."""
+    y = heading_row(text)
+    if y is None:
+        return None
+    return screen.buffer[y][row(y).index(text, SIDEBAR_W)].fg
 
 
 def sidebar_row(needle):
     """Screen row of a sidebar entry (the tree lives in the left columns)."""
     for y in range(1, ROWS - 1):
-        text = "".join(screen.buffer[y][x].data or " " for x in range(29))
+        text = "".join(screen.buffer[y][x].data or " " for x in range(SIDEBAR_W - 1))
         if needle in text:
             return y
     return None
+
+
+def sidebar_has(text):
+    """`text` on some row of the sidebar column (the panel's title counts)."""
+    return any(text in row(y)[:SIDEBAR_W] for y in range(ROWS - 1))
 
 
 def popup_result_rows():
@@ -210,13 +204,25 @@ def popup_result_rows():
     prompt = footer = None
     for y in range(ROWS):
         text = row(y)
-        if ">▏" in text or ">b▏" in text:
+        if re.search(r">[^▏│]*▏", text):
             prompt = y
         if "↑/↓ move" in text:
             footer = y
     if prompt is None or footer is None:
         return ""
     return "\n".join(row(y) for y in range(prompt + 1, footer))
+
+
+def select_by_status(label, key, presses=12):
+    """Press `key` until the status bar names `label`: the sidebar's
+    selected row (the tree's entry, the outline's heading). True when it
+    does, so a missed selection still fails the check that follows."""
+    for _ in range(presses):
+        if label in status_line():
+            return True
+        send(key)
+        pump(0.2)
+    return label in status_line()
 
 
 def click(col, r):
@@ -240,7 +246,7 @@ def check(cond, label):
 
 # --- boot ------------------------------------------------------------------
 check(pump(1.5), "app alive")
-check("Smoke Heading" in body_text(), "index.md rendered")
+check(heading_row("Lorem Index") is not None, "index.md rendered (its H1 in the content pane)")
 
 # --- status-bar icons (config `icons = "unicode"`) -------------------------
 check(
@@ -248,22 +254,25 @@ check(
     "unicode note icon (¶) beside the note name",
 )
 check(
-    "\ue73e" not in status_line(),
+    "" not in status_line(),
     "the nerd-font note glyph (U+E73E) is not used in unicode mode",
 )
 
-# --- the outline (o) -------------------------------------------------------
+# --- the outline (o) on index.md -------------------------------------------
 send("f")  # focus the sidebar (tree view)
 pump(0.3)
 send("o")
 pump(0.4)
-check("outline" in body_text(), "o switches the sidebar to the outline")
+check(sidebar_has("outline"), "o switches the sidebar to the outline")
 check(
-    sidebar_row("Smoke Heading") is not None,
+    sidebar_row("Lorem Index") is not None,
     "the open note's first heading is listed",
 )
+outline_rows = [
+    sidebar_row(h) for h in ("Lorem Index", "Projects", "Notes and references", "Tasks")
+]
 check(
-    sidebar_row("Second Section") is not None,
+    None not in outline_rows and outline_rows == sorted(outline_rows),
     "every heading is listed in document order",
 )
 check(
@@ -271,17 +280,51 @@ check(
     "tree rows are gone in outline mode",
 )
 
-send("j")  # select the second heading
+check(
+    "Lorem Index" in status_line(),
+    "the outline opens with its first heading selected",
+)
+send("j")  # one press: the second heading
 pump(0.3)
 check(
-    "Second Section" in status_line(),
-    "the status bar shows the selected heading",
+    "Projects" in status_line(),
+    "j selects the second heading; the status bar shows it",
+)
+
+# --- the outline's jump (Enter) on long-read.md ----------------------------
+# index.md is too short to scroll a heading to the top, so the jump is
+# checked on the long note, opened from the quick jumper.
+send("\x0b")  # Ctrl+K
+pump(0.5)
+check("jump: 30" in body_text(), "Ctrl+K opened the quick jumper over all 30 notes")
+check(">▏" in body_text(), "the jumper shows an empty query prompt")
+check("alpha.md" in popup_result_rows(), "the first note (alpha.md) is listed before typing")
+
+for c in "long-read":
+    send(c)
+pump(0.4)
+check(">long-read▏" in body_text(), "the query is typed into the prompt")
+results = popup_result_rows()
+check("reading/long-read.md" in results, "the matching note is listed")
+check("alpha.md" not in results, "the non-matching note is filtered out")
+check("jump: 1" in body_text(), "the query narrows the jumper to one note")
+
+send("\r")  # Enter opens the selected note
+pump(0.8)
+check("¶ long-read.md" in status_line(), "Enter opened the selected note")
+check(heading_row("Long read") is not None, "the opened note is rendered (its H1 is on screen)")
+
+send("f")  # focus the outline, which now lists long-read.md's headings
+pump(0.3)
+check(
+    select_by_status("Part 3", "j", presses=6),
+    "j selects the heading Part 3; the status bar shows it",
 )
 send("\r")  # Enter jumps to it
 pump(0.5)
 check(
-    "Second Section" in row(1),  # the default margin_y = 1: text starts here
-    "Enter scrolled the note to the selected heading",
+    heading_row("Part 3") == 1,
+    "Enter scrolled the note: Part 3 heads the top text row",
 )
 
 send("o")  # outline off: back to the view it was over (the tree)
@@ -290,12 +333,12 @@ check(
     sidebar_row("alpha.md") is not None,
     "o again returns to the tree",
 )
-check("outline" not in body_text(), "the outline panel is gone")
+check(not sidebar_has("outline"), "the outline panel is gone")
 send("g")  # back to the top of the note for the theme color checks
 pump(0.3)
 
 # --- theme groups (Ctrl+T) -------------------------------------------------
-OCEAN_HEADING = heading_fg()
+OCEAN_HEADING = heading_fg("Long read")
 check(OCEAN_HEADING is not None, "the H1 is on screen")
 # The default theme is `ocean` (dark preset): heading_1 = rgb(140,190,255).
 check(
@@ -310,7 +353,7 @@ check(
     f"Ctrl+T moved the group to light ({LIGHT_COUNT} themes)",
 )
 check(
-    heading_fg() == OCEAN_HEADING,
+    heading_fg("Long read") == OCEAN_HEADING,
     "Ctrl+T changed the group only: the theme on screen did not move",
 )
 
@@ -342,7 +385,7 @@ check(
     light_theme in LIGHT_NAMES,
     f"Shift+T inside the light group landed on a light theme ({light_theme})",
 )
-LIGHT_HEADING = heading_fg()
+LIGHT_HEADING = heading_fg("Long read")
 check(
     LIGHT_HEADING is not None and LIGHT_HEADING != OCEAN_HEADING,
     f"the light theme really applied (heading fg {LIGHT_HEADING})",
@@ -372,97 +415,84 @@ check(
     dark_theme in DARK_NAMES,
     f"Shift+T inside the dark group landed on a dark theme ({dark_theme})",
 )
-DARK_HEADING = heading_fg()
+DARK_HEADING = heading_fg("Long read")
 check(
     DARK_HEADING is not None and DARK_HEADING != LIGHT_HEADING,
     f"the dark theme really applied (heading fg {DARK_HEADING})",
 )
 
-# --- the quick jumper (Ctrl+K) -------------------------------------------
-send("\x0b")  # Ctrl+K
-pump(0.5)
-check("jump:" in body_text(), "Ctrl+K opened the quick jumper")
-check(">▏" in body_text(), "the jumper shows an empty query prompt")
-check("alpha.md" in body_text(), "every note is listed before typing")
-
-send("b")
-pump(0.4)
-check(">b▏" in body_text(), "the query is typed into the prompt")
-results = popup_result_rows()
-check("beta.md" in results, "the matching note is listed")
-check("alpha.md" not in results, "the non-matching note is filtered out")
-
-send("\x1b[A")  # Up
-pump(0.3)
-send("\r")  # Enter opens the selected note
-pump(0.8)
-check("beta.md" in status_line(), "Enter opened the selected note")
-check("Beta" in body_text(), "the opened note is rendered")
-
 # --- .base tables in the sidebar tree -------------------------------------
-check("tasks.base" in body_text(), "the .base file is a tree row")
-check(
-    sidebar_row("tasks.base") is not None,
-    "the .base row is inside the sidebar column",
-)
-
-send("f")  # focus the sidebar
+# dashboards/projects.base: four table views (docs/TESTVAULT.md, Bases).
+send("f")  # focus the sidebar (tree view)
 pump(0.3)
-selected = False
-for _ in range(6):
-    if "tasks.base" in status_line():
-        selected = True
-        break
-    send("j")
-    pump(0.2)
-check(selected, "the .base row can be selected in the tree")
 check(
-    "▦ tasks.base" in status_line(),
+    select_by_status("dashboards", "k"),
+    "k walks the tree up to the dashboards folder",
+)
+send("\r")  # Enter expands the folder
+pump(0.3)
+check(
+    select_by_status("▦ projects.base", "j", presses=4),
+    "the projects.base row can be selected in the tree",
+)
+check(
+    "▦ projects.base" in status_line(),
     "unicode base icon (▦) beside the selected .base row",
 )
+check(sidebar_row("projects.base") is not None, "the .base file is a tree row")
 
 send("\r")  # Enter opens the table
 pump(0.8)
 check(
-    "base · view 1/2: Tasks" in body_text(),
+    content_has("base · view 1/4: By status"),
     "Enter on the .base row opened the table view",
 )
 check(
-    "2 rows · view 1/2: Tasks" in status_line(),
-    "the status bar shows the table state (2 rows, view 1/2)",
+    "8 rows · view 1/4: By status" in status_line(),
+    "the status bar shows the table state (8 rows, view 1/4)",
 )
 check(
-    "▦ tasks.base" in status_line(),
+    "▦ projects.base" in status_line(),
     "the status bar shows the base icon beside the open table",
 )
-check("Name" in body_text() and "alpha" in body_text(), "the table shows its rows")
+check(
+    content_row_has("beta", "2000-01-01"),
+    "the table shows its rows (the projects/beta.md row)",
+)
 
 send("]")  # next view
 pump(0.5)
 check(
-    "view 2/2: All" in status_line(),
+    "view 2/4: Hubs" in status_line(),
     "] moved to the second view",
 )
-check("3 rows · view 2/2: All" in status_line(), "the second view lists every note")
+check(
+    "1 row · view 2/4: Hubs" in status_line(),
+    "the second view lists its one row",
+)
+check(
+    content_row_has("gamma"),
+    "the hub view holds projects/gamma.md",
+)
 
 send("1")  # jump back to the first view
 pump(0.5)
 check(
-    "2 rows · view 1/2: Tasks" in status_line(),
+    "8 rows · view 1/4: By status" in status_line(),
     "the digit key jumped back to view 1",
 )
 
 # --- clicking the .base row opens the table too ---------------------------
 send("\x7f")  # Backspace -> back to the note
 pump(0.8)
-check("beta.md" in status_line(), "Backspace returned to the note")
-base_row = sidebar_row("tasks.base")
+check("¶ long-read.md" in status_line(), "Backspace returned to the note")
+base_row = sidebar_row("projects.base")
 check(base_row is not None, "the .base row is still visible")
 if base_row is not None:
     click(5, base_row)
     pump(0.8)
     check(
-        "base · view 1/2: Tasks" in body_text(),
+        content_has("base · view 1/4: By status"),
         "clicking the .base row opens the table view",
     )
 
