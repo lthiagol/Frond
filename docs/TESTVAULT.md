@@ -245,3 +245,10 @@ these screen facts from the copy:
   to its end (`END-OF-LONG-NOTE`).
 - `reading/long-read.md`: the scroll note; the watch check appends to its copy.
 - `notes.txt` and `.obsidian/`: not listed in the sidebar.
+- `index.md`'s backlinks panel (`b`): three, in this order: `alpha.md`,
+  `edge/crlf.md`, `links/alpha-link.md`. Pinned:
+  `backlinks_and_link_kinds`.
+- `edge/crlf.md` renders its heading `CRLF note`.
+- Tag view (`t`): `#lorem` heads the list (the most notes, 6), and the
+  list has `#rust (2)` and `#mocktag, weird (1)`. Expanding `#lorem` lists
+  `alpha.md` first.

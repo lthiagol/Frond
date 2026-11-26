@@ -6,41 +6,25 @@ Prerequisites:
 - A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
-The script builds a small fixture vault with cross-links under
-/tmp/frond-m3-vault (writes ONLY there, never to testvault/) and drives the
-app with `--vault`, exercising wikilink focus/open, the backlinks panel,
-the tag view, and the status glyphs. Later loops added: mouse-click
-activation of a wikilink (SGR 1006 injection, as in smoke_m2), the
-disambiguation popup end-to-end, `[[note#Heading]]` anchor navigation,
-and backlinks panel selection.
+The script copies the sample vault (testvault/, see docs/TESTVAULT.md) into
+the scratch dir and drives the app with `--vault` on that copy, exercising
+wikilink focus/open, the backlinks panel, the tag view, the status glyphs,
+the ambiguous-link popup, and `[[note#Heading]]` anchor navigation. It writes
+ONLY the copy, never testvault/.
 """
-import os, pty, select, struct, sys, shutil, time, fcntl, termios
+import os, pty, select, struct, sys, time, fcntl, termios
 
 import pyte
 import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = smoke_tmp.path("frond-m3-vault")
 
 COLS, ROWS = 100, 30
+SIDEBAR_W = 30
 
-# --- fixture vault -------------------------------------------------------
-shutil.rmtree(VAULT, ignore_errors=True)
-BODY = "filler paragraph\n\n" * 40
-for path, body in [
-    ("index.md", "# Index\n\nSee [[alpha]] and [[beta]] and [[nowhere]]. Pick [[dup]], and jump [[alpha#Deep Section]] by anchor.\n\n" + BODY),
-    ("alpha.md", "---\nstatus: complete\ntags: [rust, mocktag]\n---\n# Alpha\n\nBack to [[index]].\n\n" + BODY + "\n## Deep Section\n\ndeep-section-anchor-line\n\n" + BODY),
-    ("beta.md", "---\nstatus: pending\ntags: [rust]\n---\n# Beta\n\nHome: [[index|home]].\n\n" + BODY),
-    # Two same-stem notes in different folders: [[dup]] from index.md (the
-    # vault root, no folder hint) must stay ambiguous -> popup.
-    ("docs/dup.md", "# Dup One\n\nunique-one-body\n\n" + BODY),
-    ("refs/dup.md", "# Dup Two\n\nunique-two-body\n\n" + BODY),
-]:
-    full = os.path.join(VAULT, path)
-    os.makedirs(os.path.dirname(full), exist_ok=True)
-    with open(full, "w") as f:
-        f.write(body)
+# --- vault copy ----------------------------------------------------------
+VAULT = smoke_tmp.copy_testvault("frond-m3-vault")
 
 pid, fd = pty.fork()
 if pid == 0:
@@ -86,6 +70,9 @@ def body_text():
 def status_line():
     return row(ROWS - 1)
 
+def sidebar_has(text):
+    return any(text in row(y)[:SIDEBAR_W] for y in range(ROWS - 1))
+
 ok = True
 def check(cond, label):
     global ok
@@ -96,15 +83,58 @@ def check(cond, label):
         print("--- screen ---")
         print(body_text())
 
+def sidebar_pos_of(text):
+    for y in range(ROWS - 1):
+        idx = row(y).find(text, 0, SIDEBAR_W)
+        if idx != -1:
+            return y, idx
+    return None
+
+def content_pos_of(text):
+    # First occurrence in the content pane only (the sidebar starts at
+    # x=30; the status line is excluded by the range).
+    for y in range(ROWS - 1):
+        idx = row(y).find(text, SIDEBAR_W)
+        if idx != -1:
+            return y, idx
+    return None
+
+def content_has(text):
+    return any(text in row(y)[SIDEBAR_W:] for y in range(ROWS - 1))
+
+def open_index_from_sidebar(page=False):
+    pos = sidebar_pos_of("index.md")
+    check(pos is not None, "click section precondition: index.md row in the sidebar")
+    if pos is None:
+        return
+    click(pos[1] + 1, pos[0])
+    pump(0.8)
+    check("index.md" in status_line(), "sidebar click opened index.md")
+    send("g")   # top of the note
+    pump(0.4)
+    if page:    # the lower links sit past the first screen
+        send("\x1b[6~")  # PageDown
+        pump(0.4)
+
+def back_to_index(page=False):
+    # Backspace pops the nav stack back to index.md. Used after a link has
+    # opened another note: the tree may have scrolled index.md out of view.
+    send("\x7f")
+    pump(0.8)
+    check("index.md" in status_line(), "Backspace returned to index.md")
+    send("g")
+    pump(0.4)
+    if page:
+        send("\x1b[6~")  # PageDown
+        pump(0.4)
+
 # --- boot ----------------------------------------------------------------
 check(pump(1.5), "app alive")
-check("Index" in body_text(), "index.md content rendered")
-check("alpha" in body_text(), "wikilink display text rendered (not raw brackets)")
+check("Lorem Index" in body_text(), "index.md heading rendered")
+check(content_has("#alpha"), "wikilink display text rendered (not raw brackets)")
 check("[[" not in body_text(), "no raw [[...]] syntax left in the body")
-check("nowhere" in body_text(), "unresolved link text still visible")
-check("alpha.md" in body_text(), "sidebar lists notes")
-check("●" in body_text(), "complete glyph (●) in the tree")
-check("○" in body_text(), "pending glyph (○) in the tree")
+check(sidebar_has("alpha.md"), "sidebar lists notes")
+check(sidebar_has("● alpha.md"), "complete glyph (●) in the tree")
 
 # --- wikilink focus + open ------------------------------------------------
 send("x")    # focus the first link ([[alpha]])
@@ -114,7 +144,7 @@ pump(0.8)
 check("alpha.md" in status_line(), "Enter opened the focused wikilink (alpha.md)")
 check("Alpha" in body_text(), "alpha note content shown")
 
-send("x")    # alpha's first link is [[index]]
+send("x")    # alpha's only link is [[index]]
 pump(0.3)
 send("\r")
 pump(0.8)
@@ -131,74 +161,60 @@ check("index.md" in status_line(), "Ctrl+O forward again")
 # --- backlinks panel ------------------------------------------------------
 send("b")
 pump(0.4)
-check("backlinks (2)" in body_text(), "backlinks panel with count (alpha+beta link here)")
-check("alpha.md" in body_text() and "beta.md" in body_text(), "both backlinks listed")
+check("backlinks (3)" in body_text(), "backlinks panel with count")
+check(content_has("alpha.md") and content_has("crlf.md"), "both backlinks listed in the panel")
 send("\r")   # open the selected backlink (alpha.md)
 pump(0.8)
 check("alpha.md" in status_line(), "Enter opened the selected backlink")
 send("b")
 pump(0.3)
 check("backlinks (" not in body_text(), "b closes the panel")
+open_index_from_sidebar()
 
 # --- tag view -------------------------------------------------------------
 send("t")    # sidebar: tree -> tags
 pump(0.4)
 check("#rust (2)" in body_text(), "tag list shows #rust with count 2")
-check("#mocktag (1)" in body_text(), "tag list shows #mocktag")
+check("#mocktag, weird (1)" in body_text(), "tag list shows the comma tag #mocktag, weird")
 # The tree block is replaced by the tags block in tag mode (the " vault "
 # title only renders in tree mode; "alpha.md" alone is no good here — the
 # opened note's path shows it in the status bar).
-check(" vault " not in body_text(), "sidebar switched to tags (tree block gone)")
-send("\r")   # expand the selected tag
+check(row(0).startswith("┌ tags"), "sidebar switched to tags (tree block gone)")
+send("f")    # focus the sidebar: Enter acts on the sidebar only
 pump(0.3)
-check("alpha.md" in body_text(), "expanded tag lists its notes")
-send("j")    # onto a note row
+send("\r")   # expand the selected tag (the first row; docs/TESTVAULT.md)
+pump(0.3)
+check(sidebar_has("alpha.md"), "expanded tag lists its notes in the sidebar")
+send("j")    # onto the first note row
 pump(0.2)
 send("\r")   # open it
 pump(0.8)
-check(
-    "alpha.md" in status_line() or "beta.md" in status_line(),
-    "tag view opened a note",
-)
+check("alpha.md" in status_line(), "tag view opened a note (alpha.md)")
 send("t")    # back to tree mode
 pump(0.3)
 # A real tree row: the glyph+name rows only render in tree mode (the
 # status bar path alone could not prove the sidebar switched back).
 check(
-    " vault " in body_text() and "● alpha.md" in body_text(),
+    row(0).startswith("┌ vault") and sidebar_has("● alpha.md"),
     "tree mode restored: tree rows (with glyphs) return",
 )
 
+# --- pending glyph: a folder's notes only show once the folder is open ----
+pos = sidebar_pos_of("▸ projects")
+check(pos is not None, "projects folder row in the sidebar")
+click(pos[1] + 1, pos[0])
+pump(0.4)
+check(sidebar_has("○"), "pending glyph (○) in the tree")
+
 # --- click activation + disambiguation popup end-to-end ------------------
 # Back to index.md via a sidebar click: find the index.md row in the
-# sidebar column (x < 30) of the tree and click it.
-def sidebar_pos_of(text):
-    for y in range(ROWS - 1):
-        idx = row(y).find(text, 0, 30)
-        if idx != -1:
-            return y, idx
-    return None
+# sidebar column of the tree and click it.
+open_index_from_sidebar(page=True)
+check(content_has("#nowhere"), "broken link renders as #nowhere")
+check("[[" not in body_text(), "no raw [[...]] in the lower links either")
 
-def content_pos_of(text):
-    # First occurrence in the content pane only (the sidebar starts at
-    # x=30; the status line is excluded by the range).
-    for y in range(ROWS - 1):
-        idx = row(y).find(text, 30)
-        if idx != -1:
-            return y, idx
-    return None
-
-pos = sidebar_pos_of("index.md")
-check(pos is not None, "click section precondition: index.md row in the sidebar")
-click(pos[1] + 1, pos[0])
-pump(0.8)
-check("index.md" in status_line(), "sidebar click opened index.md")
-send("g")   # top of the note
-pump(0.4)
-
-# [[dup]] has two same-stem candidates (docs/dup.md, refs/dup.md) and
-# index.md sits at the vault root (no folder hint): clicking the rendered
-# link must open the disambiguation popup, not guess.
+# [[dup]] from index.md is ambiguous (docs/TESTVAULT.md, Links): the click
+# must open the disambiguation popup, not guess.
 pos = content_pos_of("dup")
 check(pos is not None, "dup link rendered in the content pane")
 click(pos[1] + 2, pos[0])
@@ -221,11 +237,7 @@ check(
 
 # Same link again, second candidate this time: j moves the popup
 # selection, Enter opens refs/dup.md.
-pos = sidebar_pos_of("index.md")
-click(pos[1] + 1, pos[0])
-pump(0.8)
-send("g")
-pump(0.4)
+back_to_index(page=True)
 pos = content_pos_of("dup")
 click(pos[1] + 2, pos[0])
 pump(0.5)
@@ -244,14 +256,9 @@ check(
 )
 
 # --- heading anchor: [[alpha#Deep Section]] opens scrolled ----------------
-pos = sidebar_pos_of("index.md")
-click(pos[1] + 1, pos[0])
-pump(0.8)
-send("g")
-pump(0.4)
-# The anchor link renders as "alpha#Deep Section" (with the link icon
-# prefix); the display may wrap between "Deep" and "Section", so anchor
-# the click on "Deep" — still inside the link's clickable region.
+back_to_index()
+# The link text may wrap between "Deep" and "Section": click on "Deep",
+# still inside the link's clickable region.
 pos = content_pos_of("Deep")
 check(pos is not None, "anchor link rendered in the content pane")
 click(pos[1] + 2, pos[0])
@@ -261,21 +268,32 @@ check("Deep Section" in body_text(), "opened scrolled to the anchored section")
 check("deep-section-anchor-line" in body_text(), "the section body line is visible")
 check("Alpha" not in body_text(), "the rendered H1 'Alpha' is NOT on screen (really scrolled)")
 
-# --- backlinks panel: open, move the selection, open ----------------------
-# index.md has two backlinks (alpha, beta): select the second and open it.
-pos = sidebar_pos_of("index.md")
-click(pos[1] + 1, pos[0])
+# [[long-read#Part 3]]: the anchor into a long note (docs/TESTVAULT.md,
+# Links). Row 0 is the pane's top margin, so the heading is row 1.
+back_to_index(page=True)
+pos = content_pos_of("long-read")
+check(pos is not None, "long-read anchor rendered in the content pane")
+click(pos[1] + 2, pos[0])
 pump(0.8)
+check("long-read.md" in status_line(), "anchor link opened long-read.md")
+check(
+    row(1)[SIDEBAR_W:COLS - 1].strip() == "Part 3",
+    "opened with the Part 3 heading on the top text row",
+)
+
+# --- backlinks panel: open, move the selection, open ----------------------
+# index.md's backlinks (docs/TESTVAULT.md, Smoke suites): open the second.
+back_to_index()
 send("b")
 pump(0.4)
-check("backlinks (2)" in body_text(), "backlinks panel reopened on index.md")
+check("backlinks (3)" in body_text(), "backlinks panel reopened on index.md")
 send("j")    # onto the second backlink row
 pump(0.3)
 send("\r")
 pump(0.8)
 check(
-    "beta.md" in status_line() and "Beta" in body_text(),
-    "backlinks j + Enter opened the second backlink (beta.md)",
+    "crlf.md" in status_line() and "CRLF note" in body_text(),
+    "backlinks j + Enter opened the second backlink (edge/crlf.md)",
 )
 
 # help documents the new keys

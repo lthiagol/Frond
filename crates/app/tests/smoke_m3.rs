@@ -1,8 +1,9 @@
 //! End-to-end smoke test for M3 phase 2: shells out to
 //! `scripts/smoke_m3.py`, which drives the real TUI binary through a pty
 //! with `pyte` terminal emulation (wikilink focus/open, backlinks panel,
-//! tag view, status glyphs, clean exit) against a fixture vault with
-//! cross-links built under the smoke scratch dir (`scripts/smoke_tmp.py`).
+//! tag view, status glyphs, clean exit) against a copy of the sample vault
+//! (`testvault/`, see `docs/TESTVAULT.md`) made in the smoke scratch dir
+//! (`scripts/smoke_tmp.py`).
 //!
 //! Ignored by default because it needs:
 //! - `python3` with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`), and
@@ -11,7 +12,7 @@
 //!
 //! Run it with: `cargo test -p frond --test smoke_m3 -- --ignored`
 //!
-//! The script never touches `testvault/`; it writes only its /tmp fixture.
+//! The script never touches `testvault/`; it writes only its copy of it.
 
 use std::process::Command;
 

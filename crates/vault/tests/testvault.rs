@@ -351,6 +351,10 @@ fn backlinks_and_link_kinds() {
     );
     // The self-link `[[#Tail]]` is no backlink; index's anchor into Part 3 is.
     assert_eq!(backlinks("reading/long-read.md"), ["index.md"]);
+    assert_eq!(
+        backlinks("index.md"),
+        ["alpha.md", "edge/crlf.md", "links/alpha-link.md"]
+    );
 
     let links = |rel_path: &str| links_of(&index, rel_path);
 
