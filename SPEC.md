@@ -45,7 +45,7 @@ crates/
 
 ### Data flow
 
-1. Startup: `vault::index` walks the vault (fast, no daemon), builds link/tag maps. The vault root is `--vault`, else (with no file argument and two or more `[vaults]` entries) the one chosen in the vault picker, else the config's `vault` key, else the only `[vaults]` entry, else (with a file argument) the current directory; with none of these, the vault picker opens with only its path entry and the recent paths. A `--vault` or `vault` value that is a `[vaults]` name resolves to that entry's path; any other value is a path (write `./work` to mean the directory when a name `work` exists). A chosen vault path that is not a directory (from `--vault`, the `vault` key, or a lone `[vaults]` entry) stops the start before the terminal changes: frond prints one line, `error: vault not found: <path> (<source>)` with `<source>` one of `--vault`, `config vault`, `config [vaults] <name>` and `<path>` as given (`~` kept), and exits with status 2 — no index warning, no other error. A start note that cannot be opened (a file argument, or the vault's `index.md` — read before any session is restored) stops the start the same way with `error: cannot open <path>: <reason>`, status 1.
+1. Startup: `vault::index` walks the vault (fast, no daemon), builds link/tag maps. The vault root is `--vault`, else (with no file argument and two or more `[vaults]` entries) the one chosen in the vault picker, else the config's `vault` key, else the only `[vaults]` entry, else (with a file argument) the current directory; with none of these, the vault picker opens with only its path entry and the recent paths. A `--vault` or `vault` value that is a `[vaults]` name resolves to that entry's path; any other value is a path (write `./work` to mean the directory when a name `work` exists). A chosen vault path that is not a directory (from `--vault`, the `vault` key, or a lone `[vaults]` entry) stops the start before the terminal changes: frond prints one line, `error: vault not found: <path> (<source>)` with `<source>` one of `--vault`, `config vault`, `config [vaults] <name>` and `<path>` as given (`~` kept), and exits with status 2 — no index warning, no other error. A file argument that cannot be opened stops the start the same way with `error: cannot open <path>: <reason>`, status 1. Without a file argument, a vault starts on the first of: the session's last note (when it is inside the vault and readable), the vault's `index.md` (when readable), or no note — the note pane then shows `no note open — pick one in the sidebar`, the sidebar is shown (even when the carried display state had it hidden) and the focus is on it. A session note that cannot be read (deleted included) is skipped, and the status line says `could not reopen <note>: <reason>`; an `index.md` that exists but cannot be read is skipped the same way with `could not open <path>: <reason>` (a missing `index.md` says nothing). A vault never fails to start for want of a note.
 2. Note opened: raw md → wikilink preprocessing (`[[target|alias]]` → `[alias](vault://<n>/<target>)`, the target percent-encoded, an optional `#heading` appended) → `engine::parse` → styled lines.
 3. Watch tick (every 250 ms): the open file's mtime+size stamp is polled
    (re-parse + redraw when it changed); once a second the whole vault is
@@ -191,13 +191,13 @@ frontmatter at all — the whole file is body.
   another one is a clean quit of the open vault (its session and
   `last-vault` saved exactly as on quit) followed by a start of the chosen
   one with no note argument: its index built, its session restored (else
-  its `index.md`), and a fresh navigation stack, sidebar, search,
+  its `index.md`, else no note — Data flow step 1), and a fresh
+  navigation stack, sidebar, search,
   backlinks, git status and watcher — none of the old vault's state,
   warnings or errors carry over. The run's display state carries over:
   the theme and its `Shift+T` group, mouse capture, watch, the sidebar's
   width and visibility, the metadata block, line numbers and margins. A
-  vault that cannot be opened (its index not built, or the note it would
-  start on not readable) is not opened: the popup stays open with `cannot
+  vault that cannot be opened (its index not built) is not opened: the popup stays open with `cannot
   open vault: <error>`, and the open vault is untouched, its session not
   saved. The
   entries are the ones read at startup; the recent paths are re-read each

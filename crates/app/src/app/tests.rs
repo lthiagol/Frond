@@ -5198,3 +5198,85 @@ fn display_state_round_trips_through_apply_display() {
     app.apply_display(&display);
     assert_eq!(app.display_state(), display);
 }
+
+/// A vault started with no note (SPEC "Data flow" step 1).
+fn no_note_app(vault_dir: &TempDir) -> App {
+    let index = shared_index(vault_dir);
+    App::new(
+        Viewer::empty(80),
+        Some(vault_dir.path().to_path_buf()),
+        Some(index),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_start_with_no_note_focuses_the_sidebar() {
+    let vault_dir = vault();
+    let app = no_note_app(&vault_dir);
+    assert!(!app.has_note());
+    assert_eq!(app.focus, Focus::Sidebar);
+    assert!(app.backlinks.is_empty());
+}
+
+#[test]
+fn the_note_keys_do_nothing_with_no_note_open() {
+    let vault_dir = vault();
+    let mut app = no_note_app(&vault_dir);
+    app.focus = Focus::Content;
+    app.active_search = crate::search::ActiveSearch::from_query("A");
+    for event in [
+        key(KeyCode::Char('m')),
+        key(KeyCode::Char('m')),
+        key(KeyCode::Char('x')),
+        key(KeyCode::Char('X')),
+        key(KeyCode::Enter),
+        key(KeyCode::Char('n')),
+        key(KeyCode::Char('N')),
+        key(KeyCode::Char('b')),
+        ctrl(KeyCode::Char('o')),
+        ctrl(KeyCode::Char('i')),
+        key(KeyCode::Char('o')),
+        key(KeyCode::Esc),
+    ] {
+        app.handle_key(event);
+    }
+    app.poll();
+    assert!(!app.has_note(), "still no note");
+    assert!(app.viewer.path.as_os_str().is_empty());
+    assert_eq!(app.viewer.scroll, 0);
+    assert!(app.backlinks.is_empty());
+    assert!(
+        app.viewer.last_error.is_none(),
+        "{:?}",
+        app.viewer.last_error
+    );
+    assert!(app.pending_clipboard.is_none());
+}
+
+#[test]
+fn opening_a_note_leaves_the_no_note_state_without_a_history_entry() {
+    let vault_dir = vault();
+    let mut app = no_note_app(&vault_dir);
+    let a = vault_dir.path().join("a.md");
+    app.sidebar.as_mut().unwrap().selected = Some(a.clone());
+    app.handle_key(key(KeyCode::Enter));
+    assert!(app.has_note());
+    assert_eq!(app.viewer.path, a);
+    assert!(
+        !app.nav.can_go_back(),
+        "the empty state is not a history entry"
+    );
+    app.handle_key(ctrl(KeyCode::Char('o')));
+    assert_eq!(app.viewer.path, a, "back has nowhere to go");
+}
+
+#[test]
+fn a_session_with_no_note_open_saves_no_note() {
+    let vault_dir = vault();
+    let app = no_note_app(&vault_dir);
+    let state = app.session_state(vault_dir.path());
+    assert_eq!(state.note, None);
+    assert_eq!(state.scroll, 0);
+    assert_eq!(state.mode.as_deref(), Some("tree"));
+}

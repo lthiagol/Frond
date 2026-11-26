@@ -6090,3 +6090,17 @@ fn vault_picker_shows_a_typed_path_the_empty_state_and_a_recent_tag() {
     let text = screen(&PickerState::new(vec![recent], 0));
     assert!(text.contains("old  /srv/old  recent"), "{text}");
 }
+
+/// A vault started with no note: the pane says so, the status bar names
+/// no file and shows no scroll position.
+#[test]
+fn the_note_pane_says_when_no_note_is_open() {
+    let dir = TempDir::new("ui-no-note");
+    std::fs::write(dir.path().join("a.md"), "# a\n").unwrap();
+    let mut app = App::new(Viewer::empty(80), Some(dir.path().to_path_buf()), None).unwrap();
+    app.focus = crate::app::Focus::Content;
+    let screen = render(&mut app);
+    assert!(screen.contains(NO_NOTE_TEXT), "{screen}");
+    assert!(screen.contains("no note · 0 lines"), "{screen}");
+    assert!(!screen.contains('%'), "no scroll segment: {screen}");
+}

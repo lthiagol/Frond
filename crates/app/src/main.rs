@@ -533,13 +533,11 @@ fn main() {
     // default). Off = the terminal keeps the mouse for native text
     // selection; `M` toggles at runtime either way.
 
-    // Default the note to the vault's index, matching Obsidian's entry note.
-    // Whether the note came from an explicit argument matters later (an
-    // explicit file wins over the session restore), so capture it first.
-    let explicit_note = args.file.is_some();
+    // Without a file argument the vault picks its start note
+    // (`start_note`); with neither there is nothing to open.
     let file = match (args.file, &vault) {
-        (Some(f), _) => absolutize(&f),
-        (None, Some(v)) => absolutize(&v.join("index.md")),
+        (Some(f), _) => Some(absolutize(&f)),
+        (None, Some(_)) => None,
         (None, None) => {
             eprintln!("error: missing file argument");
             std::process::exit(2);
@@ -578,34 +576,21 @@ fn main() {
         None => setup_terminal_or_exit(mouse),
     };
 
-    let first = Start {
-        vault,
-        file,
-        explicit_note,
-        index,
-    };
+    let first = Start { vault, file, index };
     let result = start_app(first, &display, &config, &vaults, &mut warnings).and_then(|app| {
         for warning in &warnings {
             eprintln!("warning: {warning}");
         }
         let mut app = app;
         if picked_typed {
-            if let Some(root) = app.vault_root() {
-                remember_typed_vault(root, &config);
-            }
+            remember_opened_vault(&app, &config);
         }
         // A switch is a clean quit of the open vault (`run_app` saves it)
         // followed by a start of the chosen one through `start_app`, the
         // same path the first start took.
         loop {
             match run_app(&mut terminal, app, &mut |root, typed, display| {
-                let next = switch_vault(root, display, &config, &vaults)?;
-                if typed {
-                    if let Some(root) = next.vault_root() {
-                        remember_typed_vault(root, &config);
-                    }
-                }
-                Ok(next)
+                switch_and_remember(root, typed, display, &config, &vaults)
             })? {
                 Outcome::Quit => return Ok(()),
                 Outcome::Switch(next) => app = *next,
@@ -631,10 +616,51 @@ fn build_index(root: &Path) -> io::Result<SharedIndex> {
 /// the chosen vault with no note argument.
 struct Start {
     vault: Option<PathBuf>,
-    file: PathBuf,
-    /// The note came from an argument (it wins over the session restore).
-    explicit_note: bool,
+    /// The file argument: it wins over the session restore, and a failure
+    /// to open it stops the start. `None` lets the vault pick
+    /// ([`start_note`]).
+    file: Option<PathBuf>,
     index: Option<SharedIndex>,
+}
+
+/// The viewer a vault starts on without a file argument, per SPEC "Data
+/// flow" step 1: the session's last note, else `index.md`, else no note.
+/// Each candidate is opened once, so the first successful read is the
+/// note shown. A session note that cannot be read yields the status
+/// message, as does an `index.md` that exists but cannot be read; a
+/// missing `index.md` is no error. A `.base`
+/// session note is left to `App::restore_session` (it renders over the
+/// viewer's note, not in it).
+fn start_note(
+    root: &Path,
+    session: Option<&session::SessionState>,
+    width: usize,
+) -> (Viewer, Option<String>) {
+    let mut message = None;
+    let session_note = session
+        .and_then(|state| state.note.as_deref())
+        .and_then(|rel| session::within_vault(root, rel))
+        .filter(|note| !baseview::is_base_file(note));
+    if let Some(note) = session_note {
+        match Viewer::open(&note, width) {
+            Ok(viewer) => return (viewer, None),
+            Err(err) => message = Some(format!("could not reopen {}: {err}", display_path(&note))),
+        }
+    }
+    let index = root.join("index.md");
+    match Viewer::open(&index, width) {
+        Ok(viewer) => (viewer, message),
+        Err(err) => {
+            if err.kind() != io::ErrorKind::NotFound {
+                let skipped = format!("could not open {}: {err}", display_path(&index));
+                message = Some(match message {
+                    Some(earlier) => format!("{earlier}; {skipped}"),
+                    None => skipped,
+                });
+            }
+            (Viewer::empty(width), message)
+        }
+    }
 }
 
 /// The startup display state, from the flags and the config. Config
@@ -699,14 +725,31 @@ fn start_app(
     let width = crossterm::terminal::size()
         .map(|(w, _)| w.saturating_sub(2).max(20))
         .unwrap_or(FALLBACK_SIZE.0);
-    // The note is the start's first read: a failure names it (the message
-    // `main` prints after the terminal is restored, SPEC "Data flow" step 1).
-    let viewer = Viewer::open(&start.file, width as usize).map_err(|err| {
-        io::Error::new(
-            err.kind(),
-            format!("cannot open {}: {err}", display_path(&start.file)),
-        )
-    })?;
+    // A missing or malformed session file is the normal first-run state,
+    // never a warning. A file argument is the user's intent for this run:
+    // no session is restored over it.
+    let session = match (&start.file, &start.vault) {
+        (None, Some(root)) => {
+            session::session_file(root).and_then(|path| session::SessionState::load(&path))
+        }
+        _ => None,
+    };
+    // The note is the start's first read: a file argument's failure names
+    // it (the message `main` prints after the terminal is restored, SPEC
+    // "Data flow" step 1); the vault's own choice never fails.
+    let (viewer, reopen_error) = match (&start.file, &start.vault) {
+        (Some(file), _) => {
+            let viewer = Viewer::open(file, width as usize).map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("cannot open {}: {err}", display_path(file)),
+                )
+            })?;
+            (viewer, None)
+        }
+        (None, Some(root)) => start_note(root, session.as_ref(), width as usize),
+        (None, None) => (Viewer::empty(width as usize), None),
+    };
     let mut app = App::new(viewer, start.vault.clone(), start.index)?;
     app.vaults = vaults.clone();
     // Theme: presets + discovered custom themes; the resolved name
@@ -731,18 +774,15 @@ fn start_app(
         }
     }
     app.apply_display(display);
-    // Session restore: only when the note came from the defaults (no
-    // explicit file argument — that argument is the user's intent for this
-    // run). A missing or malformed session file is the normal first-run
-    // state, never a warning.
-    if !start.explicit_note {
-        if let Some(root) = &start.vault {
-            if let Some(file) =
-                session::session_file(root).and_then(|path| session::SessionState::load(&path))
-            {
-                app.restore_session(&file, root);
-            }
-        }
+    if let (Some(state), Some(root)) = (&session, &start.vault) {
+        app.restore_session(state, root);
+    }
+    // Next to any theme warning, not over it: both still stand.
+    if let Some(message) = reopen_error {
+        app.viewer.last_error = Some(match app.viewer.last_error.take() {
+            Some(earlier) => format!("{earlier}; {message}"),
+            None => message,
+        });
     }
     // Config hot-reload: the theme key live-applies on change.
     if let Some(path) = config::config_path() {
@@ -751,8 +791,8 @@ fn start_app(
     // A `.base` file argument renders its table view instead of the
     // markdown viewer (the Viewer parsed it as plain text, harmlessly
     // unused from here on).
-    if baseview::is_base_file(&start.file) {
-        if let Err(err) = app.open_base_at(&start.file, 0) {
+    if let Some(file) = start.file.as_ref().filter(|f| baseview::is_base_file(f)) {
+        if let Err(err) = app.open_base_at(file, 0) {
             app.viewer.last_error = Some(format!("open failed: {err}"));
         }
     }
@@ -760,8 +800,9 @@ fn start_app(
 }
 
 /// The App for the vault the in-app picker chose, built while the open
-/// one is still untouched: a vault that cannot be indexed (or opened) is
-/// an error for the picker, not a warning, so nothing is left half-open.
+/// one is still untouched: a vault that cannot be indexed is an error for
+/// the picker (a vault with no note to open still opens, SPEC "Data flow"
+/// step 1), not a warning, so nothing is left half-open.
 fn switch_vault(
     root: PathBuf,
     display: app::DisplayState,
@@ -771,12 +812,36 @@ fn switch_vault(
     let root = absolutize(&root);
     let index = build_index(&root)?;
     let start = Start {
-        file: absolutize(&root.join("index.md")),
+        file: None,
         vault: Some(root),
-        explicit_note: false,
         index: Some(index),
     };
     start_app(start, &display, config, vaults, &mut Vec::new())
+}
+
+/// [`switch_vault`], then the `recent-vaults` record of a typed vault:
+/// only once it has opened (SPEC "recent paths"), so a failed switch is
+/// never recorded.
+fn switch_and_remember(
+    root: PathBuf,
+    typed: bool,
+    display: app::DisplayState,
+    config: &config::Config,
+    vaults: &vault_picker::VaultList,
+) -> io::Result<App> {
+    let next = switch_vault(root, display, config, vaults)?;
+    if typed {
+        remember_opened_vault(&next, config);
+    }
+    Ok(next)
+}
+
+/// Records the vault an App opened ([`remember_typed_vault`]); the caller
+/// holds the App, so the start has already succeeded.
+fn remember_opened_vault(app: &App, config: &config::Config) {
+    if let Some(root) = app.vault_root() {
+        remember_typed_vault(root, config);
+    }
 }
 
 fn setup_terminal_or_exit(capture_mouse: bool) -> Tui {
@@ -1189,8 +1254,7 @@ mod tests {
         let note = dir.path().join("gone.md");
         let start = Start {
             vault: Some(dir.path().to_path_buf()),
-            file: note.clone(),
-            explicit_note: true,
+            file: Some(note.clone()),
             index: None,
         };
         let config = config::Config::default();
@@ -1325,6 +1389,158 @@ mod tests {
             old.vault_root(),
             Some(alpha.path()),
             "the old App is untouched"
+        );
+    }
+
+    #[test]
+    fn a_vault_starts_on_its_session_note_else_index_else_none() {
+        let (_env, _state) = isolated_env("start-note");
+        let dir = vault_dir("start-note");
+        let root = dir.path();
+        std::fs::write(root.join("b.md"), "# b\n").unwrap();
+        let session_at = |note: &str| session::SessionState {
+            note: Some(note.to_string()),
+            ..Default::default()
+        };
+        // The session's note wins.
+        let (viewer, message) = start_note(root, Some(&session_at("b.md")), 80);
+        assert_eq!(viewer.path, root.join("b.md"));
+        assert_eq!(message, None);
+        // No session: index.md.
+        let (viewer, message) = start_note(root, None, 80);
+        assert_eq!(viewer.path, root.join("index.md"));
+        assert_eq!(message, None);
+        // A session note that cannot be read: index.md, and the reason.
+        let (viewer, message) = start_note(root, Some(&session_at("gone.md")), 80);
+        assert_eq!(viewer.path, root.join("index.md"));
+        let message = message.expect("a skipped session note is reported");
+        let prefix = format!("could not reopen {}: ", display_path(&root.join("gone.md")));
+        assert!(message.starts_with(&prefix), "got: {message}");
+        // A session entry outside the vault is not a candidate.
+        let (viewer, message) = start_note(root, Some(&session_at("../b.md")), 80);
+        assert_eq!(viewer.path, root.join("index.md"));
+        assert_eq!(message, None);
+        // Neither: no note, and no error for the missing index.md.
+        std::fs::remove_file(root.join("index.md")).unwrap();
+        let (viewer, message) = start_note(root, None, 80);
+        assert!(!viewer.has_note());
+        assert_eq!(message, None);
+        let (viewer, message) = start_note(root, Some(&session_at("b.md")), 80);
+        assert_eq!(viewer.path, root.join("b.md"));
+        assert_eq!(message, None);
+        // An index.md that exists but cannot be read (a directory, so the
+        // test also holds as root): no note, and the reason.
+        std::fs::create_dir(root.join("index.md")).unwrap();
+        let (viewer, message) = start_note(root, None, 80);
+        assert!(!viewer.has_note());
+        let message = message.expect("an unreadable index.md is reported");
+        let prefix = format!("could not open {}: ", display_path(&root.join("index.md")));
+        assert!(message.starts_with(&prefix), "got: {message}");
+        // Both skipped: both reported, the session note's first.
+        let (viewer, message) = start_note(root, Some(&session_at("gone.md")), 80);
+        assert!(!viewer.has_note());
+        let message = message.unwrap_or_default();
+        assert!(message.starts_with("could not reopen "), "got: {message}");
+        assert!(message.contains(&format!("; {prefix}")), "got: {message}");
+    }
+
+    #[test]
+    fn an_unreadable_session_note_is_reported_on_the_status_line() {
+        let (_env, _state) = isolated_env("start-reopen");
+        let dir = vault_dir("start-reopen");
+        let root = absolutize(dir.path());
+        session::SessionState {
+            note: Some("gone.md".to_string()),
+            ..Default::default()
+        }
+        .save(&session::session_file(&root).unwrap())
+        .unwrap();
+        let config = config::Config::default();
+        let display = startup_display(&config, "all".to_string(), true, true, &mut Vec::new());
+        let start = Start {
+            vault: Some(root.clone()),
+            file: None,
+            index: None,
+        };
+        let app = start_app(
+            start,
+            &display,
+            &config,
+            &vault_picker::VaultList::default(),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(app.viewer.path, root.join("index.md"));
+        let error = app.viewer.last_error.clone().unwrap_or_default();
+        assert!(error.contains("could not reopen "), "got: {error}");
+        assert_eq!(app.focus, app::Focus::Content);
+    }
+
+    #[test]
+    fn a_switch_to_a_vault_without_an_index_opens_with_no_note() {
+        let (_env, _state) = isolated_env("switch-no-index");
+        let alpha = vault_dir("switch-no-index-a");
+        let beta = crate::testutil::TempDir::new("switch-no-index-b");
+        std::fs::write(beta.path().join("note.md"), "# note\n").unwrap();
+        let old = open_app(&alpha);
+        let new = switch_vault(
+            beta.path().to_path_buf(),
+            old.display_state(),
+            &config::Config::default(),
+            &vault_picker::VaultList::default(),
+        )
+        .expect("a vault without index.md opens");
+        assert!(!new.has_note());
+        assert_eq!(new.focus, app::Focus::Sidebar);
+        assert_eq!(new.viewer.last_error, None);
+    }
+
+    #[test]
+    fn a_switch_with_the_sidebar_hidden_to_a_vault_with_no_note_shows_it() {
+        let (_env, _state) = isolated_env("switch-hidden-sidebar");
+        let alpha = vault_dir("switch-hidden-a");
+        let beta = crate::testutil::TempDir::new("switch-hidden-b");
+        std::fs::write(beta.path().join("note.md"), "# note\n").unwrap();
+        let mut old = open_app(&alpha);
+        let mut display = old.display_state();
+        display.sidebar_visible = false;
+        old.apply_display(&display);
+        assert!(!old.sidebar_visible);
+        let new = switch_vault(
+            beta.path().to_path_buf(),
+            old.display_state(),
+            &config::Config::default(),
+            &vault_picker::VaultList::default(),
+        )
+        .unwrap();
+        assert!(!new.has_note());
+        assert!(new.sidebar_visible);
+        assert_eq!(new.focus, app::Focus::Sidebar);
+    }
+
+    #[test]
+    fn a_typed_vault_is_recorded_only_once_it_has_opened() {
+        let (_env, state) = isolated_env("switch-remember");
+        let alpha = vault_dir("switch-remember-a");
+        let beta = vault_dir("switch-remember-b");
+        let old = open_app(&alpha);
+        let config = config::Config::default();
+        let vaults = vault_picker::VaultList::default();
+        let gone = alpha.path().join("gone");
+        let result = switch_and_remember(gone, true, old.display_state(), &config, &vaults);
+        assert!(result.is_err());
+        assert!(!state.path().join("state/recent-vaults").exists());
+        let new = switch_and_remember(
+            beta.path().to_path_buf(),
+            true,
+            old.display_state(),
+            &config,
+            &vaults,
+        )
+        .unwrap();
+        assert_eq!(
+            session::load_recent_vaults(),
+            vec![new.vault_root().unwrap().to_path_buf()]
         );
     }
 

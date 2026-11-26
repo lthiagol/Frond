@@ -271,7 +271,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let last = first
             .saturating_add(note_area.height as usize)
             .min(app.viewer.lines.len());
-        let text = ratatui::text::Text::from(app.viewer.lines[first..last].to_vec());
+        let text = if app.viewer.has_note() {
+            ratatui::text::Text::from(app.viewer.lines[first..last].to_vec())
+        } else {
+            ratatui::text::Text::from(Line::from(Span::styled(
+                NO_NOTE_TEXT,
+                Style::new().fg(ui.dimmed_fg),
+            )))
+        };
         Paragraph::new(text)
             .style(Style::new().bg(ui.content_bg))
             .render(note_area, f.buffer_mut());
@@ -1811,6 +1818,9 @@ fn status_path_label(app: &App, sidebar_focused: bool) -> String {
 
 /// The open note's label on the status bar: its icon and file name.
 fn note_status_label(app: &App) -> String {
+    if !app.has_note() {
+        return "no note".to_string();
+    }
     file_label(app, &app.current_path())
 }
 
@@ -1832,14 +1842,16 @@ fn file_label(app: &App, path: &Path) -> String {
     }
 }
 
+/// The note pane's text when no note is open (SPEC "Data flow" step 1).
+pub(crate) const NO_NOTE_TEXT: &str = "no note open — pick one in the sidebar";
+
 /// The content pane's scroll offset and scroll range. `None` when no
-/// document is open: the viewer always holds a path in a running app, so an
-/// empty path is the sentinel (only tests reach it).
+/// document is open ([`crate::viewer::Viewer::empty`]).
 fn content_scroll(app: &App) -> Option<(u32, u32)> {
     if let Some(base) = &app.base {
         return Some((base.scroll as u32, base.max_scroll() as u32));
     }
-    if app.viewer.path.as_os_str().is_empty() {
+    if !app.viewer.has_note() {
         return None;
     }
     Some((app.viewer.scroll, app.viewer.max_scroll()))
@@ -1895,8 +1907,7 @@ fn draw_status_bar(f: &mut Frame, area: Rect, app: &mut App, ui: UiTheme) {
         })
     };
     // Scroll position: the content pane's offset, whichever pane has the
-    // focus. An empty viewer path is the no-document sentinel (the app
-    // refuses to start without a file), and then the segment is omitted.
+    // focus; omitted when no document is open.
     let scroll = content_scroll(app);
     let mut spans = vec![
         Span::styled(path, path_style),

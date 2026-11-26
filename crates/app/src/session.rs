@@ -59,6 +59,25 @@ impl SessionState {
     }
 }
 
+/// A session entry as a path under `root`, or `None` when it is not
+/// vault-relative: the session file lives outside the vault, so it must not
+/// smuggle opens — absolute paths, `..` escapes and empty entries are
+/// refused (the snapshot's own `App::session_state` never writes them, but
+/// the file is user-editable).
+pub fn within_vault(root: &Path, rel: &str) -> Option<PathBuf> {
+    use std::path::Component;
+    let path = Path::new(rel);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+        || rel.is_empty()
+    {
+        return None;
+    }
+    Some(root.join(path))
+}
+
 /// Temp file + rename in the same directory, so a crash mid-write cannot
 /// leave a truncated file.
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {

@@ -58,7 +58,7 @@ make release    # release build: target/release/frond
 ```sh
 frond                          # no vault given: the vault picker
                                # (on your [vaults], else type a path)
-frond --vault ~/notes          # open a vault (index.md is shown first, unless a saved session restores another note)
+frond --vault ~/notes          # open a vault (on its last note, else index.md)
 frond --vault ~/notes project.md   # open a specific note inside the vault
 frond --vault work             # open the [vaults] entry named work
 frond some-note.md             # open a file without a vault: no sidebar
@@ -69,6 +69,11 @@ file opens on a vault picker: type to filter (by name or path), `↑`/`↓` to
 select, `Enter` to open, `Esc` to quit. The last vault you opened (else the
 `vault` key) is preselected. With exactly one `[vaults]` entry and no
 `vault` key, that vault opens directly.
+
+A vault opens on the note you left it on (its saved session), else its
+`index.md`. A vault with neither still opens, with no note: the sidebar
+has the focus and you pick one there. A saved note that can no longer be
+read is skipped, and the status line says why.
 
 In the picker, a query that starts with `/`, `~` or `.` is a path, not a
 filter: the list shows `open <path>`, `Tab` completes the directory name

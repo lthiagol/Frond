@@ -11,8 +11,8 @@
 - with no `[vaults]` and no `vault` key the picker opens on its path
   entry: a typed path opens that vault, recorded in `recent-vaults` and
   listed as a recent row on the next start;
-- a typed path that does not open (no `index.md`) exits 1 and is not
-  recorded in `recent-vaults`;
+- a vault with no `index.md` and no session starts with no note; a note
+  opened from the sidebar reopens on the next start;
 - a config `vault` that names a missing directory exits 2 with the one
   `error: vault not found: …` line on stderr (SPEC "Data flow" step 1).
 
@@ -238,26 +238,37 @@ check(run.until(lambda: "Beta Vault Home" in run.text()), "Enter on the recent r
 run.send("q")
 check(run.wait_exit(), "clean quit, exit status 0")
 
-# --- 4b: a typed path that does not open is not recorded -------------------
-# The directory exists but has no index.md: the start fails after the picker
-# chose it, so `recent-vaults` must not name it (SPEC "recent paths").
+# --- 4b: a vault with no index.md opens with no note -----------------------
+# SPEC "Data flow" step 1: no session and no index.md is the no-note state,
+# the sidebar focused; a note opened there is the session's next start.
 NOINDEX = os.path.join(ROOT, "noindex")
-FAILED_SESSION = os.path.join(ROOT, "failed-session")
+NOINDEX_SESSION = os.path.join(ROOT, "noindex-session")
 os.makedirs(NOINDEX, exist_ok=True)
-run = Run(config=EMPTY_CONFIG, session=FAILED_SESSION)
+with open(os.path.join(NOINDEX, "lone.md"), "w") as f:
+    f.write("# Lone Note Heading\n\nbody\n")
+run = Run("--vault", NOINDEX, config=EMPTY_CONFIG, session=NOINDEX_SESSION)
 check(
-    run.until(lambda: "type a path to a vault (/, ~ or .)" in run.text()),
-    "no vaults: the picker opens for a typed path that will fail",
+    run.until(lambda: "no note open — pick one in the sidebar" in run.text()),
+    "a vault without index.md starts with no note",
     run.screen,
 )
-run.send(NOINDEX)
-run.pump(0.3)
 run.send("\r")
-check(run.exit_status() == 1, "a typed vault that fails to open exits 1")
 check(
-    not os.path.exists(os.path.join(FAILED_SESSION, "recent-vaults")),
-    "a typed vault that fails to open is not recorded in recent-vaults",
+    run.until(lambda: "Lone Note Heading" in run.text()),
+    "Enter on the sidebar note opens it",
+    run.screen,
 )
+check("no note open" not in run.text(), "the empty state is gone", run.screen)
+run.send("q")
+check(run.wait_exit(), "clean quit from the no-index vault, exit status 0")
+run = Run("--vault", NOINDEX, config=EMPTY_CONFIG, session=NOINDEX_SESSION)
+check(
+    run.until(lambda: "Lone Note Heading" in run.text()),
+    "the restart reopens the session's note",
+    run.screen,
+)
+run.send("q")
+check(run.wait_exit(), "clean quit after the restart, exit status 0")
 
 # --- 5: a config `vault` that is not a directory stops the start ------------
 # The check runs before the terminal is set up, so a pipe is enough: status

@@ -359,6 +359,13 @@ impl App {
             None => None,
         };
         let has_vault = sidebar.is_some();
+        // No note to read (SPEC "Data flow" step 1): the sidebar is where
+        // the user picks one.
+        let focus = if has_vault && !viewer.has_note() {
+            Focus::Sidebar
+        } else {
+            Focus::Content
+        };
         let mut viewer = viewer;
         viewer.set_index(index.clone());
         let watcher = index.as_ref().map(|i| VaultWatcher::new(&i.borrow()));
@@ -373,7 +380,7 @@ impl App {
             outline: Outline::new(),
             tags: TagList::new(),
             index,
-            focus: Focus::Content,
+            focus,
             nav: Nav::default(),
             backlinks_open: false,
             backlinks: Vec::new(),
@@ -530,6 +537,9 @@ impl App {
     /// (OSC 52, written by the event loop) and reports it. A write
     /// failure later replaces this with an error.
     fn copy_current_relative_path(&mut self) {
+        if !self.has_note() {
+            return;
+        }
         let rel = self.current_relative_path().display().to_string();
         self.pending_clipboard = Some(crate::clipboard::osc52_sequence(&rel));
         self.set_status(format!("copied: {rel}"));
@@ -763,8 +773,10 @@ impl App {
     /// Re-reads the backlinks of the open note from the index.
     pub fn refresh_backlinks(&mut self) {
         self.backlinks = match &self.index {
-            Some(index) => index.borrow().backlinks_to(&self.viewer.path).to_vec(),
-            None => Vec::new(),
+            Some(index) if self.viewer.has_note() => {
+                index.borrow().backlinks_to(&self.viewer.path).to_vec()
+            }
+            _ => Vec::new(),
         };
         self.backlink_sel = self
             .backlink_sel
@@ -815,6 +827,12 @@ impl App {
         }
     }
 
+    /// Whether a document is on screen: a `.base` table or a note. A vault
+    /// can start with neither (SPEC "Data flow" step 1).
+    pub fn has_note(&self) -> bool {
+        self.base.is_some() || self.viewer.has_note()
+    }
+
     /// The currently visible file's scroll offset (table rows for a base).
     pub fn current_scroll(&self) -> usize {
         match &self.base {
@@ -840,7 +858,9 @@ impl App {
         if self.base.is_none() && path == self.viewer.path {
             return Ok(());
         }
-        let outgoing = (self.current_path(), self.current_scroll() as u32);
+        let outgoing = self
+            .has_note()
+            .then(|| (self.current_path(), self.current_scroll() as u32));
         if self.base.is_some() {
             // Leaving the base table for a note: the viewer (which kept
             // its previous note) is re-opened explicitly. The open is
@@ -851,7 +871,10 @@ impl App {
         } else {
             self.viewer.open_file(path)?;
         }
-        self.nav.push(outgoing);
+        // The no-note state is not a place to go back to.
+        if let Some(outgoing) = outgoing {
+            self.nav.push(outgoing);
+        }
         // Reveal the opened note in the sidebar tree: expand its ancestor
         // folders and select it (no focus change). Link follows, search
         // hits, backlinks and session restores all land here; sidebar
@@ -877,9 +900,13 @@ impl App {
         if self.base.as_ref().is_some_and(|b| b.path == path) {
             return Ok(());
         }
-        let outgoing = (self.current_path(), self.current_scroll() as u32);
+        let outgoing = self
+            .has_note()
+            .then(|| (self.current_path(), self.current_scroll() as u32));
         self.open_base_at(path, 0)?;
-        self.nav.push(outgoing);
+        if let Some(outgoing) = outgoing {
+            self.nav.push(outgoing);
+        }
         // A `.base` file has no tree row: reveal just expands its parent
         // folder (see `Sidebar::reveal`).
         if let Some(sidebar) = &mut self.sidebar {
@@ -1697,9 +1724,9 @@ impl App {
                     // is unchanged: a permission-only break moves neither
                     // mtime nor size, so this is the only tick that can
                     // report it.
-                    let open_note = self.viewer.path.clone();
+                    let open_note = self.viewer.has_note().then(|| self.viewer.path.clone());
                     walk_outcome =
-                        Some(watcher.poll(&mut index.borrow_mut(), Some(open_note.as_path())));
+                        Some(watcher.poll(&mut index.borrow_mut(), open_note.as_deref()));
                 }
             }
         }
@@ -2438,7 +2465,13 @@ impl App {
         self.mouse_capture = display.mouse_capture;
         self.viewer.watch = display.watch;
         self.sidebar_width = display.sidebar_width;
-        self.sidebar_visible = display.sidebar_visible && self.sidebar.is_some();
+        // With no note open the sidebar is where the user picks one (SPEC
+        // "Data flow" step 1): it shows whatever visibility was carried.
+        self.sidebar_visible =
+            (display.sidebar_visible || !self.has_note()) && self.sidebar.is_some();
+        if self.sidebar_visible && !self.has_note() {
+            self.focus = Focus::Sidebar;
+        }
         if self.viewer.show_metadata != display.show_metadata {
             // Through the toggle: the note re-renders with the block.
             self.viewer.toggle_metadata();
@@ -2704,7 +2737,11 @@ impl App {
             )
         }
         crate::session::SessionState {
-            note: rel(root, Some(self.current_path().as_path())),
+            // No note open (SPEC "Data flow" step 1): nothing to reopen.
+            note: self
+                .has_note()
+                .then(|| rel(root, Some(self.current_path().as_path())))
+                .flatten(),
             scroll: self.current_scroll() as u32,
             mode: Some(
                 match self.sidebar_mode {
@@ -2741,28 +2778,15 @@ impl App {
 
     /// Apply a session snapshot, best-effort: vanished files, entries the
     /// tree no longer has, and open failures are skipped silently — the
-    /// fallback is the normal startup state (vault index at the top, the
+    /// fallback is the normal startup state (the start note at the top, the
     /// first sidebar row selected). Only *vault-relative* entries are
-    /// honored: the session file lives outside the vault, so it must not
-    /// smuggle opens — absolute paths and `..` escapes in the file are
-    /// skipped (the snapshot's own `session_state` never writes them, but
-    /// the file is user-editable). The restored scroll is clamped by the
-    /// next render (`run_app`'s initial `on_resize`); a `.base` note
+    /// honored ([`crate::session::within_vault`]). The note itself is
+    /// usually already open — the start chose it before the viewer was
+    /// built — and then only its scroll is applied. The restored scroll is
+    /// clamped by the next render (`run_app`'s initial `on_resize`); a `.base` note
     /// reopens with the table's row offset.
     pub fn restore_session(&mut self, state: &crate::session::SessionState, root: &Path) {
-        use std::path::Component;
-        let within = |rel: &str| -> Option<PathBuf> {
-            let path = Path::new(rel);
-            if path.is_absolute()
-                || path
-                    .components()
-                    .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
-                || rel.is_empty()
-            {
-                return None;
-            }
-            Some(root.join(path))
-        };
+        let within = |rel: &str| crate::session::within_vault(root, rel);
         if let Some(sidebar) = &mut self.sidebar {
             for dir in &state.expanded {
                 if let Some(path) = within(dir) {
@@ -2787,7 +2811,14 @@ impl App {
             if crate::baseview::is_base_file(&note) {
                 // A `.base` table: the scroll is the table's row offset
                 // (clamped by the next render, like every base open).
-                let _ = self.open_base_at(&note, scroll as usize);
+                if self.open_base_at(&note, scroll as usize).is_ok() && !self.viewer.has_note() {
+                    // The table is a document: the no-note focus no longer
+                    // applies (see `App::new`).
+                    self.focus = Focus::Content;
+                }
+            } else if note == self.viewer.path {
+                // The start already opened it (`main`'s start-note choice).
+                self.viewer.scroll = scroll;
             } else if self.open_note(&note).is_ok() {
                 self.viewer.scroll = scroll;
             }

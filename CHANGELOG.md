@@ -23,6 +23,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   instead of asking for a path on a plain prompt.
 
 ### Fixed
+- A vault with no `index.md` opens: frond starts on the saved session's
+  note, else `index.md`, else an empty note pane with the sidebar focused.
+  A saved note that can no longer be read is reported on the status line
+  instead of failing the start.
 - A vault path that does not exist (from `--vault`, the `vault` key or a
   lone `[vaults]` entry) stops the start with one line naming the path
   and the setting it came from, instead of a bare `No such file or

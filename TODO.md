@@ -43,19 +43,11 @@ and the tree is clean. What the cycle carries:
 
 ## Open
 
-- **A vault with no `index.md` cannot open**, even with a saved session
-  for another note: the start reads `index.md` before the session is
-  restored (SPEC "Data flow" step 1 says so). Obsidian vaults often have
-  no `index.md`; the start should restore first and fall back to an empty
-  note pane. Found in u3, pre-existing.
+Nothing.
 
 ## Next
 
 1. The human's requests.
-2. The findings of a cycle live in `/tmp/opencode/review<N>/` and die with
-   the machine. Moving them into the repository would keep the reasoning
-   behind each decision - the skill calls it a stopgap, and this project
-   has now lost its review record twice.
 
 ## Past investigations
 

@@ -133,8 +133,17 @@ impl Viewer {
     /// Reads and parses the note. Fails only if the file cannot be read at
     /// startup; later reload failures are surfaced via `last_error`.
     pub fn open(path: &Path, render_width: usize) -> io::Result<Self> {
-        let mut viewer = Self {
-            path: path.to_path_buf(),
+        let mut viewer = Self::empty(render_width);
+        viewer.open_file(path)?;
+        Ok(viewer)
+    }
+
+    /// A viewer with no note: the start state of a vault with nothing to
+    /// open (SPEC "Data flow" step 1). The empty path is the marker
+    /// ([`Self::has_note`]); [`Self::open_file`] leaves the state.
+    pub fn empty(render_width: usize) -> Self {
+        Self {
+            path: PathBuf::new(),
             source: String::new(),
             lines: Vec::new(),
             base_lines: Vec::new(),
@@ -161,9 +170,12 @@ impl Viewer {
             line_counts: None,
             source_generation: 0,
             link_colors: LinkColors::default(),
-        };
-        viewer.open_file(path)?;
-        Ok(viewer)
+        }
+    }
+
+    /// Whether a note is open (see [`Self::empty`]).
+    pub fn has_note(&self) -> bool {
+        !self.path.as_os_str().is_empty()
     }
 
     /// Attaches the vault index used for wikilink resolution and re-parses
