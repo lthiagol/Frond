@@ -28,18 +28,24 @@ covering every user-visible change.
 
 ## In flight
 
-Nothing. 0.7.0 is cut (2026-11-26), tagged `v0.7.0` and pushed. It
-carries several vaults and the vault picker (startup and `v`, typed and
-recent paths), the reorganized key map, a clear error for a missing vault
-path, and vaults with no `index.md` opening. `## [Unreleased]` is empty.
+Moving every test onto the sample vault (`testvault/`, map in
+`docs/TESTVAULT.md`). The vault landed in `2018e15`. Each unit drops a
+suite's inline fixture for a copy of the vault, every assertion kept.
 
 ## Open
 
-Nothing.
+1. smoke_tui + smoke_m2
+2. smoke_m3 (anchor end position via `[[long-read#Part 3]]`)
+3. smoke_m4 (git-inits its copy; `updated:` is now 2999-01-01)
+4. smoke_m5
+5. smoke_m6
+6. smoke_m7 (several vaults = several copies)
+7. Rust tests that build whole-vault fixtures; single-edge-case fixtures
+   stay inline.
 
 ## Next
 
-1. The human's requests.
+The open list, in order; then the human's requests.
 
 ## Past investigations
 
