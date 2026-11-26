@@ -5,46 +5,32 @@ wheel-over-results, guarded checkbox toggling) using pyte.
 
 Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
-- `git` on PATH (fixture repository setup only; the app itself only ever
-  runs read-only git commands plus the guarded checkbox write).
+- `git` on PATH (copy setup only: the copy is git-initialised; the app itself
+  only ever runs read-only git commands plus the guarded checkbox write).
 - A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
-The script builds a small fixture vault under /tmp/frond-m4-vault, turns it
-into a git repository (writes ONLY there, never to testvault/), and drives
-the app with `--vault`, exercising the search popup flow (keyboard AND
-mouse), the git status segment, the sidebar changed-file markers, the
-guarded checkbox toggle (click → on-disk marker + `updated:` bump, and
-its dirty-tree refusal), and help.
+The script copies the sample vault (testvault/, see docs/TESTVAULT.md) into
+the scratch dir, turns the copy into a git repository (writes ONLY there,
+never to testvault/), and drives the app with `--vault` on that copy,
+exercising the search popup flow (keyboard AND mouse), the git status
+segment, the sidebar changed-file markers, the guarded checkbox toggle
+(click → on-disk marker + `updated:` bump, and its dirty-tree refusal), and
+help.
 """
 import datetime
-import os, pty, select, struct, sys, shutil, time, fcntl, termios
+import os, pty, select, struct, sys, time, fcntl, termios
 
 import pyte
 import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = smoke_tmp.path("frond-m4-vault")
 
 COLS, ROWS = 100, 30
 
-# --- fixture vault + git repository --------------------------------------
-shutil.rmtree(VAULT, ignore_errors=True)
-BODY = "filler paragraph\n\n" * 40
-INDEX = (
-    "---\nstatus: complete\nupdated: 2026-01-01\n---\n"
-    "# Index\n\nSee [[alpha]].\n\nneedle in index\n\n- [ ] a task\n\n" + BODY
-)
-for path, body in [
-    ("index.md", INDEX),
-    ("alpha.md", "---\nstatus: complete\n---\n# Alpha\n\nThe needle lives here.\n\n" + BODY),
-    ("beta.md", "# Beta\n\nuntouched note\n\n" + BODY),
-]:
-    full = os.path.join(VAULT, path)
-    os.makedirs(os.path.dirname(full), exist_ok=True)
-    with open(full, "w") as f:
-        f.write(body)
+# --- vault copy + git repository -----------------------------------------
+VAULT = smoke_tmp.copy_testvault("frond-m4-vault")
 
 
 def git(*args):
@@ -149,7 +135,7 @@ def check(cond, label):
 
 # --- boot: clean git status ----------------------------------------------
 check(pump(1.5), "app alive")
-check("Index" in body_text(), "index.md content rendered")
+check("Lorem Index" in body_text(), "index.md heading rendered")
 check("✓" in status_line(), "clean repo shows the check mark in the status bar")
 check("●" not in status_line(), "no dirty dot on a clean repo")
 
@@ -163,52 +149,53 @@ pump(0.3)
 check("/needle▏" in body_text(), "query typed into the prompt")
 send("\r")
 pump(0.4)
-check("2 hits" in body_text(), "results mode with hit count (index.md + alpha.md)")
-check("alpha.md:6: " in body_text(), "hit row shows relpath:line prefix")
+check("3 hits" in body_text(), "results mode with hit count (alpha.md, index.md, links/alpha-link.md)")
+check("alpha.md:27: " in body_text(), "hit row shows relpath:line prefix")
 check("needle" in body_text(), "hit snippet visible")
 send("\r")
 pump(0.8)
 check("alpha.md" in status_line(), "Enter opened the hit's note")
 check("needle lives here" in body_text(), "the hit's line is scrolled into view")
-check("Index" not in body_text(), "previous note scrolled off (hit near the note end)")
+check("Lorem Index" not in body_text(), "previous note scrolled off (hit near the note end)")
 
 # --- search popup: wheel + click over the results --------------------------
-# Popup geometry for 2 hits at 100x30: width 70 → x 15; height 5 → y 12;
-# inner result rows are screen rows 13 (hit 0) and 14 (hit 1).
-POP_X, ROW0, ROW1 = 15, 13, 14
+# Popup geometry for 3 hits at 100x30: width 70 → x 15; height 6 → y 12;
+# inner result rows are screen rows 13 (hit 0), 14 (hit 1) and 15 (hit 2).
+POP_X, ROW0, ROW1, ROW2 = 15, 13, 14, 15
 send("s")
 pump(0.3)
 for c in "needle":
     send(c)
 send("\r")
 pump(0.4)
-check("2 hits" in body_text(), "results open again for the mouse flow")
+check("3 hits" in body_text(), "results open again for the mouse flow")
 
-# Wheel down over the popup moves the result selection (bg highlight to
-# row 1); the note behind the popup must not scroll.
+
+def selected_result_row():
+    # The highlighted row is the one whose background differs from the
+    # other two (the unselected rows share one background).
+    bgs = {y: cell_bg(POP_X + 5, y) for y in (ROW0, ROW1, ROW2)}
+    picked = [y for y in bgs if list(bgs.values()).count(bgs[y]) == 1]
+    return picked[0] if len(picked) == 1 else None
+
+
+# Each wheel notch moves the selection 3 rows, clamped to the list: one
+# notch down from hit 0 lands on the last hit. The note behind the popup
+# must not scroll: its top line (screen row 1) stays put.
 wheel(True, POP_X + 5, ROW1)
 pump(0.3)
-check(
-    cell_bg(POP_X + 5, ROW1) != cell_bg(POP_X + 5, ROW0),
-    "wheel over the results moved the selection highlight to row 1",
-)
-check("Alpha" in body_text(), "wheel over the popup did not scroll the note")
+check(selected_result_row() == ROW2, "wheel over the results moved the selection to the last hit")
+check("Ut enim ad minim veniam" in row(1), "wheel over the popup did not scroll the note")
 # Wheel up restores the selection to hit 0.
 wheel(False, POP_X + 5, ROW0)
 pump(0.3)
-check(
-    cell_bg(POP_X + 5, ROW0) != cell_bg(POP_X + 5, ROW1),
-    "wheel up moved the selection back to row 0",
-)
+check(selected_result_row() == ROW0, "wheel up moved the selection back to row 0")
 
 # A click selects the row; clicking the already-selected row opens it.
 click(POP_X + 5, ROW1)
 pump(0.3)
-check(
-    cell_bg(POP_X + 5, ROW1) != cell_bg(POP_X + 5, ROW0),
-    "clicking a result row selects it",
-)
-check("search: 2 hits" in body_text(), "the selection click did not open yet")
+check(selected_result_row() == ROW1, "clicking a result row selects it")
+check("search: 3 hits" in body_text(), "the selection click did not open yet")
 click(POP_X + 5, ROW1)
 pump(0.8)
 check("index.md" in status_line(), "clicking the selected row opened it")
@@ -216,7 +203,11 @@ check("needle in index" in body_text(), "opened at the clicked hit's line")
 check(not ("/" in status_line() and "▏" in status_line()), "popup closed after open")
 
 # --- guarded checkbox toggle (clean tree) ----------------------------------
-task_row = find_row("a task")
+# index.md's Tasks section sits past the first screen: G shows the note's end.
+send("G")
+pump(0.4)
+TASK = "Lorem ipsum dolor sit amet"
+task_row = find_row(TASK)
 check(task_row is not None, "task line rendered with its checkbox")
 # Sidebar is 30 cols, then the note's left margin (default 2); a depth-1
 # checkbox glyph sits at the first text column after it.
@@ -227,10 +218,11 @@ pump(0.8)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()
 today = datetime.date.today().isoformat()
-check("- [~] a task" in on_disk, "first click wrote the in-progress state - [~]")
+check(f"- [~] {TASK}" in on_disk, "first click wrote the in-progress state - [~]")
+# index.md starts at updated: 2999-01-01, so today's date can only come from the bump.
 check(f"updated: {today}" in on_disk, "frontmatter updated: bumped to today")
-check("updated: 2026-01-01" not in on_disk, "old updated value replaced")
-check("◐ a task" in body_text(), "the reloaded render shows the in-progress glyph")
+check("updated: 2999-01-01" not in on_disk, "old updated value replaced")
+check(f"◐ {TASK}" in body_text(), "the reloaded render shows the in-progress glyph")
 check("●" in status_line(), "git badge went dirty right after the write")
 check("index.md *" in body_text(), "the tree marks the written note")
 
@@ -245,14 +237,14 @@ click(CONTENT_X, task_row)
 pump(0.8)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()
-check("- [x] a task" in on_disk, "second click wrote the checked state - [x]")
-check("☑" in body_text(), "the reloaded render shows the checked glyph")
+check(f"- [x] {TASK}" in on_disk, "second click wrote the checked state - [x]")
+check(f"☑ {TASK}" in body_text(), "the reloaded render shows the checked glyph")
 click(CONTENT_X, task_row)
 pump(0.8)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()
-check("- [x] a task" in on_disk, "second click wrote the checked state - [x]")
-check("☑" in body_text(), "the reloaded render shows the checked glyph")
+check(f"- [x] {TASK}" in on_disk, "a click on the dirty tree left the checked state")
+check(f"☑ {TASK}" in body_text(), "the reloaded render still shows the checked glyph")
 
 # --- git dirty + changed-file markers -------------------------------------
 with open(os.path.join(VAULT, "alpha.md"), "a") as f:
@@ -262,15 +254,15 @@ pump(0.8)
 check("●" in status_line(), "dirty dot after u on a modified repo")
 check("✓" not in status_line(), "check mark gone when dirty")
 check("alpha.md *" in body_text(), "changed note marked with * in the tree")
-check("beta.md *" not in body_text(), "unchanged note unmarked")
+check("gamma.md *" not in body_text(), "unchanged note unmarked")
 
 # --- guarded toggle refuses on a dirty tree --------------------------------
-click(CONTENT_X, find_row("a task"))
+click(CONTENT_X, find_row(TASK))
 pump(0.5)
 with open(os.path.join(VAULT, "index.md")) as f:
     on_disk = f.read()
 check("not writing" in status_line(), "dirty tree refusal surfaced in the status bar")
-check("- [x] a task" in on_disk and "- [~]" not in on_disk, "refusal touched nothing")
+check(f"- [x] {TASK}" in on_disk and f"- [~] {TASK}" not in on_disk, "refusal touched nothing")
 check("dirty" in status_line(), "refusal names the reason")
 
 # --- commit everything: writes allowed again, status clean -----------------

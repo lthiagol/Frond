@@ -2,8 +2,8 @@
 //! which drives the real TUI binary through a pty with `pyte` terminal
 //! emulation (global search prompt → results → open-at-line, git clean/
 //! dirty status segment, sidebar changed-file markers, help, clean exit)
-//! against a fixture vault built (and `git init`ed) under
-//! the smoke scratch dir (`scripts/smoke_tmp.py`).
+//! against a copy of the sample vault (`testvault/`, see `docs/TESTVAULT.md`)
+//! made in the smoke scratch dir (`scripts/smoke_tmp.py`) and `git init`ed.
 //!
 //! Ignored by default because it needs:
 //! - `python3` with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`), and
@@ -12,8 +12,8 @@
 //!
 //! Run it with: `cargo test -p frond --test smoke_m4 -- --ignored`
 //!
-//! The script never touches `testvault/`; it writes only its /tmp fixture
-//! (which it turns into a git repository for the sync-status checks).
+//! The script never touches `testvault/`; it writes only its copy (which it
+//! turns into a git repository for the sync-status checks).
 
 use std::process::Command;
 

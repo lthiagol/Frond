@@ -252,3 +252,9 @@ these screen facts from the copy:
 - Tag view (`t`): `#lorem` heads the list (the most notes, 6), and the
   list has `#rust (2)` and `#mocktag, weird (1)`. Expanding `#lorem` lists
   `alpha.md` first.
+- `needle` in the results popup (`s`), in path order: `alpha.md:27`,
+  `index.md:11`, `links/alpha-link.md:27`. Opened at its hit, `alpha.md`'s
+  top row reads `Ut enim ad minim veniam`.
+- `index.md`'s task `- [ ] Lorem ipsum dolor sit amet` (in `## Tasks`, past
+  the first screen) is the checkbox toggle's target on a copy. The root
+  `gamma.md` stays unmarked after `alpha.md` is edited on the copy.

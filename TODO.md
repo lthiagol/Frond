@@ -36,7 +36,7 @@ suite's inline fixture for a copy of the vault, every assertion kept.
 
 1. ~~smoke_tui + smoke_m2~~ (done)
 2. ~~smoke_m3~~ (done)
-3. smoke_m4 (git-inits its copy; `updated:` is now 2999-01-01)
+3. ~~smoke_m4~~ (done)
 4. smoke_m5
 5. smoke_m6
 6. smoke_m7 (several vaults = several copies)
