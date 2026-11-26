@@ -3,8 +3,13 @@
 //! 0; in the app, `v` switches vaults and back; with no vaults configured,
 //! a typed path opens and comes back as a recent row; a vault with no
 //! `index.md` opens with no note.
-//! Shells out to `scripts/smoke_m7.py` (pyte through a pty); see
-//! `smoke_m6.rs` for the prerequisites.
+//! Shells out to `scripts/smoke_m7.py` (pyte through a pty) against copies of
+//! the sample vault (`testvault/`, see `docs/TESTVAULT.md`) made in the smoke
+//! scratch dir (`scripts/smoke_tmp.py`); see `smoke_m6.rs` for the
+//! prerequisites.
+//!
+//! The script writes only its copies, never `testvault/`, the real
+//! `~/.config` or the real `~/.local/state`.
 //!
 //! Run it with: `cargo test -p frond --test smoke_m7 -- --ignored`
 

@@ -14,7 +14,10 @@ Tests read it or copy it; nothing writes into it.
   - Both keep `links/alpha-link.md` as a symlink to `../alpha.md`, so a
     copy edits the same way the checkout does.
 - **A vault with no `index.md`:** a copy with `index.md` removed.
-- **Several vaults, no vault, a missing vault:** the test builds its own.
+- **Several vaults:** one copy per vault. The sidebar header shows a copy's
+  folder name, so the test names each copy for its marker
+  (`scripts/smoke_m7.py`).
+- **No vault, a missing vault:** the test builds its own config.
 - **Git:** the vault has no `.git`. A test that needs a repository copies
   the vault and `git init`s the copy.
 - **Dates:** the index's only clock-dependent results are the `.base`
@@ -275,3 +278,9 @@ these screen facts from the copy:
 - `index.md`'s task `- [ ] Lorem ipsum dolor sit amet` (in `## Tasks`, past
   the first screen) is the checkbox toggle's target on a copy. The root
   `gamma.md` stays unmarked after `alpha.md` is edited on the copy.
+- The vault picker (`scripts/smoke_m7.py`) opens three copies, named
+  `frond-m7-alpha`, `frond-m7-beta` and `frond-m7-noindex` (the last with
+  no `index.md`). Each copy opens at its `Lorem Index` heading. In alpha,
+  the quick jumper's `roadmap` opens `projects/roadmap.md` (`# Roadmap`).
+  The no-index copy's root note `alpha.md` (`# Alpha`) is the tenth `j`
+  from the sidebar's top row, since the ten folders list first.
