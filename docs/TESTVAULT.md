@@ -243,7 +243,13 @@ these screen facts from the copy:
   table; the mouse checks open it from the tree.
 - `projects/` long name note: opened from the tree (`A long name`); scrolled
   to its end (`END-OF-LONG-NOTE`).
-- `reading/long-read.md`: the scroll note; the watch check appends to its copy.
+- `reading/long-read.md`: the scroll note. Scrolled 16 lines,
+  `Paragraph 2:` heads the first text row and the `Long read` heading is off
+  the top (`scripts/smoke_m5.py`); the watch check appends to its copy.
+- The session checks (`scripts/smoke_m5.py`): the tree's `archive` child
+  `old-note.md` and `projects` child `beta.md` show once their folders open,
+  and `index.md`'s `Lorem Index` heading shows on the explicit-argument and
+  corrupt-session starts.
 - `notes.txt` and `.obsidian/`: not listed in the sidebar.
 - `index.md`'s backlinks panel (`b`): three, in this order: `alpha.md`,
   `edge/crlf.md`, `links/alpha-link.md`. Pinned:

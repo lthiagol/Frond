@@ -6,14 +6,14 @@ Prerequisites:
 - A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
-The script builds a small fixture vault under /tmp/frond-m5-vault (writes
-ONLY there, never to testvault/) and runs the app FOUR times against it,
-always with FROND_SESSION pointed at /tmp/frond-m5-session so the real
-~/.local/state is never touched:
+The script copies the sample vault (testvault/, see docs/TESTVAULT.md) into
+the scratch dir and runs the app FOUR times against that copy, always with
+FROND_SESSION pointed at the scratch dir so the real ~/.local/state is never
+touched. It writes ONLY its copy, never testvault/.
 
-1. run 1 shapes a session: expands the `archive` folder, opens
-   projects/alpha.md, scrolls it 4 lines, quits with `q`. Asserts the
-   session file was written.
+1. run 1 shapes a session: expands the `archive` and `projects` folders,
+   opens reading/long-read.md, scrolls it 16 lines, quits with `q`. Asserts
+   the session file was written.
 2. run 2 restarts with NO note argument: the same note must come back
    with its scroll, and the sidebar must still show archive's child.
 3. run 3 restarts WITH an explicit note argument: that argument wins
@@ -28,26 +28,14 @@ import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = smoke_tmp.path("frond-m5-vault")
 SESSION_DIR = smoke_tmp.path("frond-m5-session")
 
 COLS, ROWS = 100, 30
+SIDEBAR_W = 30
 
-# --- fixture vault ---------------------------------------------------------
-shutil.rmtree(VAULT, ignore_errors=True)
+# --- vault copy + session dir ----------------------------------------------
+VAULT = smoke_tmp.copy_testvault("frond-m5-vault")
 shutil.rmtree(SESSION_DIR, ignore_errors=True)
-BODY = "\n".join(f"alpha body {i}" for i in range(1, 81))
-ALPHA = "# Alpha\n\nintro\n\nMARKER-FIVE\n\n" + BODY + "\n"
-for path, body in [
-    ("index.md", "# Index\n\nThe vault entry note.\n\n" + "index filler\n\n" * 30),
-    ("projects/alpha.md", ALPHA),
-    ("projects/beta.md", "# Beta\n\nuntouched note\n"),
-    ("archive/old.md", "# Old\n\narchived note\n"),
-]:
-    full = os.path.join(VAULT, path)
-    os.makedirs(os.path.dirname(full), exist_ok=True)
-    with open(full, "w") as f:
-        f.write(body)
 
 
 # --- pty harness: the app is spawned fresh for every run --------------------
@@ -103,6 +91,12 @@ def send(s):
     os.write(fd, s.encode())
 
 
+def down(n):
+    for _ in range(n):
+        send("j")
+        pump(0.15)
+
+
 def row(y):
     return "".join(screen.buffer[y][x].data or " " for x in range(COLS))
 
@@ -113,6 +107,19 @@ def body_text():
 
 def status_line():
     return row(ROWS - 1)
+
+
+def sidebar_has(text):
+    return any(text in row(y)[:SIDEBAR_W] for y in range(ROWS - 1))
+
+
+def content_has(text):
+    return any(text in row(y)[SIDEBAR_W:] for y in range(ROWS - 1))
+
+
+def content_top():
+    # Row 0 is the content pane's top margin; the first text row is row 1.
+    return row(1)[SIDEBAR_W:].strip()
 
 
 def wait_exit():
@@ -141,49 +148,49 @@ def check(cond, label):
 # --- run 1: shape the session ----------------------------------------------
 start_run(["--vault", VAULT])
 check(pump(1.5), "run 1: app alive")
-check("Index" in body_text(), "run 1: index.md rendered")
+check(content_has("Lorem Index"), "run 1: index.md rendered")
 
-# Sidebar tree (dirs first): 0 archive, 1 projects, 2 alpha.md, ...
-# Focus it and expand `archive` (the selected first row).
+# Sidebar tree rows (folders first, then files, docs/TESTVAULT.md Layout):
+# archive is row 0. Focus the tree and expand it (the selected first row).
 send("f")
 pump(0.3)
 send("\r")
 pump(0.3)
-check("old.md" in body_text(), "run 1: archive expanded, old.md visible")
+check(sidebar_has("old-note.md"), "run 1: archive expanded, old-note.md visible")
 
-# Two rows down to `projects` (old.md, projects), expand it, one more row
-# onto alpha.md, open it (Enter: opens + moves focus to the content pane).
-send("j")
-pump(0.2)
-send("j")
-pump(0.2)
+# Nine rows down to `projects` (archive's three children, then dashboards
+# through links), expand it.
+down(9)
 send("\r")
 pump(0.3)
-check("beta.md" in body_text(), "run 1: projects expanded")
-send("j")
-pump(0.2)
+check(sidebar_has("beta.md"), "run 1: projects expanded, beta.md visible")
+
+# Nine rows down to `reading` (projects' children first, clients folded),
+# expand it, one row down onto long-read.md and open it (Enter: opens + moves
+# focus to the content pane).
+down(9)
+send("\r")
+pump(0.3)
+down(1)
 send("\r")
 check(
-    pump_until(lambda: "alpha.md" in status_line()),
-    "run 1: alpha.md opened (status bar)",
+    pump_until(lambda: "long-read.md" in status_line()),
+    "run 1: long-read.md opened (status bar)",
 )
 check(
-    pump_until(lambda: "Alpha" in body_text()),
-    "run 1: alpha.md content rendered",
+    pump_until(lambda: content_has("Long read")),
+    "run 1: long-read.md content rendered (Long read heading)",
 )
 
-# Scroll 4 lines: MARKER-FIVE (raw line 4) lands on the first content row
-# and the # Alpha heading scrolls off.
-send("j")
-pump(0.15)
-send("j")
-pump(0.15)
-send("j")
-pump(0.15)
-send("j")
+# Scroll 16 lines: Paragraph 2 heads the first text row and the `Long read`
+# heading scrolls off.
+down(16)
 pump(0.4)
-check("MARKER-FIVE" in body_text(), "run 1: scrolled to MARKER-FIVE")
-check("# Alpha" not in body_text(), "run 1: heading scrolled off")
+check(
+    content_top().startswith("Paragraph 2:"),
+    "run 1: scrolled to Paragraph 2 (first text row)",
+)
+check(not content_has("Long read"), "run 1: heading scrolled off")
 
 check(wait_exit(), "run 1: clean exit code 0")
 
@@ -194,12 +201,15 @@ check(len(sessions) == 1, f"run 1: session file written ({sessions})")
 # --- run 2: restart with no note argument — the session comes back ----------
 start_run(["--vault", VAULT])
 check(pump(1.5), "run 2: app alive")
-check("alpha.md" in status_line(), "run 2: the last note is restored")
-check("MARKER-FIVE" in body_text(), "run 2: scroll restored (marker visible)")
-check("# Alpha" not in body_text(), "run 2: scroll restored (heading still off)")
-check("old.md" in body_text(), "run 2: archive still expanded in the tree")
+check("long-read.md" in status_line(), "run 2: the last note is restored")
 check(
-    "The vault entry note." not in body_text(),
+    content_top().startswith("Paragraph 2:"),
+    "run 2: scroll restored (Paragraph 2 on the first text row)",
+)
+check(not content_has("Long read"), "run 2: scroll restored (heading still off)")
+check(sidebar_has("old-note.md"), "run 2: archive still expanded in the tree")
+check(
+    not content_has("Lorem Index"),
     "run 2: the index content did not come back (session note wins)",
 )
 check(wait_exit(), "run 2: clean exit code 0")
@@ -207,8 +217,8 @@ check(wait_exit(), "run 2: clean exit code 0")
 # --- run 3: an explicit note argument wins over the session ------------------
 start_run(["--vault", VAULT, f"{VAULT}/index.md"])
 check(pump(1.5), "run 3: app alive")
-check("Index" in body_text(), "run 3: the explicit argument opened")
-check("alpha.md" not in status_line(), "run 3: session note NOT restored")
+check(content_has("Lorem Index"), "run 3: the explicit argument opened")
+check("long-read.md" not in status_line(), "run 3: session note NOT restored")
 check(wait_exit(), "run 3: clean exit code 0")
 
 # --- run 4: a corrupted session file degrades silently -----------------------
@@ -217,8 +227,11 @@ with open(session_file, "w") as f:
     f.write("note = 42 !!! not toml !!!")
 start_run(["--vault", VAULT])
 check(pump(1.5), "run 4: app alive")
-check("Index" in body_text(), "run 4: corrupt session falls back to the index")
-check("alpha.md" not in status_line(), "run 4: nothing restored from garbage")
+check(
+    content_has("Lorem Index"),
+    "run 4: corrupt session falls back to the index",
+)
+check("long-read.md" not in status_line(), "run 4: nothing restored from garbage")
 check(wait_exit(), "run 4: clean exit code 0")
 
 print("SMOKE M5:", "OK" if ok else "FAILED")

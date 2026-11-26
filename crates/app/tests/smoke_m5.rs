@@ -1,8 +1,9 @@
 //! End-to-end smoke test for M5 (cross-run session memory): shells out to
 //! `scripts/smoke_m5.py`, which drives the real TUI binary through a pty
-//! with `pyte` terminal emulation across FOUR separate runs against the
-//! same fixture vault under the smoke scratch dir (`scripts/smoke_tmp.py`):
-//! run 1 shapes a session (expanded folder, opened note, scrolled) and
+//! with `pyte` terminal emulation across FOUR separate runs against a copy
+//! of the sample vault (`testvault/`, see `docs/TESTVAULT.md`) made in the
+//! smoke scratch dir (`scripts/smoke_tmp.py`):
+//! run 1 shapes a session (expanded folders, opened note, scrolled) and
 //! quits; run 2 restarts with no note argument and must come back exactly
 //! there; run 3 restarts with an explicit note argument (which wins over
 //! the restore); run 4 restarts with a corrupted session file and must
@@ -15,8 +16,9 @@
 //!
 //! Run it with: `cargo test -p frond --test smoke_m5 -- --ignored`
 //!
-//! The script never touches `testvault/` and never the real
-//! `~/.local/state` — `FROND_SESSION` redirects the session dir into /tmp.
+//! The script writes only its copy, never `testvault/` and never the real
+//! `~/.local/state` — `FROND_SESSION` redirects the session dir into the
+//! smoke scratch dir.
 
 use std::process::Command;
 
