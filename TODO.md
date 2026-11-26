@@ -28,24 +28,18 @@ covering every user-visible change.
 
 ## In flight
 
-Moving every test onto the sample vault (`testvault/`, map in
-`docs/TESTVAULT.md`). The vault landed in `2018e15`. Each unit drops a
-suite's inline fixture for a copy of the vault, every assertion kept.
+Nothing. The tests run on the sample vault (`testvault/`, map and the
+which-tests-use-it rule in `docs/TESTVAULT.md`): every smoke suite and the
+whole-vault Rust tests. `## [Unreleased]` is empty — the change is
+test-only.
 
 ## Open
 
-1. ~~smoke_tui + smoke_m2~~ (done)
-2. ~~smoke_m3~~ (done)
-3. ~~smoke_m4~~ (done)
-4. ~~smoke_m5~~ (done)
-5. ~~smoke_m6~~ (done)
-6. ~~smoke_m7~~ (done)
-7. Rust tests that build whole-vault fixtures; single-edge-case fixtures
-   stay inline.
+Nothing.
 
 ## Next
 
-The open list, in order; then the human's requests.
+1. The human's requests.
 
 ## Past investigations
 
