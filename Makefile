@@ -58,9 +58,7 @@ clean:
 	rm -rf target
 
 # Removes smoke-test leftovers: the private per-user scratch root the smoke
-# scripts use (scripts/smoke_tmp.py), plus the old fixed /tmp paths.
+# scripts use (scripts/smoke_tmp.py), plus the /tmp paths of manual probes.
 clean-fixtures:
 	rm -rf "$${FROND_SMOKE_TMP:-$${TMPDIR:-/tmp}/frond-smoke-$$(id -u)}"
-	rm -rf /tmp/frond-m2-vault /tmp/frond-m3-vault /tmp/frond-m4-vault \
-	       /tmp/watchtest.md /tmp/vault-copy* /tmp/gitprobe* /tmp/probe-* \
-	       /tmp/frond-ui*.md
+	rm -rf /tmp/vault-copy* /tmp/gitprobe* /tmp/probe-* /tmp/frond-ui*.md
