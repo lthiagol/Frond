@@ -4,7 +4,10 @@
 - a config with two `[vaults]` entries opens frond on the picker; typing a
   filter and pressing Enter opens the chosen vault (its note on screen);
 - `Esc` in the picker quits with exit status 0;
-- the clean quit records `last-vault`, which preselects on the next start.
+- the clean quit records `last-vault`, which preselects on the next start;
+- `V` in the app (SPEC "Vault picker in the app") switches to another
+  vault and back, the left vault's session restored, `last-vault` the one
+  open at the quit.
 
 Prerequisites: python3 with `pyte` (`uv run --with pyte`) and a debug build
 (`cargo build -p frond`; binary path overridable with $FROND_APP_BIN).
@@ -41,6 +44,8 @@ for name, heading in (("alpha", "Alpha Vault Home"), ("beta", "Beta Vault Home")
     os.makedirs(os.path.join(ROOT, name), exist_ok=True)
     with open(os.path.join(ROOT, name, "index.md"), "w") as f:
         f.write(f"# {heading}\n\nbody\n")
+with open(os.path.join(ROOT, "alpha", "other.md"), "w") as f:
+    f.write("# Alpha Other Note\n\nbody\n")
 os.makedirs(THEME_DIR, exist_ok=True)
 with open(CONFIG_FILE, "w") as f:
     f.write(
@@ -62,7 +67,7 @@ def check(cond, label, screen=None):
 
 
 class Run:
-    def __init__(self):
+    def __init__(self, *args):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.environ["TERM"] = "xterm-256color"
@@ -70,7 +75,7 @@ class Run:
             os.environ["FROND_SESSION"] = SESSION_DIR
             os.environ["FROND_THEMES"] = THEME_DIR
             fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
-            os.execv(APP, [APP])
+            os.execv(APP, [APP, *args])
         self.screen = pyte.Screen(COLS, ROWS)
         self.stream = pyte.ByteStream(self.screen)
 
@@ -144,6 +149,41 @@ check(run.until(lambda: "vaults: 2" in run.text()), "the picker shows again", ru
 check(run.until(lambda: run.selected_row() == "beta"), "the last vault is preselected", run.screen)
 run.send("\x1b")
 check(run.wait_exit(), "Esc quits with exit status 0")
+
+# --- 3: `V` switches vaults in the running app -----------------------------
+run = Run("--vault", "alpha")
+check(run.until(lambda: "Alpha Vault Home" in run.text()), "alpha opened by name", run.screen)
+run.send("\x10")
+run.send("other")
+run.pump(0.3)
+run.send("\r")
+check(run.until(lambda: "Alpha Other Note" in run.text()), "moved to alpha's other note", run.screen)
+run.send("V")
+check(run.until(lambda: "vaults: 2" in run.text()), "V opens the picker", run.screen)
+check(run.until(lambda: run.selected_row() == "alpha"), "the open vault is preselected", run.screen)
+check("Alpha Other Note" in run.text(), "the main view stays behind the popup", run.screen)
+run.send("\x1b[B")
+run.send("\r")
+check(run.until(lambda: "Beta Vault Home" in run.text()), "switched to beta", run.screen)
+check("Alpha Other Note" not in run.text(), "nothing of alpha is left", run.screen)
+check("vaults: 2" not in run.text(), "the popup closed", run.screen)
+run.send("V")
+check(run.until(lambda: run.selected_row() == "beta"), "beta is now preselected", run.screen)
+run.send("\x1b[A")
+run.send("\r")
+check(
+    run.until(lambda: "Alpha Other Note" in run.text()),
+    "back in alpha, its session restored",
+    run.screen,
+)
+run.send("q")
+check(run.wait_exit(), "clean quit after the switches, exit status 0")
+with open(os.path.join(SESSION_DIR, "last-vault")) as f:
+    recorded = f.read().strip()
+check(
+    recorded == os.path.realpath(os.path.join(ROOT, "alpha")),
+    f"last-vault records the vault open at the quit ({recorded})",
+)
 
 print("SMOKE M7:", "OK" if ok else "FAILED")
 sys.exit(0 if ok else 1)

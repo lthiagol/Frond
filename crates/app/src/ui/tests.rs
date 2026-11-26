@@ -4053,9 +4053,10 @@ fn thumb_cells(
 }
 
 /// Length a proportional thumb should have on a `track_len` track: the
-/// visible fraction of the content.
+/// visible fraction of the content. ratatui measures the content as the
+/// last viewport position (`total - 1`), not the line count.
 fn proportional_thumb_len(total: usize, visible: usize, track_len: usize) -> f64 {
-    visible as f64 / total as f64 * track_len as f64
+    visible as f64 / total.saturating_sub(1).max(1) as f64 * track_len as f64
 }
 
 /// Whether a scrollbar glyph (track or thumb) sits in column `x` of rows
@@ -6020,5 +6021,34 @@ fn vault_picker_row_overflowing_at_a_span_boundary_ends_in_an_ellipsis() {
         row,
         format!("vault  {}…", "x".repeat(60)),
         "the row is cut one column early and ends in an ellipsis"
+    );
+}
+
+/// `V`: the vault picker draws as a popup over the main view, with the
+/// in-app `Esc` hint.
+#[test]
+fn vault_picker_popup_draws_over_the_main_view() {
+    let dir = crate::testutil::TempDir::new("ui-vault-picker");
+    let file = ui_viewer("ui-vault-picker.md", "# Underneath\n");
+    let mut app = app_for(&file, Some(dir.path()));
+    app.vaults = crate::vault_picker::VaultList {
+        entries: ["alpha", "beta"]
+            .iter()
+            .map(|name| {
+                crate::vault_picker::VaultEntry::new(name.to_string(), dir.path().join(name), None)
+            })
+            .collect(),
+        startup_preselect: 0,
+    };
+    app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal.draw(|f| draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let screen: String = (0..30).map(|y| row_symbols(buffer, y) + "\n").collect();
+    assert!(screen.contains("vaults: 2"), "{screen}");
+    assert!(screen.contains("Esc close"), "{screen}");
+    assert!(
+        screen.contains("Underneath"),
+        "the main view stays behind it"
     );
 }

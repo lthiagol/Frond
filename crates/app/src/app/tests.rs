@@ -4899,3 +4899,120 @@ fn clicking_a_switcher_row_selects_then_opens_it() {
         app.current_path()
     );
 }
+
+/// Two `[vaults]` entries: `alpha` is the test app's vault, `beta` another.
+fn with_vaults(app: &mut App, alpha: &TempDir, beta: &TempDir) {
+    let entry = |name: &str, dir: &TempDir| {
+        crate::vault_picker::VaultEntry::new(name.to_string(), dir.path().to_path_buf(), None)
+    };
+    app.vaults = crate::vault_picker::VaultList {
+        entries: vec![entry("alpha", alpha), entry("beta", beta)],
+        startup_preselect: 1,
+    };
+}
+
+#[test]
+fn shift_v_opens_the_vault_picker_on_the_open_vault() {
+    let alpha = vault();
+    let beta = vault();
+    let (_f, mut app) = app(&alpha);
+    with_vaults(&mut app, &alpha, &beta);
+    assert_eq!(
+        app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT)),
+        Flow::Continue
+    );
+    let picker = app.vault_picker.as_ref().expect("the picker is open");
+    assert_eq!(picker.selected_entry().unwrap().name, "alpha");
+    // The popup owns the keys: `q` filters instead of quitting.
+    assert_eq!(app.handle_key(key(KeyCode::Char('q'))), Flow::Continue);
+    assert_eq!(app.vault_picker.as_ref().unwrap().query, "q");
+    assert_eq!(app.handle_key(key(KeyCode::Esc)), Flow::Continue);
+    assert!(app.vault_picker.is_none(), "Esc closes the popup");
+    app.handle_key(key(KeyCode::Char('V')));
+    assert_eq!(app.handle_key(ctrl(KeyCode::Char('c'))), Flow::Quit);
+}
+
+#[test]
+fn shift_v_with_no_vaults_only_says_so() {
+    let alpha = vault();
+    let (_f, mut app) = app(&alpha);
+    app.handle_key(key(KeyCode::Char('V')));
+    assert!(app.vault_picker.is_none());
+    assert_eq!(
+        app.last_status.as_ref().map(|status| status.text.as_str()),
+        Some("no vaults configured ([vaults] in config.toml)")
+    );
+}
+
+#[test]
+fn choosing_the_open_vault_changes_nothing() {
+    let alpha = vault();
+    let beta = vault();
+    let (_f, mut app) = app(&alpha);
+    with_vaults(&mut app, &alpha, &beta);
+    app.scroll_content_down(5);
+    let (note, scroll) = (app.viewer.path.clone(), app.viewer.scroll);
+    app.handle_key(key(KeyCode::Char('V')));
+    assert_eq!(app.handle_key(key(KeyCode::Enter)), Flow::Continue);
+    assert!(app.vault_picker.is_none(), "the popup closed");
+    assert_eq!((app.viewer.path.clone(), app.viewer.scroll), (note, scroll));
+}
+
+#[test]
+fn choosing_another_vault_asks_for_the_switch_and_a_failure_stays_in_the_picker() {
+    let alpha = vault();
+    let beta = vault();
+    let (_f, mut app) = app(&alpha);
+    with_vaults(&mut app, &alpha, &beta);
+    let note = app.viewer.path.clone();
+    app.handle_key(key(KeyCode::Char('V')));
+    app.handle_key(key(KeyCode::Down));
+    assert_eq!(
+        app.handle_key(key(KeyCode::Enter)),
+        Flow::SwitchVault(beta.path().to_path_buf())
+    );
+    app.vault_switch_failed("boom");
+    let picker = app.vault_picker.as_ref().expect("the popup stays open");
+    assert_eq!(picker.error.as_deref(), Some("cannot open vault: boom"));
+    assert_eq!(
+        app.vault_root(),
+        Some(alpha.path()),
+        "the open vault is intact"
+    );
+    assert_eq!(app.viewer.path, note);
+}
+
+#[test]
+fn the_vault_picker_takes_no_mouse_input() {
+    let alpha = vault();
+    let beta = vault();
+    let (_f, mut app) = app(&alpha);
+    with_vaults(&mut app, &alpha, &beta);
+    app.handle_key(key(KeyCode::Char('V')));
+    let scroll = app.viewer.scroll;
+    app.handle_wheel(true);
+    app.handle_click(0, 0);
+    assert_eq!(app.viewer.scroll, scroll);
+    assert!(app.vault_picker.is_some());
+    assert_eq!(app.focus, Focus::Content);
+}
+
+#[test]
+fn display_state_round_trips_through_apply_display() {
+    let alpha = vault();
+    let (_f, mut app) = app(&alpha);
+    let display = DisplayState {
+        theme: app.theme_name().to_string(),
+        theme_rotation: ThemeRotation::Dark,
+        mouse_capture: false,
+        watch: false,
+        sidebar_width: Some(50),
+        sidebar_visible: false,
+        show_metadata: false,
+        line_numbers: true,
+        note_margin: 7,
+        note_margin_y: 3,
+    };
+    app.apply_display(&display);
+    assert_eq!(app.display_state(), display);
+}

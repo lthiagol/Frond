@@ -11,8 +11,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   file argument, frond opens on a vault picker: type to filter by name or
   path, `Enter` to open, `Esc` to quit. The last vault opened is
   preselected next time, else the one the `vault` key names.
+- `V` switches vaults without quitting: the same picker opens over the
+  note, the vault you leave keeps its session, the one you pick opens
+  where you left it, and the theme and other display toggles stay as
+  they are. A vault that cannot be opened keeps the picker open with the
+  error.
 
 ### Fixed
+- `metadata = false` hides the frontmatter block on a first start with no
+  saved session too.
 
 ### Changed
 - A quick-switcher row wider than the popup is cut with `…` instead of

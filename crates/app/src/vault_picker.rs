@@ -6,7 +6,9 @@
 //! quick switcher's subsequence matcher ([`crate::quick::fuzzy_match`]) and
 //! the drawing lives in `ui.rs` ([`crate::ui::draw_vault_picker`]). At
 //! startup `main.rs` drives it in a small event loop of its own, before any
-//! vault is indexed.
+//! vault is indexed; in the app (`V`, SPEC's **Vault picker in the app**)
+//! the [`crate::app::App`] holds it as a popup and `main.rs` does the
+//! switch.
 
 use std::path::{Path, PathBuf};
 
@@ -60,7 +62,30 @@ pub enum PickerFlow {
     Continue,
     /// Open this vault (an existing directory).
     Open(PathBuf),
+    /// `Esc`: quits at startup, closes the popup in the app.
+    Close,
+    /// `Ctrl+C`.
     Quit,
+}
+
+/// The `[vaults]` entries read at startup, kept for the in-app picker,
+/// with the startup preselection ([`preselect`]) for when the open vault
+/// is not an entry.
+#[derive(Clone, Debug, Default)]
+pub struct VaultList {
+    pub entries: Vec<VaultEntry>,
+    pub startup_preselect: usize,
+}
+
+impl VaultList {
+    /// The picker over these entries, the open vault preselected when it is
+    /// one of them.
+    pub fn picker(&self, open: Option<&Path>) -> PickerState {
+        let pre = open
+            .and_then(|root| entry_at(&self.entries, root))
+            .unwrap_or(self.startup_preselect);
+        PickerState::new(self.entries.clone(), pre)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -130,7 +155,7 @@ impl PickerState {
         self.error = None;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Esc => return PickerFlow::Quit,
+            KeyCode::Esc => return PickerFlow::Close,
             KeyCode::Char('c') if ctrl => return PickerFlow::Quit,
             KeyCode::Up => self.selected = self.selected.saturating_sub(1),
             KeyCode::Down => {
@@ -162,13 +187,7 @@ impl PickerState {
 /// entry, else the entry the `vault` key names (by name, or by path), else
 /// the first. Paths compare canonically.
 pub fn preselect(entries: &[VaultEntry], last: Option<&Path>, vault_key: Option<&Path>) -> usize {
-    let canon = |path: &Path| path.canonicalize().ok();
-    let by_path = |target: &Path| {
-        let target = canon(target)?;
-        entries
-            .iter()
-            .position(|entry| canon(&entry.path).as_deref() == Some(target.as_path()))
-    };
+    let by_path = |target: &Path| entry_at(entries, target);
     last.and_then(by_path)
         .or_else(|| {
             let key = vault_key?;
@@ -178,6 +197,15 @@ pub fn preselect(entries: &[VaultEntry], last: Option<&Path>, vault_key: Option<
                 .or_else(|| by_path(key))
         })
         .unwrap_or(0)
+}
+
+/// The entry whose path is `target`, compared canonically.
+pub fn entry_at(entries: &[VaultEntry], target: &Path) -> Option<usize> {
+    let canon = |path: &Path| path.canonicalize().ok();
+    let target = canon(target)?;
+    entries
+        .iter()
+        .position(|entry| canon(&entry.path).as_deref() == Some(target.as_path()))
 }
 
 #[cfg(test)]
@@ -295,10 +323,10 @@ mod tests {
     }
 
     #[test]
-    fn esc_and_ctrl_c_quit() {
+    fn esc_closes_and_ctrl_c_quits() {
         let dir = TempDir::new("picker-quit");
         let mut state = PickerState::new(entries(dir.path()), 0);
-        assert_eq!(state.handle_key(key(KeyCode::Esc)), PickerFlow::Quit);
+        assert_eq!(state.handle_key(key(KeyCode::Esc)), PickerFlow::Close);
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(state.handle_key(ctrl_c), PickerFlow::Quit);
         assert_eq!(state.query, "", "Ctrl+C is not typed into the filter");
@@ -330,5 +358,19 @@ mod tests {
         );
         let state = PickerState::new(list, 2);
         assert_eq!(selected_name(&state), "work");
+    }
+
+    #[test]
+    fn the_list_preselects_the_open_vault_else_the_startup_choice() {
+        let dir = TempDir::new("picker-list");
+        let list = VaultList {
+            entries: entries(dir.path()),
+            startup_preselect: 1,
+        };
+        let open = list.picker(Some(&dir.path().join("work")));
+        assert_eq!(selected_name(&open), "work");
+        let elsewhere = list.picker(Some(dir.path()));
+        assert_eq!(selected_name(&elsewhere), "notes");
+        assert_eq!(selected_name(&list.picker(None)), "notes");
     }
 }

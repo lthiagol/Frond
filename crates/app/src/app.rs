@@ -135,6 +135,28 @@ pub struct Disambiguation {
 pub enum Flow {
     Continue,
     Quit,
+    /// Leave this vault for the one at this root (the in-app vault picker;
+    /// `main.rs` does the switch).
+    SwitchVault(PathBuf),
+}
+
+/// The display state a vault switch carries from one App to the next (the
+/// list is SPEC's **Vault picker in the app**). At startup it comes from
+/// the config and flags, on a switch from [`App::display_state`]; both go
+/// through [`App::apply_display`], except the theme, which `main.rs`
+/// resolves by name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisplayState {
+    pub theme: String,
+    pub theme_rotation: ThemeRotation,
+    pub mouse_capture: bool,
+    pub watch: bool,
+    pub sidebar_width: Option<u16>,
+    pub sidebar_visible: bool,
+    pub show_metadata: bool,
+    pub line_numbers: bool,
+    pub note_margin: u16,
+    pub note_margin_y: u16,
 }
 
 /// Widget geometry as of the last draw. `ui::draw` refreshes it every
@@ -214,6 +236,10 @@ pub struct App {
     pub active_search: Option<ActiveSearch>,
     /// Quick note switcher (`Ctrl+P`): fuzzy note jump over the index.
     pub quick: crate::quick::QuickState,
+    /// The `[vaults]` entries read at startup, for the in-app picker.
+    pub vaults: crate::vault_picker::VaultList,
+    /// The in-app vault picker popup (`V`; `None` while closed).
+    pub vault_picker: Option<crate::vault_picker::PickerState>,
     /// Last read-only git sync status (`None` = unavailable: no git, not
     /// a repository, or every command failed — the status bar shows
     /// nothing in that case).
@@ -354,6 +380,8 @@ impl App {
             search: SearchState::default(),
             active_search: None,
             quick: crate::quick::QuickState::default(),
+            vaults: crate::vault_picker::VaultList::default(),
+            vault_picker: None,
             git: None,
             watcher,
             mouse_capture: true,
@@ -683,9 +711,7 @@ impl App {
         ));
     }
 
-    /// The active theme's name (used by the tests; also cheap status
-    /// diagnostics).
-    #[cfg(test)]
+    /// The active theme's name.
     pub fn theme_name(&self) -> &str {
         &self.theme_choices.current().theme.name
     }
@@ -1021,7 +1047,7 @@ impl App {
     /// click-selectable); used by both click and wheel gating so their
     /// behavior stays aligned.
     fn any_popup_open(&self) -> bool {
-        self.disambiguation.is_some() || self.viewer.help_open
+        self.disambiguation.is_some() || self.viewer.help_open || self.vault_picker.is_some()
     }
 
     /// Maps a row of the note pane's scrollbar track onto a scroll
@@ -2066,6 +2092,9 @@ impl App {
         // "Plain" keys: no modifiers, or Shift only (Shift is how terminals
         // deliver uppercase letters like `G`).
         let plain = key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT;
+        if self.vault_picker.is_some() {
+            return self.handle_vault_picker_key(key);
+        }
         if self.quick.open {
             return self.handle_quick_key(key);
         }
@@ -2159,6 +2188,7 @@ impl App {
             // `Shift+T`: theme cycling (session-only). `t` stays the
             // sidebar-mode toggle; Shift is how terminals deliver `T`.
             KeyCode::Char('T') if plain => self.cycle_theme(),
+            KeyCode::Char('V') if plain => self.open_vault_picker(),
             KeyCode::Char('t') if key.modifiers == KeyModifiers::CONTROL => {
                 self.rotate_theme_group()
             }
@@ -2325,6 +2355,91 @@ impl App {
         } else {
             self.sidebar_move(wheel_delta(down));
         }
+    }
+
+    /// The open vault's root (`None` when started on a file argument with
+    /// no vault).
+    pub fn vault_root(&self) -> Option<&Path> {
+        self.sidebar.as_ref().map(|sidebar| sidebar.root.as_path())
+    }
+
+    /// `V`: opens the vault picker over the main view (SPEC's **Vault
+    /// picker in the app**).
+    pub fn open_vault_picker(&mut self) {
+        if self.vaults.entries.is_empty() {
+            self.set_status("no vaults configured ([vaults] in config.toml)");
+            return;
+        }
+        self.vault_picker = Some(self.vaults.picker(self.vault_root()));
+    }
+
+    /// Keys while the vault picker is open: the picker owns them all.
+    fn handle_vault_picker_key(&mut self, key: KeyEvent) -> Flow {
+        let Some(picker) = &mut self.vault_picker else {
+            return Flow::Continue;
+        };
+        match picker.handle_key(key) {
+            crate::vault_picker::PickerFlow::Continue => Flow::Continue,
+            crate::vault_picker::PickerFlow::Close => {
+                self.vault_picker = None;
+                Flow::Continue
+            }
+            crate::vault_picker::PickerFlow::Quit => Flow::Quit,
+            crate::vault_picker::PickerFlow::Open(root) => {
+                let canon = |path: &Path| path.canonicalize().ok();
+                let open = self.vault_root().and_then(canon);
+                if open.is_some() && open == canon(&root) {
+                    self.vault_picker = None;
+                    Flow::Continue
+                } else {
+                    // The popup stays open until the switch is done: a
+                    // vault that cannot be indexed reports into it
+                    // ([`Self::vault_switch_failed`]).
+                    Flow::SwitchVault(root)
+                }
+            }
+        }
+    }
+
+    /// The chosen vault could not be opened: the picker stays open with
+    /// the error, and nothing else changes.
+    pub fn vault_switch_failed(&mut self, err: impl std::fmt::Display) {
+        if let Some(picker) = &mut self.vault_picker {
+            picker.error = Some(format!("cannot open vault: {err}"));
+        }
+    }
+
+    /// The current display state, for the next vault's App.
+    pub fn display_state(&self) -> DisplayState {
+        DisplayState {
+            theme: self.theme_name().to_string(),
+            theme_rotation: self.theme_rotation,
+            mouse_capture: self.mouse_capture,
+            watch: self.viewer.watch,
+            sidebar_width: self.sidebar_width,
+            // A run with no sidebar to hide never hid it.
+            sidebar_visible: self.sidebar_visible || self.sidebar.is_none(),
+            show_metadata: self.viewer.show_metadata,
+            line_numbers: self.line_numbers,
+            note_margin: self.note_margin,
+            note_margin_y: self.note_margin_y,
+        }
+    }
+
+    /// Applies a display state but its theme (see [`DisplayState`]).
+    pub fn apply_display(&mut self, display: &DisplayState) {
+        self.theme_rotation = display.theme_rotation;
+        self.mouse_capture = display.mouse_capture;
+        self.viewer.watch = display.watch;
+        self.sidebar_width = display.sidebar_width;
+        self.sidebar_visible = display.sidebar_visible && self.sidebar.is_some();
+        if self.viewer.show_metadata != display.show_metadata {
+            // Through the toggle: the note re-renders with the block.
+            self.viewer.toggle_metadata();
+        }
+        self.line_numbers = display.line_numbers;
+        self.note_margin = display.note_margin;
+        self.note_margin_y = display.note_margin_y;
     }
 
     /// `Ctrl+P`: opens the quick note switcher over the vault index. The

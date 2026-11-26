@@ -7,7 +7,9 @@
 //! Which vault opens is SPEC.md "Data flow" step 1 ([`choose_vault`]): with
 //! two or more config `[vaults]` and neither `--vault` nor a file argument,
 //! the vault picker ([`vault_picker`]) runs first; with nothing to go on,
-//! the app prompts for the vault directory. A file argument without a vault is
+//! the app prompts for the vault directory. `V` switches vaults while the
+//! app runs: [`run_app`] leaves the open vault as a clean quit does and
+//! [`start_app`] opens the chosen one, the path the first start takes. A file argument without a vault is
 //! opened on its own, without a sidebar; the vault index is then the
 //! current directory. With a vault, `Tab` shows/hides the sidebar tree; `h`/`l` move focus between
 //! sidebar and content; `Backspace`/`Ctrl+O` walk the navigation history.
@@ -16,7 +18,7 @@
 //! `w` toggles watch; `s` is the global vault search; `Ctrl+P` is the
 //! quick note switcher; `u` refreshes the
 //! git sync status; `Shift+T` cycles the theme; `?` toggles the help
-//! popup; `v`/`1`–`9` switch table views while a `.base` file is open;
+//! popup; `V` switches vaults; `v`/`1`–`9` switch table views while a `.base` file is open;
 //! `q`/Ctrl+C quits.
 //!
 //! Vault index: booted at startup from `--vault` when given, otherwise
@@ -400,7 +402,9 @@ fn run_picker(
             match picker.handle_key(key) {
                 vault_picker::PickerFlow::Continue => {}
                 vault_picker::PickerFlow::Open(path) => return Ok(Some(path)),
-                vault_picker::PickerFlow::Quit => return Ok(None),
+                vault_picker::PickerFlow::Close | vault_picker::PickerFlow::Quit => {
+                    return Ok(None)
+                }
             }
         }
     }
@@ -514,12 +518,23 @@ fn main() {
         let root = vault
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-        match VaultIndex::build(&root) {
-            Ok(index) => Some(Rc::new(RefCell::new(index))),
+        match build_index(&root) {
+            Ok(index) => Some(index),
             Err(err) => {
                 eprintln!("warning: no vault index ({err}); wikilinks/tags/backlinks disabled");
                 None
             }
+        }
+    };
+
+    let mut warnings = Vec::new();
+    let display = startup_display(&config, theme_name, mouse, watch, &mut warnings);
+    let vaults = {
+        let entries = picker_entries(&config);
+        let startup_preselect = picker_preselection(&entries, &config);
+        vault_picker::VaultList {
+            entries,
+            startup_preselect,
         }
     };
 
@@ -528,95 +543,28 @@ fn main() {
         None => setup_terminal_or_exit(mouse),
     };
 
-    let width = crossterm::terminal::size()
-        .map(|(w, _)| w.saturating_sub(2).max(20))
-        .unwrap_or(FALLBACK_SIZE.0);
-    let result = Viewer::open(&file, width as usize).and_then(|mut viewer| {
-        viewer.watch = watch;
-        App::new(viewer, vault.clone(), index).and_then(|mut app| {
-            // Theme: presets + discovered custom themes; the resolved name
-            // positions the `Shift+T` cycle. The selected theme's own
-            // warnings (unknown keys, unknown theme) go to stderr AND the
-            // status bar; other themes' load errors stay stderr-only so a
-            // broken custom file cannot spam the status bar at startup.
-            // Never silent, never fatal.
-            let dirs = theme::default_theme_dirs();
-            let custom = theme::discover_custom_themes(&dirs);
-            let (resolved, theme_warnings, load_errors) =
-                app.install_theme_choices(&theme_name, &dirs, &custom);
-            for warning in theme_warnings.iter().chain(&load_errors) {
-                eprintln!("warning: {warning}");
+    let first = Start {
+        vault,
+        file,
+        explicit_note,
+        index,
+    };
+    let result = start_app(first, &display, &config, &vaults, &mut warnings).and_then(|app| {
+        for warning in &warnings {
+            eprintln!("warning: {warning}");
+        }
+        let mut app = app;
+        // A switch is a clean quit of the open vault (`run_app` saves it)
+        // followed by a start of the chosen one through `start_app`, the
+        // same path the first start took.
+        loop {
+            match run_app(&mut terminal, app, &mut |root, display| {
+                switch_vault(root, display, &config, &vaults)
+            })? {
+                Outcome::Quit => return Ok(()),
+                Outcome::Switch(next) => app = *next,
             }
-            app.apply_theme(&resolved, &theme_warnings);
-            // Theme group for `Shift+T` (config `theme_rotation`; `Ctrl+T`
-            // changes it for the session). An unknown value warns and keeps
-            // "all".
-            if let Some(value) = config.theme_rotation.as_deref() {
-                match theme::ThemeRotation::parse(value) {
-                    Some(rotation) => app.theme_rotation = rotation,
-                    None => eprintln!(
-                        "warning: config theme_rotation \"{value}\" is not all, light or dark; using all"
-                    ),
-                }
-            }
-            // Status-bar icons (config `icons`). An unknown value warns and
-            // keeps the default, nerd.
-            if let Some(value) = config.icons.as_deref() {
-                match config::IconSet::parse(value) {
-                    Some(icons) => app.icons = icons,
-                    None => eprintln!(
-                        "warning: config icons \"{value}\" is not nerd or unicode; using nerd"
-                    ),
-                }
-            }
-            // Note margin (config `margin`, blank columns per side).
-            app.note_margin = config
-                .margin
-                .unwrap_or(config::DEFAULT_MARGIN)
-                .min(config::MAX_MARGIN);
-            // Vertical note margin (config `margin_y`, blank rows above and
-            // below the note text).
-            app.note_margin_y = effective_margin_y(config.margin_y);
-            // Line-number gutter (config `line_numbers`, default off).
-            app.line_numbers = config.line_numbers.unwrap_or(false);
-            // Mouse capture default (config/flag): the App field drives the
-            // runtime toggle (`m`); setup_terminal already applied the
-            // startup state.
-            app.mouse_capture = mouse;
-            // Sidebar width override (config `sidebar_width`), same bounds
-            // as the `<`/`>` keys clamp to.
-            app.sidebar_width = config
-                .sidebar_width
-                .map(|w| w.clamp(crate::app::SIDEBAR_MIN_WIDTH, crate::app::SIDEBAR_MAX_WIDTH));
-            // Metadata block default (config `metadata` key; `f` toggles).
-            app.viewer.show_metadata = config.metadata.unwrap_or(true);
-            // Session restore: only when the note came from the defaults
-            // (no explicit file argument — that argument is the user's
-            // intent for this run). A missing or malformed session file is
-            // the normal first-run state, never a warning.
-            if !explicit_note {
-                if let Some(root) = &vault {
-                    if let Some(file) = session::session_file(root)
-                        .and_then(|path| session::SessionState::load(&path))
-                    {
-                        app.restore_session(&file, root);
-                    }
-                }
-            }
-            // Config hot-reload: the theme key live-applies on change.
-            if let Some(path) = config::config_path() {
-                app.watch_config(path);
-            }
-            // A `.base` file argument renders its table view instead of
-            // the markdown viewer (the Viewer parsed it as plain text,
-            // harmlessly unused from here on).
-            if baseview::is_base_file(&file) {
-                if let Err(err) = app.open_base_at(&file, 0) {
-                    app.viewer.last_error = Some(format!("open failed: {err}"));
-                }
-            }
-            run_app(&mut terminal, &mut app, vault.as_deref())
-        })
+        }
     });
 
     if let Err(err) = restore_terminal(&mut terminal) {
@@ -626,6 +574,156 @@ fn main() {
         eprintln!("error: {err}");
         std::process::exit(1);
     }
+}
+
+/// The vault index for `root`.
+fn build_index(root: &Path) -> io::Result<SharedIndex> {
+    VaultIndex::build(root).map(|index| Rc::new(RefCell::new(index)))
+}
+
+/// What a start opens: the first start's from the arguments, a switch's
+/// the chosen vault with no note argument.
+struct Start {
+    vault: Option<PathBuf>,
+    file: PathBuf,
+    /// The note came from an argument (it wins over the session restore).
+    explicit_note: bool,
+    index: Option<SharedIndex>,
+}
+
+/// The startup display state, from the flags and the config. Config
+/// values that do not parse leave a warning in `warnings`.
+fn startup_display(
+    config: &config::Config,
+    theme: String,
+    mouse: bool,
+    watch: bool,
+    warnings: &mut Vec<String>,
+) -> app::DisplayState {
+    // Theme group for `Shift+T` (config `theme_rotation`; `Ctrl+T` changes
+    // it for the session). An unknown value warns and keeps "all".
+    let mut theme_rotation = theme::ThemeRotation::default();
+    if let Some(value) = config.theme_rotation.as_deref() {
+        match theme::ThemeRotation::parse(value) {
+            Some(rotation) => theme_rotation = rotation,
+            None => warnings.push(format!(
+                "config theme_rotation \"{value}\" is not all, light or dark; using all"
+            )),
+        }
+    }
+    app::DisplayState {
+        theme,
+        theme_rotation,
+        // Mouse capture default (config/flag): the App field drives the
+        // runtime toggle (`m`); setup_terminal already applied the startup
+        // state.
+        mouse_capture: mouse,
+        watch,
+        // Sidebar width override (config `sidebar_width`), same bounds as
+        // the `<`/`>` keys clamp to.
+        sidebar_width: config
+            .sidebar_width
+            .map(|w| w.clamp(app::SIDEBAR_MIN_WIDTH, app::SIDEBAR_MAX_WIDTH)),
+        sidebar_visible: true,
+        // Metadata block default (config `metadata` key; `f` toggles).
+        show_metadata: config.metadata.unwrap_or(true),
+        // Line-number gutter (config `line_numbers`, default off).
+        line_numbers: config.line_numbers.unwrap_or(false),
+        // Note margin (config `margin`, blank columns per side).
+        note_margin: config
+            .margin
+            .unwrap_or(config::DEFAULT_MARGIN)
+            .min(config::MAX_MARGIN),
+        // Vertical note margin (config `margin_y`, blank rows above and
+        // below the note text).
+        note_margin_y: effective_margin_y(config.margin_y),
+    }
+}
+
+/// Builds the App for a start: the first start and every vault switch
+/// come through here. Warnings meant for stderr land in `warnings` (the
+/// first start prints them; a switch has no stderr to print to).
+fn start_app(
+    start: Start,
+    display: &app::DisplayState,
+    config: &config::Config,
+    vaults: &vault_picker::VaultList,
+    warnings: &mut Vec<String>,
+) -> io::Result<App> {
+    let width = crossterm::terminal::size()
+        .map(|(w, _)| w.saturating_sub(2).max(20))
+        .unwrap_or(FALLBACK_SIZE.0);
+    let viewer = Viewer::open(&start.file, width as usize)?;
+    let mut app = App::new(viewer, start.vault.clone(), start.index)?;
+    app.vaults = vaults.clone();
+    // Theme: presets + discovered custom themes; the resolved name
+    // positions the `Shift+T` cycle. The selected theme's own warnings
+    // (unknown keys, unknown theme) go to stderr AND the status bar; other
+    // themes' load errors stay stderr-only so a broken custom file cannot
+    // spam the status bar at startup. Never silent, never fatal.
+    let dirs = theme::default_theme_dirs();
+    let custom = theme::discover_custom_themes(&dirs);
+    let (resolved, theme_warnings, load_errors) =
+        app.install_theme_choices(&display.theme, &dirs, &custom);
+    warnings.extend(theme_warnings.iter().chain(&load_errors).cloned());
+    app.apply_theme(&resolved, &theme_warnings);
+    // Status-bar icons (config `icons`). An unknown value warns and keeps
+    // the default, nerd.
+    if let Some(value) = config.icons.as_deref() {
+        match config::IconSet::parse(value) {
+            Some(icons) => app.icons = icons,
+            None => warnings.push(format!(
+                "config icons \"{value}\" is not nerd or unicode; using nerd"
+            )),
+        }
+    }
+    app.apply_display(display);
+    // Session restore: only when the note came from the defaults (no
+    // explicit file argument — that argument is the user's intent for this
+    // run). A missing or malformed session file is the normal first-run
+    // state, never a warning.
+    if !start.explicit_note {
+        if let Some(root) = &start.vault {
+            if let Some(file) =
+                session::session_file(root).and_then(|path| session::SessionState::load(&path))
+            {
+                app.restore_session(&file, root);
+            }
+        }
+    }
+    // Config hot-reload: the theme key live-applies on change.
+    if let Some(path) = config::config_path() {
+        app.watch_config(path);
+    }
+    // A `.base` file argument renders its table view instead of the
+    // markdown viewer (the Viewer parsed it as plain text, harmlessly
+    // unused from here on).
+    if baseview::is_base_file(&start.file) {
+        if let Err(err) = app.open_base_at(&start.file, 0) {
+            app.viewer.last_error = Some(format!("open failed: {err}"));
+        }
+    }
+    Ok(app)
+}
+
+/// The App for the vault the in-app picker chose, built while the open
+/// one is still untouched: a vault that cannot be indexed (or opened) is
+/// an error for the picker, not a warning, so nothing is left half-open.
+fn switch_vault(
+    root: PathBuf,
+    display: app::DisplayState,
+    config: &config::Config,
+    vaults: &vault_picker::VaultList,
+) -> io::Result<App> {
+    let root = absolutize(&root);
+    let index = build_index(&root)?;
+    let start = Start {
+        file: absolutize(&root.join("index.md")),
+        vault: Some(root),
+        explicit_note: false,
+        index: Some(index),
+    };
+    start_app(start, &display, config, vaults, &mut Vec::new())
 }
 
 fn setup_terminal_or_exit(capture_mouse: bool) -> Tui {
@@ -703,7 +801,23 @@ fn install_panic_hook() {
     }));
 }
 
-fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::Result<()> {
+/// How `run_app` ended.
+enum Outcome {
+    Quit,
+    /// The in-app vault picker chose another vault: its App, built.
+    Switch(Box<App>),
+}
+
+/// The event loop for one vault. `switch` builds the App for a vault the
+/// in-app picker chose; until it succeeds the open vault is untouched (its
+/// error goes into the picker). Either way out, the open vault is left as
+/// a clean quit leaves it.
+fn run_app(
+    terminal: &mut Tui,
+    mut app: App,
+    switch: &mut dyn FnMut(PathBuf, app::DisplayState) -> io::Result<App>,
+) -> io::Result<Outcome> {
+    let mut outcome = Outcome::Quit;
     let (cols, rows) = crossterm::terminal::size().unwrap_or(FALLBACK_SIZE);
     app.viewer.on_resize(cols, rows);
 
@@ -717,7 +831,7 @@ fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::
     let mut capture_on = app.mouse_capture;
 
     loop {
-        terminal.draw(|f| ui::draw(f, app))?;
+        terminal.draw(|f| ui::draw(f, &mut app))?;
 
         if app.mouse_capture != capture_on {
             let mut stdout = io::stdout();
@@ -734,11 +848,17 @@ fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::
 
         if event::poll(POLL_INTERVAL)? {
             match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    if let app::Flow::Quit = app.handle_key(key) {
-                        break;
-                    }
-                }
+                Event::Key(key) if key.kind == KeyEventKind::Press => match app.handle_key(key) {
+                    app::Flow::Continue => {}
+                    app::Flow::Quit => break,
+                    app::Flow::SwitchVault(root) => match switch(root, app.display_state()) {
+                        Ok(next) => {
+                            outcome = Outcome::Switch(Box::new(next));
+                            break;
+                        }
+                        Err(err) => app.vault_switch_failed(err),
+                    },
+                },
                 Event::Mouse(mouse) => {
                     // Capture off: the status bar promises the app ignores
                     // the mouse, so gate here too — it must not depend on
@@ -787,13 +907,13 @@ fn run_app(terminal: &mut Tui, app: &mut App, vault_root: Option<&Path>) -> io::
     // selection and expansion) and the last vault (the picker's
     // preselection) for the next run. Best-effort — a failed write must
     // never turn a quit into an error.
-    if let Some(root) = vault_root {
+    if let Some(root) = app.vault_root() {
         if let Some(path) = session::session_file(root) {
             let _ = app.session_state(root).save(&path);
         }
         let _ = session::save_last_vault(root);
     }
-    Ok(())
+    Ok(outcome)
 }
 
 #[cfg(test)]
@@ -1032,5 +1152,88 @@ mod tests {
             1,
             "the entry at ~/work (name order: notes, work), not the first"
         );
+    }
+
+    /// A switch reads the config, session and theme paths: point them at a
+    /// temp dir under the env lock, so no test touches the developer's
+    /// `~/.config` or `~/.local/state`. The guard is returned first so it
+    /// outlives the test's use of the temp dir.
+    fn isolated_env(name: &str) -> (testutil::EnvGuard, TempDir) {
+        let dir = TempDir::new(name);
+        let mut env = testutil::EnvGuard::lock();
+        env.set("FROND_CONFIG", dir.path().join("config.toml"));
+        env.set("FROND_SESSION", dir.path().join("state"));
+        env.set("FROND_THEMES", dir.path().join("themes"));
+        (env, dir)
+    }
+
+    fn vault_dir(name: &str) -> crate::testutil::TempDir {
+        let dir = crate::testutil::TempDir::new(name);
+        std::fs::write(dir.path().join("index.md"), format!("# {name}\n")).unwrap();
+        dir
+    }
+
+    fn open_app(dir: &crate::testutil::TempDir) -> App {
+        let root = dir.path().to_path_buf();
+        let index = build_index(&root).unwrap();
+        let viewer = Viewer::open(&root.join("index.md"), 80).unwrap();
+        App::new(viewer, Some(root), Some(index)).unwrap()
+    }
+
+    #[test]
+    fn a_switch_opens_the_chosen_vault_with_the_current_display_state() {
+        let (_env, _state) = isolated_env("switch-state");
+        let alpha = vault_dir("switch-alpha");
+        let beta = vault_dir("switch-beta");
+        let mut old = open_app(&alpha);
+        let display = app::DisplayState {
+            theme: "nord".to_string(),
+            theme_rotation: theme::ThemeRotation::Light,
+            mouse_capture: false,
+            watch: false,
+            sidebar_width: Some(41),
+            sidebar_visible: false,
+            show_metadata: false,
+            line_numbers: true,
+            note_margin: 4,
+            note_margin_y: 2,
+        };
+        // As the user left them: toggled, not the config's values.
+        let (resolved, warnings, _) =
+            old.install_theme_choices(&display.theme, &[], &Default::default());
+        old.apply_theme(&resolved, &warnings);
+        old.apply_display(&display);
+        let vaults = vault_picker::VaultList::default();
+        let new = switch_vault(
+            beta.path().to_path_buf(),
+            old.display_state(),
+            &config::Config::default(),
+            &vaults,
+        )
+        .unwrap();
+        assert_eq!(new.display_state(), display);
+        assert_eq!(new.theme_name(), "nord");
+        assert_eq!(new.vault_root(), Some(absolutize(beta.path()).as_path()));
+        assert_eq!(new.viewer.path, absolutize(beta.path()).join("index.md"));
+        assert_eq!(
+            old.vault_root(),
+            Some(alpha.path()),
+            "the old App is untouched"
+        );
+    }
+
+    #[test]
+    fn a_vault_that_cannot_be_indexed_is_an_error_for_the_picker() {
+        let (_env, _state) = isolated_env("switch-fail-state");
+        let alpha = vault_dir("switch-fail");
+        let old = open_app(&alpha);
+        let gone = alpha.path().join("gone");
+        let result = switch_vault(
+            gone,
+            old.display_state(),
+            &config::Config::default(),
+            &vault_picker::VaultList::default(),
+        );
+        assert!(result.is_err());
     }
 }

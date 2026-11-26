@@ -43,14 +43,7 @@ and the tree is clean. What the cycle carries:
 
 ## Open
 
-**Multiple vaults** (the human's request, 2026-11-26). Two units, in order:
-
-1. ~~Config + startup picker~~ — committed. The picker's state is
-   `crates/app/src/vault_picker.rs`, drawn by `ui::draw_vault_picker`,
-   driven at startup by `run_picker` in `main.rs`.
-2. **In-app switch.** A key opens the same picker while running; switching
-   saves the current vault's session, re-indexes, moves the watcher and git
-   status to the new root, and restores that vault's session.
+Nothing. Multiple vaults (both units) is committed.
 
 ## Next
 

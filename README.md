@@ -70,6 +70,11 @@ select, `Enter` to open, `Esc` to quit. The last vault you opened (else the
 `vault` key) is preselected. With exactly one `[vaults]` entry and no
 `vault` key, that vault opens directly.
 
+`V` opens the same picker inside the app to switch vaults: the open vault
+is saved as on quit and the chosen one opens as a fresh start (its own
+session restored), keeping your theme, mouse, watch, sidebar, metadata,
+line-number and margin settings. `Esc` closes the picker.
+
 If you start `frond` without `--vault` (and no `vault` key or `[vaults]` in
 the config file), it asks for the vault directory. Relative paths and `~/` are accepted.
 Without `--vault` there is no sidebar, but the current directory is still
@@ -109,6 +114,7 @@ Press `?` inside the app for the full key list. The most used keys:
 | `m` | Toggle mouse capture |
 | `Shift+T` | Cycle themes (within the group set by `Ctrl+T`) |
 | `Ctrl+T` | Theme group for `Shift+T`: all → light → dark (session only) |
+| `V` | Switch to another `[vaults]` entry |
 | `q` | Quit |
 
 Clicking a rendered checkbox (or pressing `Enter` on it) cycles its state.

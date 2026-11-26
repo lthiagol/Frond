@@ -161,6 +161,26 @@ frontmatter at all — the whole file is body.
   <path>` inside the picker and keeps it open. The last vault opened is
   recorded on a clean quit (`last-vault` in the session dir, the vault's
   canonical root) — the app's own state, never the vault's.
+- **Vault picker in the app** (`V`): the same picker opens as a modal
+  popup over the main view, with the open vault preselected (when it is an
+  entry; else as at startup). `Esc` closes it; `Ctrl+C` quits. The picker
+  takes no mouse input. With no `[vaults]` entries, `V` opens nothing and
+  the status line says `no vaults configured ([vaults] in config.toml)`.
+  Choosing the open vault closes the popup and changes nothing. Choosing
+  another one is a clean quit of the open vault (its session and
+  `last-vault` saved exactly as on quit) followed by a start of the chosen
+  one with no note argument: its index built, its session restored (else
+  its `index.md`), and a fresh navigation stack, sidebar, search,
+  backlinks, git status and watcher — none of the old vault's state,
+  warnings or errors carry over. The run's display state carries over:
+  the theme and its `Shift+T` group, mouse capture, watch, the sidebar's
+  width and visibility, the metadata block, line numbers and margins. A
+  vault that cannot be opened (its index not built, or the note it would
+  start on not readable) is not opened: the popup stays open with `cannot
+  open vault: <error>`, and the open vault is untouched, its session not
+  saved. The
+  entries are the ones read at startup. Started on a file argument with
+  no vault, `V` works the same, with no session to save.
 
 ## Scrollbars
 
@@ -259,6 +279,7 @@ verified against `crates/app/src/app.rs::handle_key` and the help popup in
 | `b` | Toggle backlinks panel (opening moves the focus into it) |
 | `s` | Global vault search (Enter opens the hit line) |
 | `Ctrl+P` | Quick switcher: fuzzy jump to a note by name (Enter opens it) |
+| `V` | Vault picker: switch to another `[vaults]` entry (see "Vault picker") |
 | `u` | Sync status refresh (also auto on watch events) |
 | `v` / `1`–`9` | Switch table view while a `.base` file is open |
 | `w` | Toggle watch mode (content pane) |

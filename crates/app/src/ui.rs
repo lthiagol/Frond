@@ -411,6 +411,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         app.layout.quick_area = None;
     }
+    if let Some(picker) = &app.vault_picker {
+        draw_vault_picker_popup(f, area, picker, ui, "Esc close");
+    }
     if app.search.open {
         // Record the popup geometry for the mouse handlers before the
         // index borrow (which would block the `&mut` access).
@@ -1520,13 +1523,25 @@ fn give_back_column(kept: &mut Vec<Span<'static>>) -> Option<Style> {
     kept.last().map(|span| span.style).or(last_style)
 }
 
-/// The vault picker (SPEC "Vault picker"), full-screen over the content
-/// background: the quick switcher's popup chrome — filter prompt, the
-/// entries (name, then the path dimmed, matches highlighted), and a footer
-/// that carries the not-a-directory error when there is one.
+/// The startup vault picker (SPEC "Vault picker"), full-screen over the
+/// content background.
 pub fn draw_vault_picker(f: &mut Frame, picker: &crate::vault_picker::PickerState, ui: UiTheme) {
     let area = f.area();
     f.render_widget(Block::new().style(Style::new().bg(ui.content_bg)), area);
+    draw_vault_picker_popup(f, area, picker, ui, "Esc quit");
+}
+
+/// The vault picker's popup: the quick switcher's chrome — filter prompt,
+/// the entries (name, then the path dimmed, matches highlighted), and a
+/// footer that carries the picker's error when there is one. `esc` names
+/// what `Esc` does there (quit at startup, close in the app).
+fn draw_vault_picker_popup(
+    f: &mut Frame,
+    area: Rect,
+    picker: &crate::vault_picker::PickerState,
+    ui: UiTheme,
+    esc: &str,
+) {
     let popup = crate::quick::popup_geometry(area, picker.items.len());
     let inner_width = popup.width.saturating_sub(2) as usize;
     let list = crate::quick::CHROME.list(popup, picker.selected, picker.items.len());
@@ -1577,7 +1592,7 @@ pub fn draw_vault_picker(f: &mut Frame, picker: &crate::vault_picker::PickerStat
             Style::new().fg(ui.status_error_fg),
         )),
         None => Line::from(Span::styled(
-            "↑/↓ move · Enter open · Esc quit",
+            format!("↑/↓ move · Enter open · {esc}"),
             Style::new().fg(ui.popup_dimmed_fg),
         )),
     });
@@ -2062,6 +2077,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
             ("Shift+T", "cycle theme (session only)"),
             ("Ctrl+T", "theme group: all → light → dark"),
             ("m", "toggle mouse capture; off: wheel = arrows"),
+            ("V", "switch vault ([vaults] in config.toml)"),
             ("", "? help · q / Ctrl+C quit"),
         ],
     ),
