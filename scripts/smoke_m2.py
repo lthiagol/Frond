@@ -6,11 +6,12 @@ Prerequisites:
 - A debug build of the app (`cargo build -p frond`); binary path overridable
   with $FROND_APP_BIN.
 
-The script builds a small fixture vault under /tmp/frond-m2-vault (writes
-ONLY there, never to testvault/) and drives the app with `--vault`.
+The script copies the sample vault (testvault/, see docs/TESTVAULT.md) into
+the scratch dir and drives the app with `--vault` on that copy. It writes
+ONLY there, never to testvault/.
 
-Theme checks run against /tmp theme+config fixtures injected via the
-FROND_THEMES/FROND_CONFIG env overrides (startup config theme, Shift+T
+Theme checks run against theme+config fixtures in the scratch dir, injected
+via the FROND_THEMES/FROND_CONFIG env overrides (startup config theme, Shift+T
 cycling, config hot-reload) — the real ~/.config is never touched.
 """
 import os, pty, select, struct, sys, shutil, time, fcntl, termios
@@ -20,18 +21,19 @@ import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-VAULT = smoke_tmp.path("frond-m2-vault")
 
 COLS, ROWS = 100, 30
 
-# --- fixture vault -------------------------------------------------------
-shutil.rmtree(VAULT, ignore_errors=True)
-LONG = "a-note-with-a-really-long-name-that-must-truncate.md"
+# --- vault copy ----------------------------------------------------------
+VAULT = smoke_tmp.copy_testvault("frond-m2-vault")
+# The long-named note in projects/: its body ends in END-OF-LONG-NOTE, past
+# the screen (docs/TESTVAULT.md, "Layout edge cases").
+LONG = "a-note-with-a-really-long-name-that-must-truncate-in-the-sidebar.md"
 
-# Theme fixtures (also /tmp-only): a custom theme (frond TOML format) whose
-# heading_1 is a distinctive #ff00ff, plus a config.toml selecting it. The app under
-# test is started with FROND_CONFIG/FROND_THEMES pointing here — the real
-# ~/.config is never touched.
+# Theme fixtures (scratch dir only): a custom theme (frond TOML format) whose
+# heading_1 is a distinctive #ff00ff, plus a config.toml selecting it. The app
+# under test is started with FROND_CONFIG/FROND_THEMES pointing here — the
+# real ~/.config is never touched.
 THEME_DIR = smoke_tmp.path("frond-m2-themes", "themes")
 CONFIG_FILE = smoke_tmp.path("frond-m2-themes", "config.toml")
 shutil.rmtree(smoke_tmp.path("frond-m2-themes"), ignore_errors=True)
@@ -49,18 +51,6 @@ with open(os.path.join(THEME_DIR, "nightshade.toml"), "w") as f:
 with open(CONFIG_FILE, "w") as f:
     f.write('theme = "nightshade"\n')
 
-for path, body in [
-    ("index.md", "# Vault index\n\n" + "intro paragraph\n\n" * 60),
-    ("alpha.md", "# Alpha\n\n" + "alpha body\n\n" * 60),
-    (f"projects/{LONG}", "# Long\n\n" + "long body\n\n" * 60 + "END-OF-LONG-NOTE\n"),
-    ("notes.txt", "not a note"),
-]:
-    full = os.path.join(VAULT, path)
-    os.makedirs(os.path.dirname(full), exist_ok=True)
-    with open(full, "w") as f:
-        f.write(body)
-os.makedirs(f"{VAULT}/.obsidian", exist_ok=True)
-
 pid, fd = pty.fork()
 if pid == 0:
     os.environ["TERM"] = "xterm-256color"
@@ -68,7 +58,8 @@ if pid == 0:
     # child must not inherit a color-stripping environment.
     os.environ.pop("NO_COLOR", None)
     # Theme fixture injection (tests/smokes only): config path + theme dir
-    # redirected into /tmp. The quit-time session save is redirected too.
+    # redirected into the scratch dir. The quit-time session save is
+    # redirected too.
     os.environ["FROND_CONFIG"] = CONFIG_FILE
     os.environ["FROND_THEMES"] = THEME_DIR
     os.environ["FROND_SESSION"] = smoke_tmp.path("frond-m2-session")
@@ -123,6 +114,21 @@ def body_text():
 def status_line():
     return row(ROWS - 1)
 
+def sidebar_row(label):
+    """The sidebar row (y) that shows `label`. Found on screen, so the clicks
+    do not depend on how many rows the tree has above them."""
+    for y in range(1, ROWS - 1):
+        if label in row(y)[1:29]:
+            return y
+    raise AssertionError(f"{label} is not on screen in the sidebar")
+
+def row_of(text):
+    """The first row (y) on screen that shows `text`, or None."""
+    for y in range(ROWS - 1):
+        if text in row(y):
+            return y
+    return None
+
 ok = True
 def check(cond, label):
     global ok
@@ -140,7 +146,7 @@ check("index.md" in body_text(), "sidebar lists notes")
 check("projects" in body_text(), "sidebar lists folders")
 check("notes.txt" not in body_text(), "non-md files skipped")
 check(".obsidian" not in body_text(), "hidden dirs skipped")
-check("Vault index" in body_text(), "content shows index.md")
+check("Lorem Index" in body_text(), "content shows index.md")
 
 def screen_no_status():
     return "\n".join(row(y) for y in range(ROWS - 1))
@@ -154,7 +160,9 @@ pump(0.4)
 check("index.md" in screen_no_status(), "Tab shows sidebar again")
 
 # --- folder expand + open a note -----------------------------------------
-send("f")  # focus sidebar
+send("f")  # focus sidebar: the selection starts on the first row, archive/
+pump(0.3)
+send("jjjjjj")  # down to projects/ (the folders sort first)
 pump(0.3)
 check(
     "projects ·" in status_line() and f"{VAULT}/projects" not in status_line(),
@@ -164,12 +172,12 @@ send("l")  # expand projects
 pump(0.3)
 check(LONG[:20] in body_text(), "folder expanded, child visible")
 check("…" in body_text(), "long name truncated with ellipsis")
-send("j")  # onto the long note
+send("jj")  # past clients/ (a folder, not expanded) onto the long note
 pump(0.2)
 send("\r")  # Enter opens it
-pump_until(lambda: "Long" in body_text())
+pump_until(lambda: "A long name" in body_text())
 check(
-    "Long" in body_text() and "END-OF-LONG-NOTE" not in body_text(),
+    "A long name" in body_text() and "END-OF-LONG-NOTE" not in body_text(),
     "Enter opened the nested note at the top (end marker not yet visible)",
 )
 check(LONG in status_line(), "status bar shows opened note path")
@@ -181,8 +189,8 @@ pump(0.3)
 send("G")  # bottom of the nested note
 pump(0.4)
 send("\x7f")  # Backspace -> index.md
-pump_until(lambda: "Vault index" in body_text())
-check("Vault index" in body_text(), "Backspace returned to index.md")
+pump_until(lambda: "Lorem Index" in body_text())
+check("Lorem Index" in body_text(), "Backspace returned to index.md")
 send("\x0f")  # Ctrl+O -> forward to the long note (scroll restored: bottom)
 pump_until(lambda: "END-OF-LONG-NOTE" in body_text())
 check(
@@ -215,67 +223,65 @@ pump(0.4)
 check("close esc/any key" not in body_text(), "help popup closed")
 
 # --- sidebar reflects new file (loose rescan on watch reload) ------------
-with open(f"{VAULT}/beta.md", "w") as f:
-    f.write("# Beta\n")
+# A root note the vault does not hold, so the row can only come from the rescan.
+with open(f"{VAULT}/rescan.md", "w") as f:
+    f.write("# Rescan\n")
 send("\t")  # show sidebar
 pump(0.3)
 send("f")  # focus sidebar
 pump(0.2)
 with open(f"{VAULT}/projects/{LONG}", "a") as f:
     f.write("\nrescan tick\n")
-pump_until(lambda: "beta.md" in body_text())
-check("beta.md" in body_text(), "sidebar rescan picked up new file")
+pump_until(lambda: "rescan.md" in body_text())
+check("rescan.md" in body_text(), "sidebar rescan picked up new file")
 
 # --- mouse: sidebar clicks and wheel (SGR 1006 injected into the pty) ---
-# Sidebar geometry at 100x30: width 30 (x 0..29), inner rows start at
-# y=1 (below the top border); the header block takes y=1..4 (blank, the
-# vault's name, blank, the rule), so the list starts at y=5. Visible tree
-# rows (projects expanded): y=5 projects, y=6 LONG, y=7 alpha.md,
-# y=8 beta.md, y=9 index.md.
 check("a-note-with-a-really" in body_text(), "mouse section precondition: LONG row visible")
 
-click(5, 5)  # on the `projects` folder row
+click(5, sidebar_row("projects"))  # on the `projects` folder row
 pump(0.4)
 check(
     "a-note-with-a-really" not in screen_no_status(),
     "click on a folder row collapses it",
 )
-click(5, 5)  # again: expands
+click(5, sidebar_row("projects"))  # again: expands
 pump(0.4)
 check(
     "a-note-with-a-really" in screen_no_status(),
     "click on a collapsed folder row expands it",
 )
 
-click(5, 7)  # on the alpha.md row: opens it
-pump_until(lambda: "alpha body" in body_text())
-check("Alpha" in body_text() and "alpha body" in body_text(), "click on a note row opens it")
+click(5, sidebar_row("alpha.md"))  # on the alpha.md row: opens it
+pump_until(lambda: "Details" in body_text())
+check("Alpha" in body_text() and "Details" in body_text(), "click on a note row opens it")
 check("alpha.md" in status_line(), "status bar reflects the clicked note")
 
-# Opening a note moves focus to the content pane: j scrolls the note (the
-# top heading scrolls off), not the sidebar selection.
+# Opening a note moves focus to the content pane: j scrolls the note by one
+# line (its frontmatter table sits above the heading, so the heading moves
+# from row 13 to row 12), not the sidebar selection.
 send("j")
 pump(0.3)
 check(
-    "alpha.md" in status_line() and "Alpha" not in body_text(),
+    "alpha.md" in status_line() and row_of("Alpha") == 12,
     "click opens the note focused on content (j scrolled the note)",
 )
 
 send("g")  # back to the top of alpha.md
 pump(0.3)
-check("Alpha" in body_text(), "g returns to the top of the note")
+check(row_of("Alpha") == 13, "g returns to the top of the note")
 wheel(True, 5, 10)  # wheel down over the sidebar column
 pump(0.3)
-check("Alpha" in body_text(), "wheel over the sidebar does not scroll the content")
-wheel(True, 60, 10)  # wheel down over the content pane
+check(row_of("Alpha") == 13, "wheel over the sidebar does not scroll the content")
+wheel(True, 60, 10)  # wheel down over the content pane: three notches, one line each
 pump(0.3)
-check("Alpha" not in body_text(), "wheel over the content pane scrolls the content")
+check(row_of("Alpha") == 10, "wheel over the content pane scrolls the content")
 
 # Clicks are gated by the help popup.
+alpha_y = sidebar_row("alpha.md")
 send("?")
 pump(0.4)
 check("close esc/any key" in body_text(), "help popup open for click gating")
-click(5, 7)
+click(5, alpha_y)
 pump(0.4)
 check(
     "close esc/any key" in body_text(),
@@ -284,8 +290,8 @@ check(
 send("x")  # close the help popup
 pump(0.3)
 
-# --- theme support (fixture config + custom theme, all under /tmp) -------
-# Back to index.md at the top: the theme checks read the '# Vault index'
+# --- theme support (fixture config + custom theme, all in the scratch dir) -
+# Back to index.md at the top: the theme checks read the 'Lorem Index'
 # heading, whose fg proves the configured theme really applied. The nav
 # stack is index -> LONG -> alpha here, so two Backspaces reach index.md.
 send("\x7f")  # Backspace: back to the LONG note
@@ -294,17 +300,17 @@ send("\x7f")  # Backspace: back to index.md
 pump(0.6)
 send("g")  # top
 pump(0.4)
-check("Vault index" in body_text(), "theme section precondition: index.md on screen")
+check("Lorem Index" in body_text(), "theme section precondition: index.md on screen")
 
 # The app runs with FROND_CONFIG -> fixture config.toml (theme = "nightshade")
 # and FROND_THEMES -> the fixture theme dir. pyte keeps per-cell colors, so
 # the rendered heading's fg proves the theme really applied.
 def heading_fg():
-    """fg color of the 'V' of the '# Vault index' heading, if on screen."""
+    """fg color of the 'L' of the '# Lorem Index' heading, if on screen."""
     for y in range(ROWS - 1):
         text = row(y)
-        if "Vault index" in text:
-            x = text.index("Vault index")
+        if "Lorem Index" in text:
+            x = text.index("Lorem Index")
             return screen.buffer[y][x].fg
     return None
 

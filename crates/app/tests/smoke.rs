@@ -10,9 +10,8 @@
 //!
 //! Run it with: `cargo test -p frond --test smoke -- --ignored`
 //!
-//! The script never writes to the vault: it copies its source note
-//! (`testvault/index.md` by default, override with `FROND_SMOKE_SRC`) to
-//! `/tmp/watchtest.md` and operates on that copy only.
+//! The script never writes to the vault: it copies `testvault/` (see
+//! `docs/TESTVAULT.md`) into its scratch dir and operates on that copy only.
 
 use std::process::Command;
 

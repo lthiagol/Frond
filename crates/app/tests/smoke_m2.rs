@@ -1,6 +1,6 @@
 //! End-to-end smoke test for the M2 shell: shells out to
-//! `scripts/smoke_m2.py`, which builds a fixture vault under /tmp and drives
-//! the real TUI binary through a pty with `pyte` terminal emulation.
+//! `scripts/smoke_m2.py`, which copies the sample vault (`testvault/`) and
+//! drives the real TUI binary through a pty with `pyte` terminal emulation.
 //! checks: sidebar layout/tree/fold/truncation, Tab toggle, f focus, h/l fold,
 //! Enter-opens-note, Backspace/Ctrl+O history, watch reload + loose sidebar
 //! rescan, help popup, mouse clicks/wheel, theme support (fixture config +
@@ -14,8 +14,8 @@
 //!
 //! Run it with: `cargo test -p frond --test smoke_m2 -- --ignored`
 //!
-//! The script writes only to its own /tmp fixture vault, never to the
-//! user's vault.
+//! The script writes only to its copy of the sample vault, never to
+//! `testvault/` or the user's vault.
 
 use std::process::Command;
 

@@ -5,8 +5,8 @@ Tests read it or copy it; nothing writes into it.
 
 - **Read in place:** `crates/vault/tests/testvault.rs` indexes it and pins
   the index and `.base` facts below. The rendering and screen facts are
-  not pinned by a test yet; the smoke suites assert them when they move
-  onto this vault.
+  not pinned by a test yet; the smoke suites that run on this vault assert
+  them, on a copy (see "Smoke suites").
 - **Copy before mutating:** a test that writes (a checkbox toggle, a file
   edit for the watcher, `git init`) takes a copy:
   - Rust: `copy_testvault(name)` in `crates/app/src/testutil.rs`
@@ -26,14 +26,14 @@ Tests read it or copy it; nothing writes into it.
 
 ```
 testvault/
-  index.md                      entry note: links, tasks, "needle", broken link
+  index.md                      entry note (`# Lorem Index`): links, tasks, "needle", broken link
   alpha.md                      headings 1-4, table, rust fence, frontmatter
   gamma.md                      root gamma (the ambiguous "gamma" in the root)
   notes.txt                     plain text: not indexed
   .obsidian/app.json            hidden: not indexed
   .trash/deleted.md             hidden note: not indexed
   archive/                      superseded, archived, old note
-  projects/                     beta, gamma, long name, blocked, roadmap, pilot, launch
+  projects/                     beta, gamma, long name (scroll end marker), blocked, roadmap, pilot, launch
   projects/clients/acme/        nested: kickoff, contract
   tasks/                        tasks.md, tasks.base
   docs/                         dup (one), guide, math, rendering
@@ -224,10 +224,24 @@ Pinned: `the_notes_table_base_shows_the_seven_notes`,
 ## Layout edge cases
 
 - **Long name:** `projects/a-note-with-a-really-long-name-that-must-truncate-in-the-sidebar.md`
-  (title `A long name`).
+  (title `A long name`). Its body is 60 filler paragraphs under `## Filler`
+  and ends in `END-OF-LONG-NOTE`, past the screen.
 - **Nested folders:** `projects/clients/acme/` (two levels under `projects/`).
 - **Same stem:** `docs/dup.md` (`# Dup One`, `unique-one-body`) and
   `refs/dup.md` (`# Dup Two`, `unique-two-body`).
 - **Hidden:** `.trash/`, `.obsidian/`.
 - **Plain text:** `notes.txt`.
 - **No frontmatter:** `edge/plain.md` (`# Plain note`).
+
+## Smoke suites
+
+The smoke suites that run on this vault copy it (`copy_testvault`) and read
+these screen facts from the copy:
+
+- `index.md`: the heading `Lorem Index` (the theme checks read its colour).
+- `alpha.md`: a frontmatter table above `# Alpha`, then `## Details` and the
+  table; the mouse checks open it from the tree.
+- `projects/` long name note: opened from the tree (`A long name`); scrolled
+  to its end (`END-OF-LONG-NOTE`).
+- `reading/long-read.md`: the scroll note; the watch check appends to its copy.
+- `notes.txt` and `.obsidian/`: not listed in the sidebar.

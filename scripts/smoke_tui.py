@@ -5,29 +5,25 @@ Prerequisites:
 - python3 with `pyte` installed (`uv pip install pyte`, or run via `uv run --with pyte`).
 - A debug build of the app (`cargo build -p frond`); the binary defaults to
   <workspace>/target/debug/frond and can be overridden with $FROND_APP_BIN.
-- A source note to render: defaults to testvault/index.md (READ-ONLY), can
-  be overridden with $FROND_SMOKE_SRC. The script copies it to /tmp/watchtest.md
-  and only ever writes to that copy — never to the vault.
+- The sample vault (`testvault/`, see docs/TESTVAULT.md). The script copies
+  it to the scratch dir and only ever writes to that copy, never to the vault.
 
 Run directly (`python3 scripts/smoke_tui.py`) or via the ignored Rust
 integration test: `cargo test -p frond --test smoke -- --ignored`.
 """
-import os, pty, select, shutil, struct, sys, fcntl, termios, time, re
+import os, pty, select, struct, sys, fcntl, termios, time, re
 
 import pyte
 import smoke_tmp
 
 _APP_DEFAULT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "frond")
 APP = os.environ.get("FROND_APP_BIN", _APP_DEFAULT)
-SRC = os.environ.get("FROND_SMOKE_SRC", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "testvault", "index.md"))
-TMP = smoke_tmp.path("watchtest.md")
+VAULT = smoke_tmp.copy_testvault("smoke-tui-vault")
+# A long note, so the wheel and the scroll keys have room to move.
+NOTE = "reading/long-read.md"
+TMP = os.path.join(VAULT, NOTE)
 
 COLS, ROWS = 100, 30
-shutil.copyfile(SRC, TMP)
-# The fixture is shorter than the screen, so nothing would scroll: append
-# filler paragraphs to the copy so the wheel and scroll keys have room.
-with open(TMP, "a") as f:
-    f.write("".join(f"\nfiller paragraph {i}\n" for i in range(60)))
 
 screen = pyte.Screen(COLS, ROWS)
 stream = pyte.ByteStream(screen)
@@ -40,7 +36,7 @@ if pid == 0:
     # Never the real ~/.config: a missing file is the default config.
     os.environ["FROND_CONFIG"] = smoke_tmp.path("frond-no-config.toml")
     fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
-    os.execv(APP, [APP, TMP])
+    os.execv(APP, [APP, "--vault", VAULT, TMP])
 
 def pump(sec):
     end = time.time() + sec
@@ -90,11 +86,11 @@ def check(cond, label):
         print(body_text())
 
 check(pump(1.5), "app alive")
-check("watchtest.md" in status_line(), "status bar shows file path")
+check("long-read.md" in status_line(), "status bar shows file path")
 check("watch on" in status_line(), "watch on indicator")
 # The bar shows a clock glyph and HH:MM (no seconds), so equal strings
 # across the reload below are expected.
-CLOCK = re.compile(r"\S+ \d\d:\d\d · ")
+CLOCK = re.compile(r"\S+ \d\d:\d\d\b")
 clock1 = CLOCK.search(status_line())
 check(clock1 is not None, f"render clock ({clock1.group(0) if clock1 else None})")
 check("lines" in status_line(), "line count")
