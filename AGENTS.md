@@ -29,6 +29,8 @@ closed unit.
   orchestrator's: a release's notes describe what shipped, every
   user-visible change included.
 - `docs/COLORS.md` — the theme vocabulary (`UiTheme` keys).
+- `docs/TESTVAULT.md` — the sample vault (`testvault/`) the tests copy:
+  what feature lives in which note, and the strings a test asserts on.
 - `crates/engine/VENDORED.md` — the vendored engine's boundary: every
   intentional deviation from upstream leaf, and what the app may change.
 

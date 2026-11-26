@@ -1,0 +1,53 @@
+filters:
+  and:
+    - 'file.inFolder("projects")'
+    - 'status != "blocked"'
+formulas:
+  project: file.asLink(title)
+  words: 'len(file.name)'
+properties:
+  status:
+    displayName: Status
+  formula.project:
+    displayName: Project
+views:
+  - type: table
+    name: By status
+    groupBy:
+      property: status
+      direction: ASC
+    order:
+      - formula.project
+      - status
+      - updated
+    sort:
+      - property: updated
+        direction: DESC
+  - type: table
+    name: Hubs
+    filters:
+      and:
+        - 'hub == true'
+    order:
+      - file.name
+      - status
+  - type: table
+    name: Recent
+    filters:
+      and:
+        - 'updated >= today() - "30d"'
+    sort:
+      - property: updated
+        direction: DESC
+    order:
+      - file.name
+      - updated
+  - type: table
+    name: Tagged
+    filters:
+      or:
+        - 'file.hasTag("ops")'
+        - 'file.hasTag("legal")'
+    order:
+      - file.name
+      - formula.words

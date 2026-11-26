@@ -1,0 +1,2 @@
+This plain text file is not a note. The index walks markdown notes and base
+files only, so this file never appears in the tree.

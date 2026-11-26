@@ -1,0 +1,15 @@
+filters:
+  and:
+    - 'file.size > 10'
+formulas:
+  words: 'len(file.name)'
+views:
+  - type: cards
+    name: Cards
+    order:
+      - file.name
+  - type: table
+    name: Everything
+    order:
+      - file.name
+      - formula.words

@@ -140,7 +140,8 @@ is unchanged since it was read.
 
 ## Try it with the test vault
 
-The repository ships a small lorem-ipsum vault in `testvault/`:
+The repository ships a lorem-ipsum vault in `testvault/` that covers every
+feature (what is where: [`docs/TESTVAULT.md`](docs/TESTVAULT.md)):
 
 ```sh
 make run        # launches frond on the vault picker
