@@ -53,6 +53,17 @@ impl Drop for EnvGuard {
     }
 }
 
+/// An empty session dir for the vault picker's recent paths and last vault,
+/// so a test never reads the real state. Hold it while the picker opens
+/// (`v`); the dir is removed when the returned `TempDir` drops.
+#[must_use]
+pub fn isolated_session() -> (EnvGuard, TempDir) {
+    let dir = TempDir::new("session");
+    let mut env = EnvGuard::lock();
+    env.set("FROND_SESSION", dir.path());
+    (env, dir)
+}
+
 /// Drop-guarded uniquely named temp file (no tempfile dependency), so a
 /// failing assert never leaves `frond-test-*` files behind in `/tmp`. A
 /// process-wide counter keeps concurrent test threads from colliding.

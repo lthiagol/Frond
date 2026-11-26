@@ -1532,9 +1532,11 @@ pub fn draw_vault_picker(f: &mut Frame, picker: &crate::vault_picker::PickerStat
 }
 
 /// The vault picker's popup: the quick jumper's chrome — filter prompt,
-/// the entries (name, then the path dimmed, matches highlighted), and a
-/// footer that carries the picker's error when there is one. `esc` names
-/// what `Esc` does there (quit at startup, close in the app).
+/// the entries (name, then the path dimmed, matches highlighted, a recent
+/// path tagged `recent`), and a footer that carries the picker's error
+/// when there is one. A typed path lists its one `open` row; with nothing
+/// to list, the empty state says how to type one. `esc` names what `Esc`
+/// does there (quit at startup, close in the app).
 fn draw_vault_picker_popup(
     f: &mut Frame,
     area: Rect,
@@ -1542,7 +1544,9 @@ fn draw_vault_picker_popup(
     ui: UiTheme,
     esc: &str,
 ) {
-    let popup = crate::quick::popup_geometry(area, picker.items.len());
+    let path_mode = picker.path_mode();
+    let rows = if path_mode { 1 } else { picker.items.len() };
+    let popup = crate::quick::popup_geometry(area, rows);
     let inner_width = popup.width.saturating_sub(2) as usize;
     let list = crate::quick::CHROME.list(popup, picker.selected, picker.items.len());
     let name_width = picker
@@ -1553,9 +1557,21 @@ fn draw_vault_picker_popup(
         .unwrap_or(0);
 
     let mut lines: Vec<Line<'static>> = vec![Line::from(Span::raw(format!(">{}▏", picker.query)))];
-    if picker.items.is_empty() {
+    if path_mode {
+        let mut line = Line::from(truncate_spans(
+            vec![Span::raw(format!("open {}", picker.query))],
+            inner_width,
+        ));
+        highlight_selection(&mut line, inner_width, ui.content_bg, ui);
+        lines.push(line);
+    } else if picker.items.is_empty() {
+        let empty = if picker.entries.is_empty() {
+            "type a path to a vault (/, ~ or .)"
+        } else {
+            "no matches"
+        };
         lines.push(Line::from(Span::styled(
-            "no matches",
+            empty,
             Style::new().fg(ui.popup_dimmed_fg),
         )));
     } else {
@@ -1578,6 +1594,12 @@ fn draw_vault_picker_popup(
                         Style::new().fg(ui.popup_dimmed_fg),
                         ui,
                     ));
+                    if entry.recent {
+                        spans.push(Span::styled(
+                            "  recent",
+                            Style::new().fg(ui.popup_dimmed_fg),
+                        ));
+                    }
                     let mut line = Line::from(truncate_spans(spans, inner_width));
                     if i == picker.selected {
                         highlight_selection(&mut line, inner_width, ui.content_bg, ui);
@@ -1591,13 +1613,17 @@ fn draw_vault_picker_popup(
             error.clone(),
             Style::new().fg(ui.status_error_fg),
         )),
+        None if path_mode => Line::from(Span::styled(
+            format!("Tab complete · Enter open · {esc}"),
+            Style::new().fg(ui.popup_dimmed_fg),
+        )),
         None => Line::from(Span::styled(
             format!("↑/↓ move · Enter open · {esc}"),
             Style::new().fg(ui.popup_dimmed_fg),
         )),
     });
 
-    let title = format!(" vaults: {} ", picker.items.len());
+    let title = format!(" vaults: {} ", rows);
     f.render_widget(Clear, popup);
     f.render_widget(
         Paragraph::new(lines)
@@ -2077,7 +2103,7 @@ const HELP_SECTIONS: &[(&str, &[HelpEntry])] = &[
             ("Shift+T", "cycle theme (session only)"),
             ("Ctrl+T", "theme group: all → light → dark"),
             ("M", "toggle mouse capture; off: wheel = arrows"),
-            ("v", "switch vault ([vaults] in config.toml)"),
+            ("v", "switch vault (an entry, a recent or typed path)"),
             ("", "? help · q / Ctrl+C quit"),
         ],
     ),

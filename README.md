@@ -56,8 +56,8 @@ make release    # release build: target/release/frond
 ## Usage
 
 ```sh
-frond                          # no vault given: prompts for the vault directory
-                               # (two or more [vaults] in the config: the vault picker)
+frond                          # no vault given: the vault picker
+                               # (on your [vaults], else type a path)
 frond --vault ~/notes          # open a vault (index.md is shown first, unless a saved session restores another note)
 frond --vault ~/notes project.md   # open a specific note inside the vault
 frond --vault work             # open the [vaults] entry named work
@@ -70,13 +70,21 @@ select, `Enter` to open, `Esc` to quit. The last vault you opened (else the
 `vault` key) is preselected. With exactly one `[vaults]` entry and no
 `vault` key, that vault opens directly.
 
+In the picker, a query that starts with `/`, `~` or `.` is a path, not a
+filter: the list shows `open <path>`, `Tab` completes the directory name
+(hidden ones only after a `.`), and `Enter` opens it. Vaults opened that
+way are remembered (the five most recent, `recent-vaults` in the state
+directory) and listed after the `[vaults]` entries, tagged `recent`.
+
 `v` opens the same picker inside the app to switch vaults: the open vault
 is saved as on quit and the chosen one opens as a fresh start (its own
 session restored), keeping your theme, mouse, watch, sidebar, metadata,
 line-number and margin settings. `Esc` closes the picker.
 
 If you start `frond` without `--vault` (and no `vault` key or `[vaults]` in
-the config file), it asks for the vault directory. Relative paths and `~/` are accepted.
+the config file), the picker opens on your recent paths: type a path to a
+vault. A relative path starts with `./` or `../` (a bare name filters the
+list instead), and `~/` is accepted.
 Without `--vault` there is no sidebar, but the current directory is still
 indexed (the opened file's own folder is *not* searched), so wikilinks,
 backlinks and the search keep working.
@@ -116,7 +124,7 @@ Press `?` inside the app for the full key list. The most used keys:
 | `M` | Toggle mouse capture |
 | `Shift+T` | Cycle themes (within the group set by `Ctrl+T`) |
 | `Ctrl+T` | Theme group for `Shift+T`: all → light → dark (session only) |
-| `v` | Switch to another `[vaults]` entry |
+| `v` | Switch vaults: a `[vaults]` entry, a recent path or a typed one |
 | `]` / `[`, `1`–`9` | Next / previous / nth table view (`.base` files) |
 | `q` | Quit |
 
@@ -130,8 +138,8 @@ is unchanged since it was read.
 The repository ships a small lorem-ipsum vault in `testvault/`:
 
 ```sh
-make run        # launches frond and prompts for the vault path
-# enter: testvault
+make run        # launches frond on the vault picker
+# type: ./testvault
 ```
 
 Or directly:
@@ -173,7 +181,8 @@ frond also remembers where you were: the last open note with its scroll and
 the sidebar's state (mode, selection, folder expansion) are saved per vault on
 quit (`~/.local/state/frond/`, `FROND_SESSION` overrides the directory) and
 restored on the next start. The last vault opened is recorded there too
-(`last-vault`), for the vault picker's preselection.
+(`last-vault`), for the vault picker's preselection, and so are the
+vaults opened from a typed path (`recent-vaults`).
 
 ## Themes
 

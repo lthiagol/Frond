@@ -1,6 +1,7 @@
 //! End-to-end smoke test for the vault picker: at startup, two `[vaults]`
 //! entries, a filter, Enter opens the chosen vault, Esc quits with status
-//! 0; in the app, `v` switches vaults and back.
+//! 0; in the app, `v` switches vaults and back; with no vaults configured,
+//! a typed path opens and comes back as a recent row.
 //! Shells out to `scripts/smoke_m7.py` (pyte through a pty); see
 //! `smoke_m6.rs` for the prerequisites.
 //!

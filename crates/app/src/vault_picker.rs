@@ -1,6 +1,8 @@
-//! Vault picker: chooses one of the config's `[vaults]` entries. The
-//! behaviour (listing, filter, keys, preselection, the not-a-directory
-//! error) is SPEC.md's **Vault picker** bullet.
+//! Vault picker: chooses one of the config's `[vaults]` entries, a recent
+//! path, or a typed path. The behaviour (listing, filter, keys,
+//! preselection, the not-a-directory error, typed paths and their `Tab`
+//! completion, recent paths, the empty state) is SPEC.md's **Vault
+//! picker** bullet.
 //!
 //! Terminal-independent state, like [`crate::quick`]: filtering reuses the
 //! quick jumper's subsequence matcher ([`crate::quick::fuzzy_match`]) and
@@ -24,6 +26,8 @@ pub struct VaultEntry {
     pub path: PathBuf,
     /// The path as listed: `$HOME` shown as `~`.
     pub display: String,
+    /// A recent path (`recent-vaults`), not a `[vaults]` entry.
+    pub recent: bool,
 }
 
 impl VaultEntry {
@@ -33,6 +37,19 @@ impl VaultEntry {
             name,
             path,
             display,
+            recent: false,
+        }
+    }
+
+    /// A recent path's row: named by its folder.
+    pub fn recent(path: PathBuf, home: Option<&Path>) -> Self {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        Self {
+            recent: true,
+            ..Self::new(name, path, home)
         }
     }
 }
@@ -60,8 +77,11 @@ pub struct PickerItem {
 #[derive(Debug, PartialEq, Eq)]
 pub enum PickerFlow {
     Continue,
-    /// Open this vault (an existing directory).
+    /// Open this vault (an existing directory): a `[vaults]` entry.
     Open(PathBuf),
+    /// Open this vault from a typed path or a recent row: the opener
+    /// records it in `recent-vaults` once it is open.
+    OpenTyped(PathBuf),
     /// `Esc`: quits at startup, closes the popup in the app.
     Close,
     /// `Ctrl+C`.
@@ -78,13 +98,93 @@ pub struct VaultList {
 }
 
 impl VaultList {
-    /// The picker over these entries, the open vault preselected when it is
-    /// one of them.
+    /// The picker over these entries and the recent paths, re-read now;
+    /// the open vault preselected when it is listed.
     pub fn picker(&self, open: Option<&Path>) -> PickerState {
+        let home = std::env::var_os("HOME")
+            .filter(|home| !home.is_empty())
+            .map(PathBuf::from);
+        let recent = crate::session::load_recent_vaults();
+        self.picker_with(open, &recent, home.as_deref())
+    }
+
+    /// [`Self::picker`] over the given recent roots.
+    pub fn picker_with(
+        &self,
+        open: Option<&Path>,
+        recent: &[PathBuf],
+        home: Option<&Path>,
+    ) -> PickerState {
+        let entries = with_recent(self.entries.clone(), recent, home);
         let pre = open
-            .and_then(|root| entry_at(&self.entries, root))
+            .and_then(|root| entry_at(&entries, root))
             .unwrap_or(self.startup_preselect);
-        PickerState::new(self.entries.clone(), pre)
+        PickerState::new(entries, pre)
+    }
+}
+
+/// `entries` followed by the recent roots (newest first) that are still
+/// directories and not already an entry.
+pub fn with_recent(
+    mut entries: Vec<VaultEntry>,
+    recent: &[PathBuf],
+    home: Option<&Path>,
+) -> Vec<VaultEntry> {
+    for root in recent {
+        if crate::is_vault_dir(root) && entry_at(&entries, root).is_none() {
+            entries.push(VaultEntry::recent(root.clone(), home));
+        }
+    }
+    entries
+}
+
+/// A query that is a path, not a filter (SPEC's typed path).
+pub fn is_path_query(query: &str) -> bool {
+    matches!(query.chars().next(), Some('/' | '~' | '.'))
+}
+
+/// `query` with its last component completed against the subdirectories
+/// of its parent (SPEC's typed path, `Tab`). Unchanged when nothing
+/// matches.
+pub fn complete_path(query: &str) -> String {
+    if query == "~" {
+        return "~/".to_string();
+    }
+    let (parent, prefix) = match query.rfind('/') {
+        Some(at) => query.split_at(at + 1),
+        None => ("", query),
+    };
+    let dir = if parent.is_empty() {
+        PathBuf::from(".")
+    } else {
+        crate::expand_tilde(Path::new(parent))
+    };
+    let Ok(read) = std::fs::read_dir(&dir) else {
+        return query.to_string();
+    };
+    let mut names: Vec<String> = read
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with(prefix))
+        .filter(|name| prefix.starts_with('.') || !name.starts_with('.'))
+        .collect();
+    names.sort();
+    match names.as_slice() {
+        [] => query.to_string(),
+        [only] => format!("{parent}{only}/"),
+        [first, rest @ ..] => {
+            let mut common = first.as_str();
+            for name in rest {
+                let len = common
+                    .char_indices()
+                    .zip(name.chars())
+                    .find(|((_, a), b)| a != b)
+                    .map_or(common.len().min(name.len()), |((at, _), _)| at);
+                common = &common[..len];
+            }
+            format!("{parent}{common}")
+        }
     }
 }
 
@@ -114,9 +214,19 @@ impl PickerState {
         state
     }
 
+    /// The query is a typed path: the list is its one `open` row.
+    pub fn path_mode(&self) -> bool {
+        is_path_query(&self.query)
+    }
+
     /// Re-filters for the current query; the selection goes to the best
-    /// match, as in the quick jumper.
+    /// match, as in the quick jumper. A typed path lists no entries.
     fn refresh(&mut self) {
+        self.selected = 0;
+        if self.path_mode() {
+            self.items.clear();
+            return;
+        }
         let query = self.query.as_str();
         let mut items: Vec<PickerItem> = self
             .entries
@@ -142,7 +252,6 @@ impl PickerState {
         // Best first; ties (every row, with no query) keep name order.
         items.sort_by(|a, b| b.score.cmp(&a.score).then(a.entry.cmp(&b.entry)));
         self.items = items;
-        self.selected = 0;
     }
 
     pub fn selected_entry(&self) -> Option<&VaultEntry> {
@@ -161,13 +270,27 @@ impl PickerState {
             KeyCode::Down => {
                 self.selected = (self.selected + 1).min(self.items.len().saturating_sub(1))
             }
+            KeyCode::Enter if self.path_mode() => {
+                let path = crate::expand_tilde(Path::new(&self.query));
+                if crate::is_vault_dir(&path) {
+                    return PickerFlow::OpenTyped(crate::absolutize(&path));
+                }
+                self.error = Some(format!("not a directory: {}", self.query));
+            }
             KeyCode::Enter => {
                 if let Some(entry) = self.selected_entry() {
                     if crate::is_vault_dir(&entry.path) {
-                        return PickerFlow::Open(entry.path.clone());
+                        return if entry.recent {
+                            PickerFlow::OpenTyped(entry.path.clone())
+                        } else {
+                            PickerFlow::Open(entry.path.clone())
+                        };
                     }
                     self.error = Some(format!("not a directory: {}", entry.path.display()));
                 }
+            }
+            KeyCode::Tab if self.path_mode() => {
+                self.query = complete_path(&self.query);
             }
             KeyCode::Backspace => {
                 self.query.pop();
@@ -367,10 +490,160 @@ mod tests {
             entries: entries(dir.path()),
             startup_preselect: 1,
         };
-        let open = list.picker(Some(&dir.path().join("work")));
+        let open = list.picker_with(Some(&dir.path().join("work")), &[], None);
         assert_eq!(selected_name(&open), "work");
-        let elsewhere = list.picker(Some(dir.path()));
+        let elsewhere = list.picker_with(Some(dir.path()), &[], None);
         assert_eq!(selected_name(&elsewhere), "notes");
-        assert_eq!(selected_name(&list.picker(None)), "notes");
+        assert_eq!(selected_name(&list.picker_with(None, &[], None)), "notes");
+    }
+
+    #[test]
+    fn a_query_starting_with_a_path_character_is_a_path() {
+        for query in ["/", "~", "~/x", ".", "./a", "../b"] {
+            assert!(is_path_query(query), "{query}");
+        }
+        for query in ["", "notes", "a/b", " /x"] {
+            assert!(!is_path_query(query), "{query}");
+        }
+        let dir = TempDir::new("picker-pathmode");
+        let mut state = PickerState::new(entries(dir.path()), 0);
+        type_str(&mut state, "/wor");
+        assert!(state.path_mode());
+        assert!(state.items.is_empty(), "a path lists no entries");
+        assert_eq!(state.selected_entry(), None);
+        state.handle_key(key(KeyCode::Backspace));
+        state.handle_key(key(KeyCode::Backspace));
+        state.handle_key(key(KeyCode::Backspace));
+        state.handle_key(key(KeyCode::Backspace));
+        assert!(!state.path_mode());
+        assert_eq!(state.items.len(), 3, "an emptied query filters again");
+    }
+
+    #[test]
+    fn tab_completes_the_last_component_against_subdirectories() {
+        let dir = TempDir::new("picker-tab");
+        let root = dir.path().display().to_string();
+        for sub in ["alpha", "albatross", "beta", ".hidden", "zeta/inner"] {
+            std::fs::create_dir_all(dir.path().join(sub)).unwrap();
+        }
+        std::fs::write(dir.path().join("bfile"), "x").unwrap();
+        std::fs::write(dir.path().join("zfile"), "x").unwrap();
+        let mut state = PickerState::new(Vec::new(), 0);
+        let tab = |state: &mut PickerState, query: String| {
+            state.query = query;
+            state.handle_key(key(KeyCode::Tab));
+            state.query.clone()
+        };
+        assert_eq!(
+            tab(&mut state, format!("{root}/b")),
+            format!("{root}/beta/"),
+            "one match: completed, with a slash (files ignored)"
+        );
+        assert_eq!(
+            tab(&mut state, format!("{root}/a")),
+            format!("{root}/al"),
+            "several: their longest common prefix"
+        );
+        assert_eq!(
+            tab(&mut state, format!("{root}/q")),
+            format!("{root}/q"),
+            "none: unchanged"
+        );
+        assert_eq!(
+            tab(&mut state, format!("{root}/z")),
+            format!("{root}/zeta/"),
+            "a file of the same prefix is no match"
+        );
+        assert_eq!(
+            tab(&mut state, format!("{root}/zeta/")),
+            format!("{root}/zeta/inner/"),
+            "an empty component completes inside the directory"
+        );
+        assert_eq!(
+            tab(&mut state, format!("{root}/h")),
+            format!("{root}/h"),
+            "hidden directories are not offered without a leading dot"
+        );
+        assert_eq!(
+            tab(&mut state, format!("{root}/.h")),
+            format!("{root}/.hidden/"),
+            "with a leading dot they are"
+        );
+        // An empty last component matches every name, so it is where the
+        // filter shows: without it `.hidden` would be a match, and the
+        // common prefix of `.hidden` and `only` is empty (query unchanged).
+        std::fs::create_dir_all(dir.path().join("lone/only")).unwrap();
+        std::fs::create_dir_all(dir.path().join("lone/.hidden")).unwrap();
+        assert_eq!(
+            tab(&mut state, format!("{root}/lone/")),
+            format!("{root}/lone/only/"),
+            "an empty component skips hidden directories"
+        );
+        assert_eq!(complete_path("~"), "~/");
+    }
+
+    #[test]
+    fn enter_on_a_typed_path_opens_a_directory_and_reports_anything_else() {
+        let dir = TempDir::new("picker-typed");
+        let file = dir.path().join("file");
+        std::fs::write(&file, "x").unwrap();
+        let mut state = PickerState::new(Vec::new(), 0);
+        type_str(&mut state, &file.display().to_string());
+        assert_eq!(state.handle_key(key(KeyCode::Enter)), PickerFlow::Continue);
+        assert_eq!(
+            state.error.as_deref(),
+            Some(format!("not a directory: {}", file.display()).as_str())
+        );
+        assert!(state.path_mode(), "the picker stays open on the path");
+        state.handle_key(key(KeyCode::Backspace));
+        state.handle_key(key(KeyCode::Backspace));
+        state.handle_key(key(KeyCode::Backspace));
+        state.handle_key(key(KeyCode::Backspace));
+        assert_eq!(
+            state.handle_key(key(KeyCode::Enter)),
+            PickerFlow::OpenTyped(dir.path().canonicalize().unwrap())
+        );
+    }
+
+    #[test]
+    fn recent_paths_follow_the_entries_and_open_as_typed() {
+        let dir = TempDir::new("picker-recent");
+        let list = VaultList {
+            entries: entries(dir.path()),
+            startup_preselect: 0,
+        };
+        let old = dir.path().join("old");
+        let newer = dir.path().join("newer");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&newer).unwrap();
+        let gone = dir.path().join("gone");
+        let recent = [newer.clone(), gone, dir.path().join("notes"), old.clone()];
+        let mut state = list.picker_with(None, &recent, Some(dir.path()));
+        let rows: Vec<(&str, bool)> = state
+            .items
+            .iter()
+            .map(|item| {
+                let entry = &state.entries[item.entry];
+                (entry.name.as_str(), entry.recent)
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                ("archive", false),
+                ("notes", false),
+                ("work", false),
+                ("newer", true),
+                ("old", true)
+            ],
+            "after the entries, newest first; gone and entry roots skipped"
+        );
+        assert_eq!(state.entries[4].display, "~/old");
+        type_str(&mut state, "old");
+        assert_eq!(selected_name(&state), "old", "recent rows filter too");
+        assert_eq!(
+            state.handle_key(key(KeyCode::Enter)),
+            PickerFlow::OpenTyped(old)
+        );
     }
 }

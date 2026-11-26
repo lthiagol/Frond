@@ -17,7 +17,7 @@ help:
 	@echo "make smoke          - pty smoke suites (slow, uses uv + pyte)"
 	@echo "make fmt / clippy   - formatting / lints"
 	@echo "make check          - fmt + clippy + test + smoke"
-	@echo "make run            - launch the TUI (prompts for the vault path)"
+	@echo "make run            - launch the TUI (opens on the vault picker)"
 	@echo "make clean          - remove all build artifacts"
 	@echo "make clean-fixtures - remove /tmp test fixtures"
 

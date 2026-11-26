@@ -12,6 +12,9 @@
 //!
 //! `last-vault` (same directory) holds the canonical root of the last vault
 //! open at a clean quit: the vault picker's preselection, nothing more.
+//! `recent-vaults` (same directory) holds the vaults opened from a typed
+//! path, one canonical root per line; its rules are SPEC.md's **Vault
+//! picker** (recent paths).
 //!
 //! `FROND_SESSION` overrides the state directory (tests and smokes only —
 //! they must never write to the real `~/.local/state`).
@@ -92,6 +95,48 @@ pub fn load_last_vault() -> Option<PathBuf> {
     let text = fs::read_to_string(last_vault_file()?).ok()?;
     let line = text.lines().next()?.trim_end();
     (!line.is_empty()).then(|| PathBuf::from(line))
+}
+
+/// How many recent paths `recent-vaults` keeps (SPEC's recent paths).
+const RECENT_MAX: usize = 5;
+
+/// The `recent-vaults` file; `None` when no state directory is resolvable.
+fn recent_vaults_file() -> Option<PathBuf> {
+    Some(state_dir()?.join("recent-vaults"))
+}
+
+/// The recorded recent roots, newest first; empty when there are none.
+pub fn load_recent_vaults() -> Vec<PathBuf> {
+    recent_vaults_file()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .map(|text| {
+            text.lines()
+                .filter(|line| !line.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Records `vault_root` (canonicalized) as the newest recent path, unless
+/// it is one of `entries` (the `[vaults]` paths, compared canonically).
+pub fn record_recent_vault(vault_root: &Path, entries: &[PathBuf]) -> io::Result<()> {
+    let path = recent_vaults_file()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no state directory"))?;
+    let canon = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let root = canon(vault_root);
+    if entries.iter().any(|entry| canon(entry) == root) {
+        return Ok(());
+    }
+    let mut recent = load_recent_vaults();
+    recent.retain(|old| *old != root);
+    recent.insert(0, root);
+    recent.truncate(RECENT_MAX);
+    let text: String = recent
+        .iter()
+        .map(|root| format!("{}\n", root.display()))
+        .collect();
+    write_atomic(&path, &text)
 }
 
 /// `FROND_SESSION` overrides the directory; else the XDG state dir:
@@ -221,6 +266,42 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .count();
         assert_eq!(leftovers, 0, "atomic write leaves no temp file");
+    }
+
+    #[test]
+    fn recent_vaults_are_newest_first_capped_deduplicated_and_skip_entries() {
+        let state = TempDir::new("sess-recent");
+        let vaults = TempDir::new("sess-recent-vaults");
+        let dirs: Vec<PathBuf> = (0..7)
+            .map(|i| {
+                let dir = vaults.path().join(format!("v{i}"));
+                fs::create_dir_all(&dir).unwrap();
+                dir.canonicalize().unwrap()
+            })
+            .collect();
+        let mut env = crate::testutil::EnvGuard::lock();
+        env.set("FROND_SESSION", state.path());
+        assert!(load_recent_vaults().is_empty(), "no file yet");
+        let entry = dirs[6].clone();
+        for dir in &dirs[..6] {
+            record_recent_vault(dir, std::slice::from_ref(&entry)).unwrap();
+        }
+        // An older one again moves to the front, not twice in the list.
+        record_recent_vault(&dirs[3].join("."), std::slice::from_ref(&entry)).unwrap();
+        // A `[vaults]` entry is never recorded.
+        record_recent_vault(&entry, std::slice::from_ref(&entry)).unwrap();
+        let loaded = load_recent_vaults();
+        env.remove("FROND_SESSION");
+        assert_eq!(
+            loaded,
+            vec![
+                dirs[3].clone(),
+                dirs[5].clone(),
+                dirs[4].clone(),
+                dirs[2].clone(),
+                dirs[1].clone()
+            ]
+        );
     }
 
     #[test]

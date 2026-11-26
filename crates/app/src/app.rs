@@ -136,8 +136,12 @@ pub enum Flow {
     Continue,
     Quit,
     /// Leave this vault for the one at this root (the in-app vault picker;
-    /// `main.rs` does the switch).
-    SwitchVault(PathBuf),
+    /// `main.rs` does the switch and, for a `typed` one, records it in
+    /// `recent-vaults` once open).
+    SwitchVault {
+        root: PathBuf,
+        typed: bool,
+    },
 }
 
 /// The display state a vault switch carries from one App to the next (the
@@ -2369,10 +2373,6 @@ impl App {
     /// `v`: opens the vault picker over the main view (SPEC's **Vault
     /// picker in the app**).
     pub fn open_vault_picker(&mut self) {
-        if self.vaults.entries.is_empty() {
-            self.set_status("no vaults configured ([vaults] in config.toml)");
-            return;
-        }
         self.vault_picker = Some(self.vaults.picker(self.vault_root()));
     }
 
@@ -2388,19 +2388,22 @@ impl App {
                 Flow::Continue
             }
             crate::vault_picker::PickerFlow::Quit => Flow::Quit,
-            crate::vault_picker::PickerFlow::Open(root) => {
-                let canon = |path: &Path| path.canonicalize().ok();
-                let open = self.vault_root().and_then(canon);
-                if open.is_some() && open == canon(&root) {
-                    self.vault_picker = None;
-                    Flow::Continue
-                } else {
-                    // The popup stays open until the switch is done: a
-                    // vault that cannot be indexed reports into it
-                    // ([`Self::vault_switch_failed`]).
-                    Flow::SwitchVault(root)
-                }
-            }
+            crate::vault_picker::PickerFlow::Open(root) => self.choose_vault(root, false),
+            crate::vault_picker::PickerFlow::OpenTyped(root) => self.choose_vault(root, true),
+        }
+    }
+
+    /// The picker chose `root` (`typed`: from a typed path or a recent row).
+    fn choose_vault(&mut self, root: PathBuf, typed: bool) -> Flow {
+        let canon = |path: &Path| path.canonicalize().ok();
+        let open = self.vault_root().and_then(canon);
+        if open.is_some() && open == canon(&root) {
+            self.vault_picker = None;
+            Flow::Continue
+        } else {
+            // The popup stays open until the switch is done: a vault that
+            // cannot be indexed reports into it ([`Self::vault_switch_failed`]).
+            Flow::SwitchVault { root, typed }
         }
     }
 

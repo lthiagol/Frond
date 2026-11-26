@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use vault::VaultIndex;
 
-use crate::testutil::{TempDir, TempFile};
+use crate::testutil::{isolated_session, TempDir, TempFile};
 use crate::theme::Appearance;
 
 /// A tiny vault: root/a.md, root/sub/b.md, root/sub/c.md.
@@ -4218,7 +4218,7 @@ fn bracket_and_digit_keys_switch_base_views() {
     app.handle_key(key(KeyCode::Char('[')));
     assert_eq!(view(&app), "Open");
     // `v` is the vault picker, not a view switch, in a table too.
-    with_vaults(&mut app, &dir, &dir);
+    let _session = with_vaults(&mut app, &dir, &dir);
     app.handle_key(key(KeyCode::Char('v')));
     assert!(
         app.vault_picker.is_some(),
@@ -5063,7 +5063,12 @@ fn clicking_a_jumper_row_selects_then_opens_it() {
 }
 
 /// Two `[vaults]` entries: `alpha` is the test app's vault, `beta` another.
-fn with_vaults(app: &mut App, alpha: &TempDir, beta: &TempDir) {
+#[must_use]
+fn with_vaults(
+    app: &mut App,
+    alpha: &TempDir,
+    beta: &TempDir,
+) -> (crate::testutil::EnvGuard, TempDir) {
     let entry = |name: &str, dir: &TempDir| {
         crate::vault_picker::VaultEntry::new(name.to_string(), dir.path().to_path_buf(), None)
     };
@@ -5071,6 +5076,7 @@ fn with_vaults(app: &mut App, alpha: &TempDir, beta: &TempDir) {
         entries: vec![entry("alpha", alpha), entry("beta", beta)],
         startup_preselect: 1,
     };
+    isolated_session()
 }
 
 #[test]
@@ -5078,7 +5084,7 @@ fn v_opens_the_vault_picker_on_the_open_vault() {
     let alpha = vault();
     let beta = vault();
     let (_f, mut app) = app(&alpha);
-    with_vaults(&mut app, &alpha, &beta);
+    let _session = with_vaults(&mut app, &alpha, &beta);
     assert_eq!(app.handle_key(key(KeyCode::Char('v'))), Flow::Continue);
     let picker = app.vault_picker.as_ref().expect("the picker is open");
     assert_eq!(picker.selected_entry().unwrap().name, "alpha");
@@ -5092,14 +5098,28 @@ fn v_opens_the_vault_picker_on_the_open_vault() {
 }
 
 #[test]
-fn v_with_no_vaults_only_says_so() {
+fn v_with_no_vaults_opens_the_picker_on_the_recent_paths() {
     let alpha = vault();
+    let beta = vault();
     let (_f, mut app) = app(&alpha);
+    let _session = isolated_session();
+    crate::session::record_recent_vault(beta.path(), &[]).unwrap();
     app.handle_key(key(KeyCode::Char('v')));
-    assert!(app.vault_picker.is_none());
+    let picker = app.vault_picker.as_ref().expect("the picker is open");
+    let entry = picker.selected_entry().expect("the recent row is listed");
+    assert!(entry.recent);
+    assert_eq!(entry.path, beta.path().canonicalize().unwrap());
+    assert!(app.last_status.is_none(), "no status, the picker instead");
+    // A typed path opens through the switch, marked for `recent-vaults`.
+    for c in beta.path().display().to_string().chars() {
+        app.handle_key(key(KeyCode::Char(c)));
+    }
     assert_eq!(
-        app.last_status.as_ref().map(|status| status.text.as_str()),
-        Some("no vaults configured ([vaults] in config.toml)")
+        app.handle_key(key(KeyCode::Enter)),
+        Flow::SwitchVault {
+            root: beta.path().canonicalize().unwrap(),
+            typed: true
+        }
     );
 }
 
@@ -5108,7 +5128,7 @@ fn choosing_the_open_vault_changes_nothing() {
     let alpha = vault();
     let beta = vault();
     let (_f, mut app) = app(&alpha);
-    with_vaults(&mut app, &alpha, &beta);
+    let _session = with_vaults(&mut app, &alpha, &beta);
     app.scroll_content_down(5);
     let (note, scroll) = (app.viewer.path.clone(), app.viewer.scroll);
     app.handle_key(key(KeyCode::Char('v')));
@@ -5122,13 +5142,16 @@ fn choosing_another_vault_asks_for_the_switch_and_a_failure_stays_in_the_picker(
     let alpha = vault();
     let beta = vault();
     let (_f, mut app) = app(&alpha);
-    with_vaults(&mut app, &alpha, &beta);
+    let _session = with_vaults(&mut app, &alpha, &beta);
     let note = app.viewer.path.clone();
     app.handle_key(key(KeyCode::Char('v')));
     app.handle_key(key(KeyCode::Down));
     assert_eq!(
         app.handle_key(key(KeyCode::Enter)),
-        Flow::SwitchVault(beta.path().to_path_buf())
+        Flow::SwitchVault {
+            root: beta.path().to_path_buf(),
+            typed: false
+        }
     );
     app.vault_switch_failed("boom");
     let picker = app.vault_picker.as_ref().expect("the popup stays open");
@@ -5146,7 +5169,7 @@ fn the_vault_picker_takes_no_mouse_input() {
     let alpha = vault();
     let beta = vault();
     let (_f, mut app) = app(&alpha);
-    with_vaults(&mut app, &alpha, &beta);
+    let _session = with_vaults(&mut app, &alpha, &beta);
     app.handle_key(key(KeyCode::Char('v')));
     let scroll = app.viewer.scroll;
     app.handle_wheel(true);

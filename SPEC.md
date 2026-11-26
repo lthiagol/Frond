@@ -45,7 +45,7 @@ crates/
 
 ### Data flow
 
-1. Startup: `vault::index` walks the vault (fast, no daemon), builds link/tag maps. The vault root is `--vault`, else (with no file argument and two or more `[vaults]` entries) the one chosen in the vault picker, else the config's `vault` key, else the only `[vaults]` entry, else (with a file argument) the current directory; with none of these, the app prompts for the vault directory. A `--vault` or `vault` value that is a `[vaults]` name resolves to that entry's path; any other value is a path (write `./work` to mean the directory when a name `work` exists). A chosen vault path that is not a directory (from `--vault`, the `vault` key, or a lone `[vaults]` entry) stops the start before the terminal changes: frond prints one line, `error: vault not found: <path> (<source>)` with `<source>` one of `--vault`, `config vault`, `config [vaults] <name>` and `<path>` as given (`~` kept), and exits with status 2 — no index warning, no other error. A start note that cannot be opened (a file argument, or the vault's `index.md` — read before any session is restored) stops the start the same way with `error: cannot open <path>: <reason>`, status 1.
+1. Startup: `vault::index` walks the vault (fast, no daemon), builds link/tag maps. The vault root is `--vault`, else (with no file argument and two or more `[vaults]` entries) the one chosen in the vault picker, else the config's `vault` key, else the only `[vaults]` entry, else (with a file argument) the current directory; with none of these, the vault picker opens with only its path entry and the recent paths. A `--vault` or `vault` value that is a `[vaults]` name resolves to that entry's path; any other value is a path (write `./work` to mean the directory when a name `work` exists). A chosen vault path that is not a directory (from `--vault`, the `vault` key, or a lone `[vaults]` entry) stops the start before the terminal changes: frond prints one line, `error: vault not found: <path> (<source>)` with `<source>` one of `--vault`, `config vault`, `config [vaults] <name>` and `<path>` as given (`~` kept), and exits with status 2 — no index warning, no other error. A start note that cannot be opened (a file argument, or the vault's `index.md` — read before any session is restored) stops the start the same way with `error: cannot open <path>: <reason>`, status 1.
 2. Note opened: raw md → wikilink preprocessing (`[[target|alias]]` → `[alias](vault://<n>/<target>)`, the target percent-encoded, an optional `#heading` appended) → `engine::parse` → styled lines.
 3. Watch tick (every 250 ms): the open file's mtime+size stamp is polled
    (re-parse + redraw when it changed); once a second the whole vault is
@@ -147,9 +147,10 @@ frontmatter at all — the whole file is body.
   are saved on clean quit and restored on the next start (an explicit note
   argument wins over the restore). `frond --config-show` prints a
   commented default config file; `--help`/`--version` print usage/version.
-- **Vault picker** (startup): with no `--vault`, no file argument and two
-  or more `[vaults]` entries, frond opens full-screen on a picker before
-  any vault is indexed. It lists every entry as its name and its path
+- **Vault picker** (startup): with no `--vault`, no file argument and
+  either two or more `[vaults]` entries or none (and no `vault` key),
+  frond opens full-screen on a picker before any vault is indexed. It
+  lists every entry as its name and its path
   (`~` for `$HOME`), in name order; typing filters it with the quick
   jumper's case-insensitive subsequence match over the name and the
   path, ranked best match first (ties in name order) with the best match
@@ -161,11 +162,31 @@ frontmatter at all — the whole file is body.
   <path>` inside the picker and keeps it open. The last vault opened is
   recorded on a clean quit (`last-vault` in the session dir, the vault's
   canonical root) — the app's own state, never the vault's.
+  - **A typed path:** a query that starts with `/`, `~` or `.` is a path,
+    not a filter: the list shows one row, `open <query>`, selected.
+    `Enter` opens that directory (`~` expanded, a relative path against
+    the current directory); a path that is not a directory shows `not a
+    directory: <path>` and keeps the picker open. `Tab` completes the
+    query's last component against the subdirectories of its parent
+    (hidden ones only when the component starts with `.`): one match
+    completes it and appends `/`; several complete their longest common
+    prefix; none does nothing. A query that does not start with one of
+    those characters filters as before.
+  - **Recent paths:** a vault opened from a typed path or a recent row
+    (once it has opened) is recorded in
+    `recent-vaults` in the session dir (canonical roots, newest first,
+    at most 5, no duplicates; a root that is also a `[vaults]` entry is
+    not recorded). The picker lists them after the entries, newest first,
+    named by their folder name, and they filter like the entries. A
+    recorded root that is no longer a directory is not listed. The file
+    is the app's own state, never the vault's or the config's.
+  - With nothing to list (no entries, no recent paths), the picker shows
+    `type a path to a vault (/, ~ or .)` as its empty state.
 - **Vault picker in the app** (`v`): the same picker opens as a modal
   popup over the main view, with the open vault preselected (when it is an
-  entry; else as at startup). `Esc` closes it; `Ctrl+C` quits. The picker
-  takes no mouse input. With no `[vaults]` entries, `v` opens nothing and
-  the status line says `no vaults configured ([vaults] in config.toml)`.
+  entry or a recent row; else as at startup). `Esc` closes it; `Ctrl+C` quits. The picker
+  takes no mouse input. With no `[vaults]` entries it opens all the same,
+  on the recent paths and the path entry.
   Choosing the open vault closes the popup and changes nothing. Choosing
   another one is a clean quit of the open vault (its session and
   `last-vault` saved exactly as on quit) followed by a start of the chosen
@@ -179,7 +200,8 @@ frontmatter at all — the whole file is body.
   start on not readable) is not opened: the popup stays open with `cannot
   open vault: <error>`, and the open vault is untouched, its session not
   saved. The
-  entries are the ones read at startup. Started on a file argument with
+  entries are the ones read at startup; the recent paths are re-read each
+  time the picker opens. Started on a file argument with
   no vault, `v` works the same, with no session to save.
 
 ## Scrollbars

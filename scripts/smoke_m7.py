@@ -8,6 +8,11 @@
 - `v` in the app (SPEC "Vault picker in the app") switches to another
   vault and back, the left vault's session restored, `last-vault` the one
   open at the quit;
+- with no `[vaults]` and no `vault` key the picker opens on its path
+  entry: a typed path opens that vault, recorded in `recent-vaults` and
+  listed as a recent row on the next start;
+- a typed path that does not open (no `index.md`) exits 1 and is not
+  recorded in `recent-vaults`;
 - a config `vault` that names a missing directory exits 2 with the one
   `error: vault not found: …` line on stderr (SPEC "Data flow" step 1).
 
@@ -71,12 +76,12 @@ def check(cond, label, screen=None):
 
 
 class Run:
-    def __init__(self, *args):
+    def __init__(self, *args, config=CONFIG_FILE, session=SESSION_DIR):
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.environ["TERM"] = "xterm-256color"
-            os.environ["FROND_CONFIG"] = CONFIG_FILE
-            os.environ["FROND_SESSION"] = SESSION_DIR
+            os.environ["FROND_CONFIG"] = config
+            os.environ["FROND_SESSION"] = session
             os.environ["FROND_THEMES"] = THEME_DIR
             fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
             os.execv(APP, [APP, *args])
@@ -123,10 +128,13 @@ class Run:
                         return name
         return None
 
-    def wait_exit(self):
+    def exit_status(self):
         self.pump(0.8)
         _, status = os.waitpid(self.pid, 0)
-        return os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+        return os.WEXITSTATUS(status) if os.WIFEXITED(status) else None
+
+    def wait_exit(self):
+        return self.exit_status() == 0
 
 
 # --- 1: filter + Enter opens the chosen vault -------------------------------
@@ -189,7 +197,69 @@ check(
     f"last-vault records the vault open at the quit ({recorded})",
 )
 
-# --- 4: a config `vault` that is not a directory stops the start ------------
+# --- 4: no vaults configured: a typed path, then its recent row ----------
+EMPTY_CONFIG = os.path.join(ROOT, "empty-config.toml")
+EMPTY_SESSION = os.path.join(ROOT, "empty-session")
+with open(EMPTY_CONFIG, "w") as f:
+    f.write("")
+run = Run(config=EMPTY_CONFIG, session=EMPTY_SESSION)
+check(
+    run.until(lambda: "type a path to a vault (/, ~ or .)" in run.text()),
+    "no vaults: the picker opens on its empty state, no stdin prompt",
+    run.screen,
+)
+run.send(os.path.join(ROOT, "be"))
+run.pump(0.3)
+run.send("\t")
+check(
+    run.until(lambda: "open " + os.path.join(ROOT, "beta") + "/" in run.text()),
+    "Tab completed the typed path",
+    run.screen,
+)
+run.send("\r")
+check(run.until(lambda: "Beta Vault Home" in run.text()), "Enter opened the typed vault", run.screen)
+run.send("q")
+check(run.wait_exit(), "clean quit from the typed vault, exit status 0")
+with open(os.path.join(EMPTY_SESSION, "recent-vaults")) as f:
+    recorded = f.read().strip()
+check(
+    recorded == os.path.realpath(os.path.join(ROOT, "beta")),
+    f"recent-vaults records the typed vault ({recorded})",
+)
+run = Run(config=EMPTY_CONFIG, session=EMPTY_SESSION)
+check(
+    run.until(lambda: "vaults: 1" in run.text() and "recent" in run.text()),
+    "the next start lists the recent row",
+    run.screen,
+)
+check(run.selected_row() == "beta", "the recent row is selected", run.screen)
+run.send("\r")
+check(run.until(lambda: "Beta Vault Home" in run.text()), "Enter on the recent row opens it", run.screen)
+run.send("q")
+check(run.wait_exit(), "clean quit, exit status 0")
+
+# --- 4b: a typed path that does not open is not recorded -------------------
+# The directory exists but has no index.md: the start fails after the picker
+# chose it, so `recent-vaults` must not name it (SPEC "recent paths").
+NOINDEX = os.path.join(ROOT, "noindex")
+FAILED_SESSION = os.path.join(ROOT, "failed-session")
+os.makedirs(NOINDEX, exist_ok=True)
+run = Run(config=EMPTY_CONFIG, session=FAILED_SESSION)
+check(
+    run.until(lambda: "type a path to a vault (/, ~ or .)" in run.text()),
+    "no vaults: the picker opens for a typed path that will fail",
+    run.screen,
+)
+run.send(NOINDEX)
+run.pump(0.3)
+run.send("\r")
+check(run.exit_status() == 1, "a typed vault that fails to open exits 1")
+check(
+    not os.path.exists(os.path.join(FAILED_SESSION, "recent-vaults")),
+    "a typed vault that fails to open is not recorded in recent-vaults",
+)
+
+# --- 5: a config `vault` that is not a directory stops the start ------------
 # The check runs before the terminal is set up, so a pipe is enough: status
 # 2, exactly the one error line on stderr, nothing on stdout.
 MISSING = os.path.join(ROOT, "missing")

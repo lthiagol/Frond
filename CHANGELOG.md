@@ -16,6 +16,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) loosely; dates ar
   where you left it, and the theme and other display toggles stay as
   they are. A vault that cannot be opened keeps the picker open with the
   error.
+- Type a path in the vault picker: a query starting with `/`, `~` or `.`
+  offers `open <path>`, `Tab` completes folder names, and `Enter` opens
+  it. Vaults opened that way are remembered (the last 5) and listed under
+  the config's vaults. With no vaults configured, frond opens the picker
+  instead of asking for a path on a plain prompt.
 
 ### Fixed
 - A vault path that does not exist (from `--vault`, the `vault` key or a

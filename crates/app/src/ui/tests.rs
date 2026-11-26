@@ -5873,6 +5873,7 @@ fn vault_picker_cuts_an_overlong_path_with_an_ellipsis() {
         name: name.to_string(),
         path: Path::new("/unused").to_path_buf(),
         display: display.to_string(),
+        recent: false,
     };
     let state = PickerState::new(vec![entry("icloud", long), entry("work", "~/work")], 0);
     let backend = TestBackend::new(100, 24);
@@ -5977,6 +5978,7 @@ fn vault_picker_row_that_fits_exactly_is_shown_whole() {
         name: "vault".to_string(),
         path: Path::new("/unused").to_path_buf(),
         display: path.clone(),
+        recent: false,
     };
     let state = PickerState::new(vec![entry], 0);
     let backend = TestBackend::new(100, 24);
@@ -6003,6 +6005,7 @@ fn vault_picker_row_overflowing_at_a_span_boundary_ends_in_an_ellipsis() {
         name: "vault".to_string(),
         path: Path::new("/unused").to_path_buf(),
         display,
+        recent: false,
     };
     let mut state = PickerState::new(vec![entry], 0);
     state.items[0].path_positions = vec![61];
@@ -6040,6 +6043,7 @@ fn vault_picker_popup_draws_over_the_main_view() {
             .collect(),
         startup_preselect: 0,
     };
+    let _session = crate::testutil::isolated_session();
     app.handle_key(key(KeyCode::Char('v')));
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -6051,4 +6055,38 @@ fn vault_picker_popup_draws_over_the_main_view() {
         screen.contains("Underneath"),
         "the main view stays behind it"
     );
+}
+
+#[test]
+fn vault_picker_shows_a_typed_path_the_empty_state_and_a_recent_tag() {
+    use crate::vault_picker::{PickerState, VaultEntry};
+    let ui = crate::theme::ui_by_preset(engine::MarkdownThemePreset::default());
+    let screen = |state: &PickerState| {
+        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        terminal.draw(|f| draw_vault_picker(f, state, ui)).unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..24)
+            .map(|y| {
+                (0..100)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let mut empty = PickerState::new(Vec::new(), 0);
+    let text = screen(&empty);
+    assert!(
+        text.contains("type a path to a vault (/, ~ or .)"),
+        "{text}"
+    );
+    empty.query = "~/notes".to_string();
+    let text = screen(&empty);
+    assert!(text.contains("open ~/notes"), "{text}");
+    assert!(text.contains("vaults: 1"), "{text}");
+    assert!(text.contains("Tab complete"), "{text}");
+
+    let recent = VaultEntry::recent(Path::new("/srv/old").to_path_buf(), None);
+    let text = screen(&PickerState::new(vec![recent], 0));
+    assert!(text.contains("old  /srv/old  recent"), "{text}");
 }

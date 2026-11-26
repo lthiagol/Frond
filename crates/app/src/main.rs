@@ -7,7 +7,7 @@
 //! Which vault opens is SPEC.md "Data flow" step 1 ([`choose_vault`]): with
 //! two or more config `[vaults]` and neither `--vault` nor a file argument,
 //! the vault picker ([`vault_picker`]) runs first; with nothing to go on,
-//! the app prompts for the vault directory. `v` switches vaults while the
+//! it opens on its path entry and the recent paths. `v` switches vaults while the
 //! app runs: [`run_app`] leaves the open vault as a clean quit does and
 //! [`start_app`] opens the chosen one, the path the first start takes. A file argument without a vault is
 //! opened on its own, without a sidebar; the vault index is then the
@@ -116,7 +116,8 @@ Options:
 
 With two or more config [vaults] and neither --vault nor a file argument,
 frond opens on a vault picker. With no vault at all and no file argument,
-it prompts for the vault directory. Config file:
+the picker opens on the recent paths: type a path (/, ~ or .) to open a
+directory, Tab completes it. Config file:
 ~/.config/frond/config.toml (frond --config-show prints a template).
 ";
 
@@ -233,46 +234,11 @@ fn effective_margin_y(config: Option<u16>) -> u16 {
         .min(config::MAX_MARGIN_Y)
 }
 
-/// Checks that `input` names an existing directory and returns its absolute
-/// form. Empty input is an error (the prompt has no default).
-fn validate_vault_dir(input: &str) -> Result<PathBuf, String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err("no vault path given".to_string());
-    }
-    // Expand a leading `~/` (a shell would normally do this for us).
-    let expanded = match trimmed.strip_prefix("~/") {
-        Some(rest) => match std::env::var_os("HOME") {
-            Some(home) => PathBuf::from(home).join(rest),
-            None => PathBuf::from(trimmed),
-        },
-        None => PathBuf::from(trimmed),
-    };
-    if !is_vault_dir(&expanded) {
-        return Err(format!("not a directory: {}", expanded.display()));
-    }
-    Ok(absolutize(&expanded))
-}
-
-/// The one check for "is this a vault directory": the prompt
-/// ([`validate_vault_dir`]), a chosen startup path (`main`) and the picker's
-/// Enter (`vault_picker`) all ask it.
+/// The one check for "is this a vault directory": a chosen startup path
+/// (`main`), the picker's Enter on an entry or a typed path and its recent
+/// rows (`vault_picker`) all ask it.
 fn is_vault_dir(path: &Path) -> bool {
     path.is_dir()
-}
-
-/// Interactively asks for the vault directory on stdin/stdout.
-fn prompt_vault_path() -> Result<PathBuf, String> {
-    use std::io::{BufRead, Write};
-    let mut out = io::stdout();
-    write!(out, "Vault path (directory): ").map_err(|e| e.to_string())?;
-    out.flush().map_err(|e| e.to_string())?;
-    let mut line = String::new();
-    io::stdin()
-        .lock()
-        .read_line(&mut line)
-        .map_err(|e| e.to_string())?;
-    validate_vault_dir(&line)
 }
 
 /// Canonicalizes `path` so path comparisons become identity comparisons.
@@ -317,10 +283,9 @@ enum VaultChoice {
     /// This path (a `[vaults]` name already resolved; not yet absolutized),
     /// and the setting it was read from.
     Path { path: PathBuf, source: VaultSource },
-    /// Two or more `[vaults]` entries: ask in the vault picker.
+    /// Two or more `[vaults]` entries, or nothing to go on and no file
+    /// argument: ask in the vault picker.
     Picker,
-    /// Nothing to go on and no file argument: prompt on stdin.
-    Prompt,
     /// A file argument without a vault: the cwd indexes.
     None,
 }
@@ -363,7 +328,7 @@ fn choose_vault(flag: Option<&Path>, has_file: bool, config: &config::Config) ->
     if has_file {
         VaultChoice::None
     } else {
-        VaultChoice::Prompt
+        VaultChoice::Picker
     }
 }
 
@@ -417,6 +382,16 @@ fn picker_entries(config: &config::Config) -> Vec<vault_picker::VaultEntry> {
         .collect()
 }
 
+/// Records a vault opened from a typed path or a recent row in
+/// `recent-vaults` (best-effort: a failed write never stops the open).
+fn remember_typed_vault(root: &Path, config: &config::Config) {
+    let entries: Vec<PathBuf> = picker_entries(config)
+        .into_iter()
+        .map(|entry| entry.path)
+        .collect();
+    let _ = session::record_recent_vault(root, &entries);
+}
+
 /// The picker's preselected entry (`vault_picker::preselect` owns the
 /// order). The `vault` key's `~` is expanded first, as the entries' paths
 /// are, so a `~` path key finds its entry.
@@ -436,12 +411,13 @@ fn picker_palette(theme_name: &str) -> theme::UiTheme {
         .unwrap_or_else(|_| theme::preset_theme(Default::default()).ui)
 }
 
-/// The startup picker loop. `Ok(None)` = the user quit.
+/// The startup picker loop. `Ok(None)` = the user quit; else the chosen
+/// vault and whether it came from a typed path or a recent row.
 fn run_picker(
     terminal: &mut Tui,
     picker: &mut vault_picker::PickerState,
     ui: theme::UiTheme,
-) -> io::Result<Option<PathBuf>> {
+) -> io::Result<Option<(PathBuf, bool)>> {
     loop {
         terminal.draw(|f| ui::draw_vault_picker(f, picker, ui))?;
         if let Event::Key(key) = event::read()? {
@@ -450,7 +426,8 @@ fn run_picker(
             }
             match picker.handle_key(key) {
                 vault_picker::PickerFlow::Continue => {}
-                vault_picker::PickerFlow::Open(path) => return Ok(Some(path)),
+                vault_picker::PickerFlow::Open(path) => return Ok(Some((path, false))),
+                vault_picker::PickerFlow::OpenTyped(path) => return Ok(Some((path, true))),
                 vault_picker::PickerFlow::Close | vault_picker::PickerFlow::Quit => {
                     return Ok(None)
                 }
@@ -508,6 +485,9 @@ fn main() {
     // The picker runs in the TUI, so the terminal is set up before the
     // vault is known; the App then reuses it.
     let mut early_terminal: Option<Tui> = None;
+    // The picker's choice was a typed path or a recent row: recorded in
+    // `recent-vaults` only once its vault has opened (below).
+    let mut picked_typed = false;
     let vault = match choose_vault(args.vault.as_deref(), args.file.is_some(), &config) {
         VaultChoice::Path { path, source } => {
             // Checked before the terminal and the index: a missing vault is
@@ -522,11 +502,16 @@ fn main() {
         VaultChoice::Picker => {
             let entries = picker_entries(&config);
             let pre = picker_preselection(&entries, &config);
-            let mut picker = vault_picker::PickerState::new(entries, pre);
+            let list = vault_picker::VaultList {
+                entries,
+                startup_preselect: pre,
+            };
+            let mut picker = list.picker(None);
             let mut terminal = setup_terminal_or_exit(mouse);
             match run_picker(&mut terminal, &mut picker, picker_palette(&theme_name)) {
-                Ok(Some(v)) => {
+                Ok(Some((v, typed))) => {
                     early_terminal = Some(terminal);
+                    picked_typed = typed;
                     Some(absolutize(&v))
                 }
                 Ok(None) => {
@@ -541,14 +526,6 @@ fn main() {
                 }
             }
         }
-        // Before raw mode, so the line editor works normally.
-        VaultChoice::Prompt => match prompt_vault_path() {
-            Ok(v) => Some(v),
-            Err(msg) => {
-                eprintln!("error: {msg}");
-                std::process::exit(2);
-            }
-        },
         VaultChoice::None => None,
     };
     let watch = args.watch.unwrap_or_else(|| config.watch_default());
@@ -612,12 +589,23 @@ fn main() {
             eprintln!("warning: {warning}");
         }
         let mut app = app;
+        if picked_typed {
+            if let Some(root) = app.vault_root() {
+                remember_typed_vault(root, &config);
+            }
+        }
         // A switch is a clean quit of the open vault (`run_app` saves it)
         // followed by a start of the chosen one through `start_app`, the
         // same path the first start took.
         loop {
-            match run_app(&mut terminal, app, &mut |root, display| {
-                switch_vault(root, display, &config, &vaults)
+            match run_app(&mut terminal, app, &mut |root, typed, display| {
+                let next = switch_vault(root, display, &config, &vaults)?;
+                if typed {
+                    if let Some(root) = next.vault_root() {
+                        remember_typed_vault(root, &config);
+                    }
+                }
+                Ok(next)
             })? {
                 Outcome::Quit => return Ok(()),
                 Outcome::Switch(next) => app = *next,
@@ -880,7 +868,7 @@ enum Outcome {
 fn run_app(
     terminal: &mut Tui,
     mut app: App,
-    switch: &mut dyn FnMut(PathBuf, app::DisplayState) -> io::Result<App>,
+    switch: &mut dyn FnMut(PathBuf, bool, app::DisplayState) -> io::Result<App>,
 ) -> io::Result<Outcome> {
     let mut outcome = Outcome::Quit;
     let (cols, rows) = crossterm::terminal::size().unwrap_or(FALLBACK_SIZE);
@@ -916,13 +904,15 @@ fn run_app(
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.handle_key(key) {
                     app::Flow::Continue => {}
                     app::Flow::Quit => break,
-                    app::Flow::SwitchVault(root) => match switch(root, app.display_state()) {
-                        Ok(next) => {
-                            outcome = Outcome::Switch(Box::new(next));
-                            break;
+                    app::Flow::SwitchVault { root, typed } => {
+                        match switch(root, typed, app.display_state()) {
+                            Ok(next) => {
+                                outcome = Outcome::Switch(Box::new(next));
+                                break;
+                            }
+                            Err(err) => app.vault_switch_failed(err),
                         }
-                        Err(err) => app.vault_switch_failed(err),
-                    },
+                    }
                 },
                 Event::Mouse(mouse) => {
                     // Capture off: the status bar promises the app ignores
@@ -1062,26 +1052,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_vault_dir_accepts_existing_directory() {
-        let dir = TempDir::new("vdir-ok");
-        let input = format!("  {}\n", dir.path().display());
-        assert_eq!(
-            validate_vault_dir(&input).unwrap(),
-            dir.path().canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    fn validate_vault_dir_rejects_empty_missing_and_files() {
-        assert!(validate_vault_dir("   \n").is_err());
-        assert!(validate_vault_dir("/nonexistent/frond/vault").is_err());
-        let dir = TempDir::new("vdir-file");
-        let file = dir.path().join("note.md");
-        std::fs::write(&file, "x\n").unwrap();
-        assert!(validate_vault_dir(&file.display().to_string()).is_err());
-    }
-
-    #[test]
     fn absolutize_falls_back_when_canonicalize_fails() {
         // Missing file: lexical absolutization against the cwd.
         let missing = PathBuf::from("does-not-exist-frond.md");
@@ -1172,7 +1142,11 @@ mod tests {
         );
         // Zero entries: today's behaviour.
         let none = config_with(None, &[]);
-        assert_eq!(choose_vault(None, false, &none), VaultChoice::Prompt);
+        assert_eq!(
+            choose_vault(None, false, &none),
+            VaultChoice::Picker,
+            "nothing to go on: the picker, on its path entry"
+        );
         assert_eq!(choose_vault(None, true, &none), VaultChoice::None);
         assert_eq!(
             choose_vault(None, false, &config_with(Some("/k"), &[])),
